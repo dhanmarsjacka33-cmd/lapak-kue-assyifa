@@ -2542,7 +2542,7 @@ function formTutupBuku() {
 }
 
 async function unlockPeriode(id) {
-  if (!(await confirmDlg('Buka Kunci Periode?', 'Setoran dalam rentang ini bisa diedit lagi.', 'Buka')) return;
+  if (!(await confirmDlg('Buka Kunci Periode?', 'Setoran dalam rentang ini bisa diedit lagi.', 'Buka'))) return;
   showLoader();
   try {
     const r = await api('unlockPeriode', { token: S.token, id });
@@ -2554,7 +2554,6 @@ async function unlockPeriode(id) {
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
-
 // ============================================
 //  ADMIN ACTIONS — NOTIFIKASI
 // ============================================
