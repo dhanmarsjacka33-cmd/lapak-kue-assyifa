@@ -2481,7 +2481,11 @@ async function doLogin(form) {
     S.token = res.token; S.user = res.user;
     localStorage.setItem('tk', res.token);
     if (res.bootstrap) applyBootstrap(res.bootstrap);
-    else await bootstrap();
+
+    // Load data sesuai role
+    if (res.user.role === 'karyawan') {
+      await initKaryawan();
+    }
     render();
     setTimeout(preloadCommon, 500);
   } catch (err) { toast(err.message, 'error'); }
@@ -2500,6 +2504,62 @@ function applyBootstrap(b) {
   if (b.kas) S.kas = b.kas;
   if (b.laporan) S.laporan = b.laporan;
   if (b.role === 'admin') { S.view = 'admin'; S.tab = 'home'; }
+  // Untuk karyawan, view diatur oleh initKaryawan()
+}
+async function initKaryawan() {
+  try {
+    const myLapak = await api('getMyLapak', { token: S.token });
+
+    if (myLapak.length === 0) {
+      toast('Akun Anda belum ditugaskan ke lapak manapun. Hubungi admin.', 'error');
+      S.view = 'login';
+      return;
+    }
+
+    // Multi-lapak: pilih kalau belum ada
+    if (myLapak.length > 1 && !S.lapakAktif) {
+      S.view = 'karyawan'; // placeholder
+      showPilihLapak(myLapak);
+      return;
+    }
+
+    // Set lapak aktif
+    if (myLapak.length === 1) {
+      S.lapakAktif = myLapak[0];
+      localStorage.setItem('lapakAktif', JSON.stringify(S.lapakAktif));
+      await api('setLapakAktif', { token: S.token, lapakId: S.lapakAktif.id });
+    } else if (S.lapakAktif) {
+      // Verifikasi lapak aktif masih valid
+      const valid = myLapak.some(l => l.id === S.lapakAktif.id);
+      if (!valid) S.lapakAktif = myLapak[0];
+      localStorage.setItem('lapakAktif', JSON.stringify(S.lapakAktif));
+      await api('setLapakAktif', { token: S.token, lapakId: S.lapakAktif.id });
+    }
+
+    // Load data karyawan
+    const [d, kb, ak] = await Promise.all([
+      api('getKaryawanDashboard', { token: S.token }),
+      api('getKasbon', { token: S.token, filter: {} }),
+      api('absensiHariIni', { token: S.token }).catch(() => ({ status: 'belum' }))
+    ]);
+
+    S.karyawan = d;
+    S.kasbon = kb;
+    S.absensiHariIni = ak;
+
+    if (S.karyawan.distribusi) {
+      S.karyawan.distribusi.forEach(x => {
+        if (S.rekap[x.katalogId] === undefined) S.rekap[x.katalogId] = 0;
+      });
+    }
+
+    S.view = 'karyawan';
+    S.tab = 'home';
+  } catch (e) {
+    console.error('initKaryawan error:', e);
+    toast('Gagal memuat data karyawan: ' + e.message, 'error');
+    S.view = 'login';
+  }
 }
 
 async function doLogout() {
@@ -2542,6 +2602,9 @@ async function tryAutoLogin() {
     S.user = await api('getMe', { token: S.token });
     if (!S.user) throw new Error('UNAUTHORIZED');
     applyBootstrap(res);
+    if (S.user.role === 'karyawan') {
+      await initKaryawan();
+    }
     render();
     setTimeout(preloadCommon, 500);
   } catch (e) {
