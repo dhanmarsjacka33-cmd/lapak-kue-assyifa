@@ -4163,6 +4163,40 @@ async function showDetailKonsinyasi(supplierId) {
 }
 
 // MULTI-LAPAK
+function showPilihLapak(list) {
+  modal({
+    title: 'Pilih Lapak',
+    body: '<p class="text-sm text-gray mb-3">Anda punya akses ke beberapa lapak. Pilih lapak aktif:</p>' +
+      list.map(l => `
+        <button data-lapak="${esc(l.id)}" class="menu-item" style="border:1px solid #f1f5f9;border-radius:12px;margin-bottom:6px">
+          ${ico('store')}
+          <span class="menu-item-label">${esc(l.nama)}</span>
+          ${ico('chevron-right','menu-item-chevron')}
+        </button>`).join(''),
+    actions: [],
+    onMount: (wrap, close) => {
+      wrap.addEventListener('click', async e => {
+        const b = e.target.closest('[data-lapak]');
+        if (!b) return;
+        const lapakId = b.dataset.lapak;
+        const lapakObj = list.find(l => l.id === lapakId);
+        try {
+          const r = await api('setLapakAktif', { token: S.token, lapakId });
+          if (!r.success) return toast(r.message, 'error');
+          S.lapakAktif = lapakObj;
+          localStorage.setItem('lapakAktif', JSON.stringify(lapakObj));
+          close();
+          MEM.clear();
+          await initKaryawan();
+          render();
+          toast('Lapak: ' + lapakObj.nama, 'success');
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      });
+    }
+  });
+}
 async function showGantiLapakModal() {
   showLoader();
   try {
