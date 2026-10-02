@@ -1,11 +1,11 @@
 'use strict';
-/* Kue As-Syifa POS v5.2 — Frontend */
+/* Kue As-Syifa POS v5.3 — Frontend */
 
 const CFG = window.APP_CONFIG || {};
 const API = CFG.API_URL;
 
 // ============================================
-//  STATE
+//  STATE + MEMORY CACHE
 // ============================================
 const S = {
   user: null,
@@ -16,7 +16,7 @@ const S = {
   submitting: false,
   lapak: [], suppliers: [], katalog: [], users: [], belanja: [], jadwal: [],
   dash: null, karyawan: null, kasbon: null, gaji: null, laporan: null,
-  setoran: null, pesanan: null, settingGaji: null, rekapGaji: null, rekapPesanan: null,
+  setoran: null, kas: null, pesanan: null, settingGaji: null, rekapGaji: null,
   kartuStok: null, stokSaldo: null, retur: null, hargaTingkat: null,
   tutupBuku: null, notifikasi: null,
   absensiList: null, absensiFilter: {},
@@ -25,14 +25,30 @@ const S = {
   payrollBulan: null, payrollData: null, payrollHistory: null,
   dashboardProfit: null, profitRange: 30,
   absensiHariIni: null,
-  // Fase 2
   konsinyasi: null, saldoSupplier: null, konsinyasiFilter: {},
   riwayatBayarSupplier: null,
   rekap: {},
   _setoranFilter: {},
-  _distTanggal: null, _distLapakId: null, _distItems: {},
-  _rekapGajiTipe: 'Bulanan', _rekapGajiDari: null, _rekapGajiSampai: null,
-  _pesananDari: null, _pesananSampai: null
+  _distTanggal: null, _distLapakId: null, _distItems: {}
+};
+
+// Memory cache dengan TTL (lebih cepat dari sessionStorage)
+const MEM = {
+  data: {},
+  set(key, val, ttlMs = 60000) {
+    this.data[key] = { val, exp: Date.now() + ttlMs };
+  },
+  get(key) {
+    const o = this.data[key];
+    if (!o) return null;
+    if (Date.now() > o.exp) { delete this.data[key]; return null; }
+    return o.val;
+  },
+  has(key) { return !!this.get(key); },
+  clear(prefix) {
+    if (!prefix) { this.data = {}; return; }
+    Object.keys(this.data).filter(k => k.startsWith(prefix)).forEach(k => delete this.data[k]);
+  }
 };
 
 // ============================================
@@ -69,24 +85,6 @@ const bulanLabel = (ym) => {
   return (names[parseInt(m, 10) - 1] || '') + ' ' + y;
 };
 
-const CACHE = {
-  get(k) {
-    try {
-      const raw = sessionStorage.getItem('c_' + k);
-      if (!raw) return null;
-      const o = JSON.parse(raw);
-      if (Date.now() > o.t) { sessionStorage.removeItem('c_' + k); return null; }
-      return o.v;
-    } catch { return null; }
-  },
-  set(k, v, ttl = 60000) {
-    try { sessionStorage.setItem('c_' + k, JSON.stringify({ t: Date.now() + ttl, v })); } catch {}
-  },
-  clearAll() {
-    Object.keys(sessionStorage).filter(k => k.startsWith('c_')).forEach(k => sessionStorage.removeItem(k));
-  }
-};
-
 // ============================================
 //  API CLIENT
 // ============================================
@@ -105,6 +103,17 @@ async function api(action, payload = {}) {
     throw new Error(body.error || 'Unknown');
   }
   return body.data;
+}
+
+// Cached API — pakai memory cache
+async function apiCached(action, payload, key, ttlMs) {
+  if (key) {
+    const cached = MEM.get(key);
+    if (cached) return cached;
+  }
+  const data = await api(action, payload);
+  if (key) MEM.set(key, data, ttlMs || 60000);
+  return data;
 }
 
 // ============================================
@@ -175,10 +184,10 @@ function formModal({ title, fields, onSubmit, submitLabel = 'Simpan', submitClas
     }
     if (f.type === 'radio') {
       return `<div class="field"><label>${esc(f.label)}</label>
-        <div class="row" style="gap:12px;margin-top:4px">
+        <div class="row" style="gap:16px;margin-top:6px;flex-wrap:wrap">
           ${(f.options || []).map(o => `
-            <label class="row text-sm" style="cursor:pointer">
-              <input type="radio" name="__radio_${f.key}" value="${esc(o.v)}" ${o.selected ? 'checked' : ''} data-f="${f.key}" style="width:auto;accent-color:var(--amber)">
+            <label class="row text-sm" style="cursor:pointer;gap:6px">
+              <input type="radio" name="__r_${f.key}" value="${esc(o.v)}" ${o.selected ? 'checked' : ''} data-f="${f.key}">
               <span>${esc(o.l)}</span>
             </label>`).join('')}
         </div></div>`;
@@ -188,7 +197,7 @@ function formModal({ title, fields, onSubmit, submitLabel = 'Simpan', submitClas
         <textarea data-f="${f.key}" class="textarea" ${f.attrs || ''}>${esc(f.value || '')}</textarea></div>`;
     }
     if (f.type === 'checkbox') {
-      return `<label class="row text-sm mb-3"><input type="checkbox" data-f="${f.key}" ${f.checked ? 'checked' : ''}> ${esc(f.label)}</label>`;
+      return `<label class="row text-sm mb-3" style="gap:8px;cursor:pointer"><input type="checkbox" data-f="${f.key}" ${f.checked ? 'checked' : ''}> ${esc(f.label)}</label>`;
     }
     return `<div class="field"><label>${esc(f.label)}</label>
       <input type="${f.type || 'text'}" data-f="${f.key}" class="input" value="${esc(f.value || '')}" ${f.attrs || ''} placeholder="${esc(f.placeholder || '')}"></div>`;
@@ -220,7 +229,7 @@ function formModal({ title, fields, onSubmit, submitLabel = 'Simpan', submitClas
 }
 
 // ============================================
-//  RENDER ROUTER
+//  RENDER
 // ============================================
 function render() {
   const app = $('#app');
@@ -230,7 +239,8 @@ function render() {
   else if (S.view === 'karyawan') html = vKaryawan();
   else if (S.view === 'admin') html = vAdmin();
   app.innerHTML = html;
-  if (S.view === 'karyawan' && S.karyawan && S.karyawan.absen && S.karyawan.absen.isOpen && S.karyawan.distribusi && S.karyawan.distribusi.length && !S.karyawan.sudahSubmit) {
+  if (S.view === 'karyawan' && S.karyawan && S.karyawan.absen && S.karyawan.absen.isOpen &&
+      S.karyawan.distribusi && S.karyawan.distribusi.length && !S.karyawan.sudahSubmit) {
     const list = $('[data-peng-list]');
     if (list && !list.children.length) addPengRow();
   }
@@ -267,14 +277,14 @@ function vLogin() {
       <p class="sub">Sistem Manajemen POS &amp; ERP</p>
       <form class="login-form" data-form="login">
         <div class="field"><label>Username / Nama</label>
-          <input class="input" name="username" autocomplete="username" autofocus>
+          <input class="input" name="username" autocomplete="username" autofocus placeholder="admin / Siti / lapak1">
         </div>
         <div class="field"><label>Password</label>
-          <input class="input" type="password" name="password" autocomplete="current-password">
+          <input class="input" type="password" name="password" autocomplete="current-password" placeholder="••••••">
         </div>
-        <button class="btn btn-primary btn-block" type="submit">Masuk</button>
+        <button class="btn btn-primary btn-block btn-lg mt-2" type="submit">Masuk</button>
       </form>
-      <p class="text-center text-xs text-gray mt-3">v5.2 · Kue As-Syifa</p>
+      <p class="text-center text-xs text-gray mt-3">v5.3 · Kue As-Syifa</p>
     </div>`;
 }
 
@@ -298,7 +308,7 @@ function vKaryawan() {
         ${esc(fmtDateID(new Date()))} · 
         <span class="status-pill ${statusCls[ak.status] || 'status-belum'}">${statusMap[ak.status] || 'Belum Absen'}</span>
       </div>
-      ${ak.jamMasuk ? `<div class="text-xs" style="opacity:.9;margin-bottom:8px">Masuk: ${esc(ak.jamMasuk)}${ak.jamKeluar ? ' · Keluar: ' + esc(ak.jamKeluar) : ''}</div>` : ''}
+      ${ak.jamMasuk ? `<div class="text-xs" style="opacity:.7;margin-bottom:12px">Masuk: ${esc(ak.jamMasuk)}${ak.jamKeluar ? ' · Keluar: ' + esc(ak.jamKeluar) : ''}</div>` : ''}
       <div class="clock-actions">
         <button class="btn" data-act="absen-masuk" ${ak.status !== 'belum' ? 'disabled' : ''}>
           ${ico('login','ico-sm')} Absen Masuk
@@ -327,13 +337,13 @@ function vKaryawan() {
   } else if (!d.distribusi || !d.distribusi.length) {
     body += renderDropForm(d);
   } else if (!isOpen) {
-    body += `<div class="alert alert-warn">${ico('inbox','ico-sm')}<span>Buka lapak dulu untuk mulai rekap.</span></div>`;
+    body += `<div class="alert alert-warn">${ico('inbox','ico')}<span>Buka lapak dulu untuk mulai rekap.</span></div>`;
     body += `<div class="card"><div class="row-between mb-3"><strong class="text-sm">Drop Stok Hari Ini</strong><button class="btn btn-ghost btn-sm" data-act="edit-drop">Edit</button></div>`;
     body += d.distribusi.map(it => `
-      <div class="row-between" style="padding:6px 0;border-bottom:1px solid var(--gray-100)">
+      <div class="row-between" style="padding:8px 0;border-bottom:1px solid #f8fafc">
         <div style="min-width:0;flex:1">
           <span class="text-sm">${esc(it.nama)}</span>
-          ${it.tipeTransaksi === 'TitipJual' ? ` <span class="badge badge-warn" style="font-size:9px">TITIP</span>` : ''}
+          ${it.tipeTransaksi === 'TitipJual' ? ' <span class="badge badge-warn" style="font-size:9px">TITIP</span>' : ''}
         </div>
         <strong>${it.qtyDrop} pcs</strong>
       </div>`).join('');
@@ -348,9 +358,9 @@ function vKaryawan() {
       <strong class="text-sm">${ico('money','ico-sm')} Kasbon Saya</strong>
       <button class="btn btn-primary btn-sm" data-act="ajukan-kasbon">+ Ajukan</button>
     </div>
-    ${kb.length === 0 ? '<p class="text-xs text-gray text-center" style="padding:8px 0">Belum ada kasbon.</p>' :
+    ${kb.length === 0 ? '<p class="text-xs text-gray text-center" style="padding:12px 0">Belum ada kasbon.</p>' :
       kb.slice(0, 5).map(k => `
-        <div class="row-between" style="padding:6px 0;border-bottom:1px solid var(--gray-100)">
+        <div class="row-between" style="padding:8px 0;border-bottom:1px solid #f8fafc">
           <div style="min-width:0;flex:1">
             <p class="text-sm">${esc(k.keterangan || k.tipe)}</p>
             <p class="text-xs text-gray">${esc(k.tanggal)}</p>
@@ -364,10 +374,10 @@ function vKaryawan() {
 
   return `
     <div class="page">
-      <div class="topbar topbar-amber">
+      <div class="topbar">
         <div class="topbar-title">
           <h2>${esc(S.user.name)}</h2>
-          <p>${esc(d.lapakNama || '')} · ${esc(fmtDateID(new Date()))}</p>
+          <p>${esc(d.lapakNama || '')}</p>
         </div>
         <div class="row" style="gap:4px">
           <button class="icon-btn" data-act="ganti-lapak">${ico('store')}</button>
@@ -382,16 +392,16 @@ function renderDropForm(d) {
   const katalog = d.katalogFull || [];
   if (!katalog.length) return `<div class="card empty">${ico('box','ico')}<p>Katalog kosong.</p></div>`;
   return `
-    <div class="card" style="border:1px solid var(--amber);">
-      <div class="card-title">${ico('boxes')} Input Stok Diterima</div>
+    <div class="card" style="border:1.5px solid var(--amber);background:var(--amber-50)">
+      <div class="card-title" style="color:var(--amber-600)">${ico('boxes')} Input Stok Diterima</div>
       <p class="text-xs text-gray mb-4">Masukkan jumlah kue yang Anda terima pagi ini.</p>
       ${katalog.map(k => `
-        <div class="row-between" style="padding:8px 0;border-bottom:1px solid var(--gray-100)">
+        <div class="row-between" style="padding:10px 0;border-bottom:1px solid rgba(245,158,11,.15)">
           <div style="min-width:0;flex:1;padding-right:8px">
             <p class="text-sm font-semibold">${esc(k.nama)}</p>
             <p class="text-xs text-gray">${esc(k.supplierNama)} · ${fmtRp(k.hargaJual)}</p>
           </div>
-          <input type="number" min="0" inputmode="numeric" value="0" data-drop-item="${esc(k.id)}" class="input field-sm" style="width:70px;text-align:center">
+          <input type="number" min="0" inputmode="numeric" value="0" data-drop-item="${esc(k.id)}" class="input field-sm" style="width:72px;text-align:center">
         </div>`).join('')}
       <button class="btn btn-primary btn-block mt-3" data-act="save-drop">Simpan Stok Diterima</button>
     </div>`;
@@ -403,7 +413,7 @@ function renderRekapForm(d) {
       <div class="card-title">${ico('bar')} Rekap Akhir Hari</div>
       ${d.locked ? `<div class="alert alert-danger">${ico('lock','ico-sm')}<span>Input terkunci setelah jam ${d.cutoffHour}:00</span></div>` : ''}
       ${d.distribusi.map(it => `
-        <div class="card" style="padding:12px;background:var(--gray-50);border:none;margin-bottom:8px">
+        <div class="card card-flat" style="padding:12px;margin-bottom:8px">
           <div class="row-between mb-3">
             <div style="min-width:0;flex:1;padding-right:8px">
               <p class="text-sm font-semibold">${esc(it.nama)} ${it.tipeTransaksi === 'TitipJual' ? '<span class="badge badge-warn" style="font-size:9px">TITIP</span>' : ''}</p>
@@ -411,20 +421,20 @@ function renderRekapForm(d) {
             </div>
             <div style="text-align:right;flex-shrink:0">
               <label class="text-xs text-gray">Sisa</label>
-              <input type="number" min="0" max="${it.qtyDrop}" inputmode="numeric" value="${S.rekap[it.katalogId] || 0}" data-rekap-item="${esc(it.katalogId)}" data-max="${it.qtyDrop}" class="input field-sm" style="width:64px;text-align:center">
+              <input type="number" min="0" max="${it.qtyDrop}" inputmode="numeric" value="${S.rekap[it.katalogId] || 0}" data-rekap-item="${esc(it.katalogId)}" data-max="${it.qtyDrop}" class="input field-sm" style="width:68px;text-align:center">
             </div>
           </div>
-          <div class="row-between text-xs" style="border-top:1px solid var(--gray-200);padding-top:6px">
+          <div class="row-between text-xs" style="border-top:1px solid #e2e8f0;padding-top:8px">
             <span class="text-gray">Laku: <strong data-laku="${esc(it.katalogId)}">${it.qtyDrop - (S.rekap[it.katalogId] || 0)}</strong></span>
             <span class="text-green font-bold" data-sub="${esc(it.katalogId)}">${fmtRp((it.qtyDrop - (S.rekap[it.katalogId] || 0)) * it.hargaJual)}</span>
           </div>
         </div>`).join('')}
-      <div style="border-top:1px solid var(--gray-100);padding-top:12px;margin-top:8px">
+      <div style="border-top:1px solid #f1f5f9;padding-top:14px;margin-top:10px">
         <p class="text-xs font-semibold mb-2">Pengeluaran Lapak (opsional)</p>
         <div data-peng-list></div>
         <button class="btn btn-ghost btn-sm mt-2" data-act="add-peng">+ Tambah pengeluaran</button>
       </div>
-      <div style="border-top:1px solid var(--gray-100);padding-top:12px;margin-top:12px">
+      <div style="border-top:1px solid #f1f5f9;padding-top:14px;margin-top:14px">
         <p class="text-xs font-semibold mb-2">Total Penerimaan</p>
         <div class="form-grid">
           <div class="field"><label>Tunai (Rp)</label><input type="number" name="tunai" min="0" inputmode="numeric" class="input field-sm"></div>
@@ -432,7 +442,7 @@ function renderRekapForm(d) {
         </div>
       </div>
       <div class="alert alert-info" data-summary>${summaryHTML()}</div>
-      <button class="btn btn-primary btn-block ${d.locked ? 'hide' : ''}" data-act="submit-rekap">Kirim Laporan</button>
+      <button class="btn btn-primary btn-block btn-lg ${d.locked ? 'hide' : ''}" data-act="submit-rekap">Kirim Laporan</button>
     </div>`;
 }
 
@@ -449,10 +459,10 @@ function summaryHTML() {
   const selisih = total - (tunai + qris);
   return `
     <div style="flex:1">
-      <div class="row-between text-xs"><span>Penjualan Sistem</span><strong>${fmtRp(total)}</strong></div>
+      <div class="row-between text-xs"><span>Penjualan</span><strong>${fmtRp(total)}</strong></div>
       <div class="row-between text-xs text-red"><span>Pengeluaran</span><span>- ${fmtRp(pengeluaran)}</span></div>
       <div class="row-between text-xs text-green font-bold mt-2"><span>Harus Disetor</span><span>${fmtRp(Math.max(0, expected))}</span></div>
-      <div class="divider"></div>
+      <div class="divider" style="margin:10px 0"></div>
       <div class="row-between text-xs"><span>Tunai + QRIS</span><span>${fmtRp(tunai + qris)}</span></div>
       <div class="row-between text-xs font-bold ${Math.abs(selisih) < 1 ? 'text-green' : 'text-red'}"><span>Selisih</span><span>${fmtRp(selisih)}</span></div>
     </div>`;
@@ -481,50 +491,49 @@ function vAdmin() {
     { id:'kas',     label:'Kas',     icon:'wallet' },
     { id:'setoran', label:'Setoran', icon:'file', badge: S.dash ? S.dash.pendingCount : 0 },
     { id:'laporan', label:'Laporan', icon:'bar' },
-    { id:'more',    label:'Lainnya', icon:'menu' }
+    { id:'more',    label:'Menu',    icon:'menu' }
   ];
 
   let body = '';
-  if (S.tab === 'home') body = tabHome();
-  else if (S.tab === 'kas') body = tabKas();
-  else if (S.tab === 'setoran') body = tabSetoran();
-  else if (S.tab === 'laporan') body = tabLaporan();
-  else if (S.tab === 'katalog') body = tabKatalog();
-  else if (S.tab === 'suppliers') body = tabSuppliers();
-  else if (S.tab === 'lapak') body = tabLapak();
-  else if (S.tab === 'distribusi') body = tabDistribusi();
-  else if (S.tab === 'belanja') body = tabBelanja();
-  else if (S.tab === 'jadwal') body = tabJadwal();
-  else if (S.tab === 'kasbon') body = tabKasbon();
-  else if (S.tab === 'gaji') body = tabGajiRiwayat();
-  else if (S.tab === 'setting-gaji') body = tabSettingGaji();
-  else if (S.tab === 'rekap-gaji') body = tabRekapGaji();
-  else if (S.tab === 'pesanan') body = tabPesanan();
-  else if (S.tab === 'users') body = tabUsers();
-  else if (S.tab === 'kartu-stok') body = tabKartuStok();
-  else if (S.tab === 'retur') body = tabRetur();
-  else if (S.tab === 'harga-tingkat') body = tabHargaTingkat();
-  else if (S.tab === 'tutup-buku') body = tabTutupBuku();
-  else if (S.tab === 'notifikasi') body = tabNotifikasi();
-  else if (S.tab === 'profil') body = tabProfil();
-  else if (S.tab === 'absensi') body = tabAbsensi();
-  else if (S.tab === 'absensi-hari-ini') body = tabAbsensiHariIni();
-  else if (S.tab === 'bonus-antar') body = tabBonusAntar();
-  else if (S.tab === 'setting-payroll') body = tabSettingPayroll();
-  else if (S.tab === 'payroll') body = tabPayroll();
-  else if (S.tab === 'dashboard-profit') body = tabDashboardProfit();
-  // Fase 2
-  else if (S.tab === 'konsinyasi') body = tabKonsinyasi();
-  else if (S.tab === 'riwayat-bayar-supplier') body = tabRiwayatBayarSupplier();
+  const T = S.tab;
+  if (T === 'home') body = tabHome();
+  else if (T === 'kas') body = tabKas();
+  else if (T === 'setoran') body = tabSetoran();
+  else if (T === 'laporan') body = tabLaporan();
+  else if (T === 'katalog') body = tabKatalog();
+  else if (T === 'suppliers') body = tabSuppliers();
+  else if (T === 'lapak') body = tabLapak();
+  else if (T === 'distribusi') body = tabDistribusi();
+  else if (T === 'belanja') body = tabBelanja();
+  else if (T === 'jadwal') body = tabJadwal();
+  else if (T === 'kasbon') body = tabKasbon();
+  else if (T === 'gaji') body = tabGajiRiwayat();
+  else if (T === 'setting-gaji') body = tabSettingGaji();
+  else if (T === 'pesanan') body = tabPesanan();
+  else if (T === 'users') body = tabUsers();
+  else if (T === 'kartu-stok') body = tabKartuStok();
+  else if (T === 'retur') body = tabRetur();
+  else if (T === 'harga-tingkat') body = tabHargaTingkat();
+  else if (T === 'tutup-buku') body = tabTutupBuku();
+  else if (T === 'notifikasi') body = tabNotifikasi();
+  else if (T === 'profil') body = tabProfil();
+  else if (T === 'absensi') body = tabAbsensi();
+  else if (T === 'absensi-hari-ini') body = tabAbsensiHariIni();
+  else if (T === 'bonus-antar') body = tabBonusAntar();
+  else if (T === 'setting-payroll') body = tabSettingPayroll();
+  else if (T === 'payroll') body = tabPayroll();
+  else if (T === 'dashboard-profit') body = tabDashboardProfit();
+  else if (T === 'konsinyasi') body = tabKonsinyasi();
+  else if (T === 'riwayat-bayar-supplier') body = tabRiwayatBayarSupplier();
 
   const unread = S.dash ? (S.dash.unreadNotif || 0) : 0;
 
   return `
     <div class="page">
-      <div class="topbar topbar-dark">
+      <div class="topbar">
         <div class="topbar-title">
-          <h2>Admin Panel</h2>
-          <p>${esc(S.user.name)}</p>
+          <h2>${esc(S.user.name)}</h2>
+          <p>Admin Panel</p>
         </div>
         <div class="row" style="gap:4px">
           <button class="icon-btn icon-btn-relative" data-act="open-notif">
@@ -551,22 +560,21 @@ function vAdmin() {
 function tabHome() {
   const d = S.dash || { kasBesar: 0, pendingCount: 0, todayPenjualan: 0, todayTunai: 0, todayQris: 0, todaySetoranCount: 0, recentKas: [], utangKonsinyasi: 0 };
   return `
-    <div class="kpi-hero">
-      <div class="kpi-hero-label">Saldo Kas Besar</div>
-      <div class="kpi-hero-value">${fmtRp(d.kasBesar)}</div>
-      <button class="btn btn-ghost btn-sm" data-act="refresh">${ico('sync','ico-sm')} Refresh</button>
+    <div class="hero hero-amber">
+      <div class="hero-label">Saldo Kas Besar</div>
+      <div class="hero-value">${fmtRp(d.kasBesar)}</div>
+      <div class="hero-sub">${d.todaySetoranCount} setoran hari ini</div>
     </div>
 
     <div class="kpi-grid">
       <div class="kpi">
         <div class="kpi-label">Penjualan Hari Ini</div>
-        <div class="kpi-value text-green">${fmtRp(d.todayPenjualan)}</div>
-        <div class="kpi-sub">${d.todaySetoranCount} setoran</div>
+        <div class="kpi-value text-green" style="font-size:16px">${fmtRp(d.todayPenjualan)}</div>
       </div>
       <div class="kpi">
-        <div class="kpi-label">Tunai / QRIS</div>
-        <div class="kpi-value" style="font-size:13px">${fmtRp(d.todayTunai)}</div>
-        <div class="kpi-value text-amber" style="font-size:13px">${fmtRp(d.todayQris)}</div>
+        <div class="kpi-label">Tunai · QRIS</div>
+        <div class="kpi-value" style="font-size:14px">${fmtRp(d.todayTunai)}</div>
+        <div class="kpi-sub">${fmtRp(d.todayQris)}</div>
       </div>
     </div>
 
@@ -575,13 +583,9 @@ function tabHome() {
         ${ico('truck','ico')}
         <div style="flex:1">
           <strong>Utang Konsinyasi: ${fmtRp(d.utangKonsinyasi)}</strong>
-          <br><button class="btn btn-primary btn-sm mt-2" data-act="tab" data-tab="konsinyasi">Bayar Sekarang</button>
+          <br><button class="btn btn-primary btn-sm mt-2" data-act="tab" data-tab="konsinyasi">Bayar</button>
         </div>
       </div>` : ''}
-
-    <button class="btn btn-ghost btn-block mb-3" data-act="tab" data-tab="dashboard-profit">
-      ${ico('trending','ico-sm')} Lihat Grafik Profit
-    </button>
 
     ${d.pendingCount > 0 ? `
       <div class="alert alert-warn">
@@ -592,8 +596,13 @@ function tabHome() {
         </div>
       </div>` : ''}
 
+    <div class="row" style="gap:8px;margin-bottom:16px">
+      <button class="btn btn-ghost btn-block" data-act="tab" data-tab="dashboard-profit">${ico('trending','ico-sm')} Profit</button>
+      <button class="btn btn-ghost btn-block" data-act="refresh">${ico('refresh','ico-sm')} Refresh</button>
+    </div>
+
     <h3 class="card-title">${ico('wallet')} Kas Terbaru</h3>
-    ${!d.recentKas || !d.recentKas.length ? '<div class="empty"><p>Belum ada transaksi</p></div>' :
+    ${!d.recentKas || !d.recentKas.length ? '<div class="empty">' + ico('inbox','ico') + '<p>Belum ada transaksi</p></div>' :
       d.recentKas.map(k => `
         <div class="list-item">
           <div class="list-item-main">
@@ -617,8 +626,11 @@ function tabKas() {
       <h3 class="card-title" style="margin:0">${ico('wallet')} Buku Kas</h3>
       <button class="btn btn-primary btn-sm" data-act="add-kas">+ Transaksi</button>
     </div>
-    <div class="kpi-hero"><div class="kpi-hero-label">Saldo Saat Ini</div><div class="kpi-hero-value">${fmtRp(d.kasBesar)}</div></div>
-    ${!d.recentKas || !d.recentKas.length ? '<div class="empty"><p>Belum ada transaksi</p></div>' :
+    <div class="hero">
+      <div class="hero-label">Saldo Saat Ini</div>
+      <div class="hero-value">${fmtRp(d.kasBesar)}</div>
+    </div>
+    ${!d.recentKas || !d.recentKas.length ? '<div class="empty">' + ico('inbox','ico') + '<p>Belum ada transaksi</p></div>' :
       d.recentKas.map(k => `
         <div class="list-item">
           <div class="list-item-main">
@@ -639,48 +651,50 @@ function tabSetoran() {
   const f = S._setoranFilter || {};
   const list = S.setoran || [];
   const pending = list.filter(s => s.status === 'pending');
-  const done = list.filter(s => s.status !== 'pending').slice(0, 50);
+  const done = list.filter(s => s.status !== 'pending').slice(0, 30);
 
-  let html = `<h3 class="card-title">${ico('file')} Setoran</h3>
+  let html = `
     <div class="card">
       <div class="form-grid">
         <div class="field"><label>Dari</label><input type="date" data-filter-dari value="${f.dari || ''}" class="input field-sm"></div>
         <div class="field"><label>Sampai</label><input type="date" data-filter-sampai value="${f.sampai || ''}" class="input field-sm"></div>
       </div>
-      <div class="field"><label>Lapak</label>
-        <select data-filter-lapak class="select field-sm">
-          <option value="">Semua Lapak</option>
-          ${S.lapak.map(l => `<option value="${esc(l.id)}" ${f.lapakId === l.id ? 'selected' : ''}>${esc(l.nama)}</option>`).join('')}
-        </select>
-      </div>
-      <div class="field"><label>Status</label>
-        <select data-filter-status class="select field-sm">
-          <option value="">Semua Status</option>
-          <option value="pending" ${f.status === 'pending' ? 'selected' : ''}>Pending</option>
-          <option value="approved" ${f.status === 'approved' ? 'selected' : ''}>Approved</option>
-          <option value="rejected" ${f.status === 'rejected' ? 'selected' : ''}>Rejected</option>
-        </select>
+      <div class="form-grid">
+        <div class="field"><label>Lapak</label>
+          <select data-filter-lapak class="select field-sm">
+            <option value="">Semua</option>
+            ${S.lapak.map(l => `<option value="${esc(l.id)}" ${f.lapakId === l.id ? 'selected' : ''}>${esc(l.nama)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Status</label>
+          <select data-filter-status class="select field-sm">
+            <option value="">Semua</option>
+            <option value="pending" ${f.status === 'pending' ? 'selected' : ''}>Pending</option>
+            <option value="approved" ${f.status === 'approved' ? 'selected' : ''}>Approved</option>
+            <option value="rejected" ${f.status === 'rejected' ? 'selected' : ''}>Rejected</option>
+          </select>
+        </div>
       </div>
       <button class="btn btn-primary btn-block btn-sm" data-act="apply-setoran-filter">Terapkan Filter</button>
     </div>`;
 
   html += `<h3 class="card-title">${ico('inbox')} Pending (${pending.length})</h3>`;
-  if (!pending.length) html += '<div class="empty">' + ico('inbox') + '<p>Tidak ada setoran pending</p></div>';
+  if (!pending.length) html += '<div class="empty">' + ico('check','ico') + '<p>Tidak ada setoran pending</p></div>';
   else html += pending.map(s => {
     const status = s.selisih === 0 ? 'Match' : s.selisih > 0 ? 'Shortage' : 'Overage';
     const cls = s.selisih === 0 ? 'badge-success' : s.selisih > 0 ? 'badge-danger' : 'badge-blue';
     return `
-      <div class="card" style="border:1px solid var(--amber-bg)">
+      <div class="card">
         <div class="row-between mb-3">
           <div><strong>${esc(s.lapakId)}</strong><div class="text-xs text-gray">${esc(s.tanggal)}</div></div>
           <span class="badge ${cls}">${status}</span>
         </div>
-        <div style="background:var(--gray-50);padding:10px;border-radius:8px;font-size:12px">
+        <div class="card-flat" style="padding:12px;font-size:13px">
           <div class="row-between"><span class="text-gray">Penjualan</span><strong>${fmtRp(s.totalSistem)}</strong></div>
           <div class="row-between text-gray"><span>Tunai</span><span>${fmtRp(s.totalTunai)}</span></div>
           <div class="row-between text-gray"><span>QRIS</span><span>${fmtRp(s.totalQris)}</span></div>
           <div class="row-between text-red"><span>Pengeluaran</span><span>- ${fmtRp(s.pengeluaran)}</span></div>
-          <div class="row-between text-green font-bold" style="border-top:1px solid var(--gray-200);padding-top:6px;margin-top:6px"><span>Setoran</span><span>${fmtRp(s.expectedSetoran)}</span></div>
+          <div class="row-between text-green font-bold" style="border-top:1px solid #e2e8f0;padding-top:8px;margin-top:8px"><span>Setoran</span><span>${fmtRp(s.expectedSetoran)}</span></div>
         </div>
         <div class="row mt-3" style="gap:6px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" data-act="detail-setoran" data-id="${esc(s.id)}">${ico('eye','ico-sm')}</button>
@@ -692,21 +706,72 @@ function tabSetoran() {
       </div>`;
   }).join('');
 
-  html += `<h3 class="card-title mt-3">${ico('file')} Riwayat (${done.length})</h3>`;
-  if (!done.length) html += '<div class="empty"><p>Belum ada riwayat</p></div>';
-  else html += done.map(s => `
-    <div class="list-item">
-      <div class="list-item-main">
-        <div class="list-item-title">${esc(s.lapakId)} · ${esc(s.tanggal)}</div>
-        <div class="list-item-sub">${fmtRp(s.totalSistem)}${s.locked ? ' · 🔒' : ''}</div>
-      </div>
-      <span class="badge ${s.status === 'approved' ? 'badge-success' : 'badge-danger'}">${esc(s.status)}</span>
-    </div>`).join('');
+  if (done.length) {
+    html += `<h3 class="card-title mt-3">${ico('file')} Riwayat</h3>`;
+    html += done.map(s => `
+      <div class="list-item">
+        <div class="list-item-main">
+          <div class="list-item-title">${esc(s.lapakId)} · ${esc(s.tanggal)}</div>
+          <div class="list-item-sub">${fmtRp(s.totalSistem)}${s.locked ? ' · 🔒' : ''}</div>
+        </div>
+        <span class="badge ${s.status === 'approved' ? 'badge-success' : 'badge-danger'}">${esc(s.status)}</span>
+      </div>`).join('');
+  }
   return html;
 }
 
 // ============================================
-//  TAB: KATALOG
+//  TAB: LAPORAN
+// ============================================
+function tabLaporan() {
+  const L = S.laporan;
+  if (!L) return '<div class="empty">Memuat laporan...</div>';
+  const maxQty = L.topItems.length ? Math.max(...L.topItems.map(i => i.qtyLaku)) : 1;
+  return `
+    <div class="card">
+      <div class="form-grid">
+        <div class="field"><label>Dari</label><input type="date" data-lap-dari value="${L.periode.dari}" class="input field-sm"></div>
+        <div class="field"><label>Sampai</label><input type="date" data-lap-sampai value="${L.periode.sampai}" class="input field-sm"></div>
+      </div>
+      <button class="btn btn-primary btn-block btn-sm" data-act="load-laporan">Terapkan</button>
+    </div>
+    <div class="grid-3 mb-3">
+      <div class="kpi"><div class="kpi-label">Omzet</div><div class="kpi-value text-green" style="font-size:13px">${fmtRp(L.ringkasan.totalOmzet)}</div></div>
+      <div class="kpi"><div class="kpi-label">Profit</div><div class="kpi-value text-blue" style="font-size:13px">${fmtRp(L.ringkasan.totalProfit)}</div></div>
+      <div class="kpi"><div class="kpi-label">Qty</div><div class="kpi-value text-amber">${L.ringkasan.totalQty}</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Top 10 Item</div>
+      ${!L.topItems.length ? '<p class="text-xs text-gray">Belum ada data.</p>' :
+        `<div class="bar-list">${L.topItems.map((it, i) => `
+          <div class="bar-row">
+            <div class="bar-meta"><span>${i + 1}. ${esc(it.nama)}</span><strong>${it.qtyLaku} pcs</strong></div>
+            <div class="bar-track"><div class="bar-fill" style="width:${(it.qtyLaku / maxQty * 100).toFixed(1)}%"></div></div>
+          </div>`).join('')}</div>`}
+    </div>
+    <div class="card">
+      <div class="card-title">Performa Supplier</div>
+      ${!L.perSupplier.length ? '<p class="text-xs text-gray">Belum ada data.</p>' :
+        L.perSupplier.map(s => `
+          <div style="padding:10px 0;border-bottom:1px solid #f8fafc">
+            <div class="row-between text-sm mb-2"><strong>${esc(s.nama)}</strong><span class="text-gray">${s.margin.toFixed(1)}% margin</span></div>
+            <div class="row-between text-xs text-gray"><span>${s.qtyLaku} pcs · ${s.itemCount} item</span><span class="text-green font-semibold">${fmtRp(s.omzet)}</span></div>
+          </div>`).join('')}
+    </div>
+    <div class="card">
+      <div class="card-title">Performa Lapak</div>
+      ${!L.perLapak.length ? '<p class="text-xs text-gray">Belum ada data.</p>' :
+        L.perLapak.map(l => `
+          <div style="padding:10px 0;border-bottom:1px solid #f8fafc">
+            <div class="row-between text-sm mb-2"><strong>${esc(l.nama)}</strong><span class="text-gray">${l.margin.toFixed(1)}%</span></div>
+            <div class="row-between text-xs text-gray"><span>${l.qtyLaku} pcs · ${l.setoranCount} setoran</span><span class="text-green font-semibold">${fmtRp(l.omzet)}</span></div>
+          </div>`).join('')}
+    </div>
+    <button class="btn btn-success btn-block" data-act="export-csv">${ico('csv','ico-sm')} Export CSV</button>`;
+}
+
+// ============================================
+//  TAB: KATALOG / SUPPLIERS / LAPAK / USERS
 // ============================================
 function tabKatalog() {
   const isAdmin = S.user.role === 'admin';
@@ -714,11 +779,11 @@ function tabKatalog() {
     <div class="row-between mb-3">
       <h3 class="card-title" style="margin:0">${ico('box')} Katalog (${S.katalog.length})</h3>
       <div class="row" style="gap:4px">
-        <button class="btn btn-ghost btn-sm" data-act="tab" data-tab="harga-tingkat">${ico('tag','ico-sm')} Harga</button>
+        <button class="btn btn-ghost btn-sm" data-act="tab" data-tab="harga-tingkat">${ico('tag','ico-sm')}</button>
         <button class="btn btn-primary btn-sm" data-act="add-katalog">+ Tambah</button>
       </div>
     </div>
-    ${!S.katalog.length ? '<div class="empty"><p>Belum ada item</p></div>' :
+    ${!S.katalog.length ? '<div class="empty">' + ico('box','ico') + '<p>Belum ada item</p></div>' :
       S.katalog.map(k => `
         <div class="list-item">
           <div class="list-item-main">
@@ -736,22 +801,19 @@ function tabKatalog() {
         </div>`).join('')}`;
 }
 
-// ============================================
-//  TAB: SUPPLIERS (+ tipeTransaksi)
-// ============================================
 function tabSuppliers() {
   return `
     <div class="row-between mb-3">
       <h3 class="card-title" style="margin:0">${ico('truck')} Suppliers</h3>
       <button class="btn btn-primary btn-sm" data-act="add-supplier">+ Tambah</button>
     </div>
-    ${!S.suppliers.length ? '<div class="empty"><p>Belum ada supplier</p></div>' :
+    ${!S.suppliers.length ? '<div class="empty">' + ico('truck','ico') + '<p>Belum ada supplier</p></div>' :
       S.suppliers.map(s => `
         <div class="list-item">
           <div class="list-item-main">
             <div class="list-item-title">
               ${esc(s.nama)}
-              ${s.tipeTransaksi === 'TitipJual' ? '<span class="badge badge-warn" style="font-size:9px;margin-left:4px">TITIP JUAL</span>' : '<span class="badge badge-gray" style="font-size:9px;margin-left:4px">BELI PUTUS</span>'}
+              ${s.tipeTransaksi === 'TitipJual' ? '<span class="badge badge-warn" style="font-size:9px;margin-left:4px">TITIP</span>' : '<span class="badge badge-gray" style="font-size:9px;margin-left:4px">BELI PUTUS</span>'}
             </div>
             <div class="list-item-sub">${esc(s.kontak || '-')}</div>
             ${s.jadwalPesan ? `<div class="text-xs text-amber mt-2">${esc(s.jadwalPesan)}</div>` : ''}
@@ -763,9 +825,6 @@ function tabSuppliers() {
         </div>`).join('')}`;
 }
 
-// ============================================
-//  TAB: LAPAK
-// ============================================
 function tabLapak() {
   return `
     <div class="row-between mb-3">
@@ -786,8 +845,30 @@ function tabLapak() {
         </div>`).join('')}`;
 }
 
+function tabUsers() {
+  return `
+    <div class="row-between mb-3">
+      <h3 class="card-title" style="margin:0">${ico('users')} Users</h3>
+      <button class="btn btn-primary btn-sm" data-act="add-user">+ Tambah</button>
+    </div>
+    ${!S.users.length ? '<div class="empty"><p>Belum ada user</p></div>' :
+      S.users.map(u => `
+        <div class="list-item">
+          <div class="list-item-main">
+            <div class="list-item-title">${esc(u.name)}</div>
+            <div class="list-item-sub">@${esc(u.username)} · ${esc(u.role)}${u.lapakNama ? ' · ' + esc(u.lapakNama) : ''}</div>
+            ${u.mustChangePassword ? '<span class="badge badge-warn mt-1">Perlu ganti pwd</span>' : ''}
+          </div>
+          <div class="list-item-actions">
+            <button class="action-btn action-info" data-act="reset-user-pwd" data-id="${esc(u.id)}">${ico('key','ico-sm')}</button>
+            <button class="action-btn action-edit" data-act="edit-user" data-id="${esc(u.id)}">${ico('edit','ico-sm')}</button>
+            <button class="action-btn action-del" data-act="del-user" data-id="${esc(u.id)}">${ico('trash','ico-sm')}</button>
+          </div>
+        </div>`).join('')}`;
+}
+
 // ============================================
-//  TAB: DISTRIBUSI
+//  TAB: DISTRIBUSI / BELANJA / JADWAL / KASBON
 // ============================================
 function tabDistribusi() {
   const today = todayISO();
@@ -795,43 +876,42 @@ function tabDistribusi() {
   const lapakId = S._distLapakId || (S.lapak[0] ? S.lapak[0].id : '');
   const items = S._distItems || {};
   return `
-    <h3 class="card-title">${ico('boxes')} Drop Stok ke Lapak</h3>
+    <h3 class="card-title">${ico('boxes')} Drop Stok</h3>
     <div class="card">
-      <div class="field"><label>Tanggal</label><input type="date" data-dist-tgl value="${tanggal}" class="input field-sm"></div>
-      <div class="field"><label>Lapak</label>
-        <select data-dist-lapak class="select field-sm">
-          ${S.lapak.map(l => `<option value="${esc(l.id)}" ${l.id === lapakId ? 'selected' : ''}>${esc(l.nama)}</option>`).join('')}
-        </select>
+      <div class="form-grid">
+        <div class="field"><label>Tanggal</label><input type="date" data-dist-tgl value="${tanggal}" class="input field-sm"></div>
+        <div class="field"><label>Lapak</label>
+          <select data-dist-lapak class="select field-sm">
+            ${S.lapak.map(l => `<option value="${esc(l.id)}" ${l.id === lapakId ? 'selected' : ''}>${esc(l.nama)}</option>`).join('')}
+          </select>
+        </div>
       </div>
-      <button class="btn btn-ghost btn-block mt-2" data-act="load-distribusi">Muat Distribusi</button>
+      <button class="btn btn-ghost btn-block btn-sm" data-act="load-distribusi">Muat</button>
     </div>
     <div class="card">
       ${!S.katalog.length ? '<p class="text-xs text-gray">Katalog kosong.</p>' :
         S.katalog.map(k => `
-          <div class="row-between" style="padding:8px 0;border-bottom:1px solid var(--gray-100)">
+          <div class="row-between" style="padding:10px 0;border-bottom:1px solid #f8fafc">
             <div style="min-width:0;flex:1;padding-right:8px">
               <p class="text-sm font-semibold">${esc(k.nama)}</p>
               <p class="text-xs text-gray">${esc(k.supplierNama)} · ${fmtRp(k.hargaJual)}</p>
             </div>
-            <input type="number" min="0" inputmode="numeric" value="${items[k.id] || 0}" data-dist-item="${esc(k.id)}" class="input field-sm" style="width:70px;text-align:center">
+            <input type="number" min="0" inputmode="numeric" value="${items[k.id] || 0}" data-dist-item="${esc(k.id)}" class="input field-sm" style="width:72px;text-align:center">
           </div>`).join('')}
     </div>
     <button class="btn btn-primary btn-block mt-3" data-act="save-distribusi">Simpan Drop</button>`;
 }
 
-// ============================================
-//  TAB: BELANJA
-// ============================================
 function tabBelanja() {
   return `
     <div class="row-between mb-3">
-      <h3 class="card-title" style="margin:0">${ico('cart')} Daftar Belanja</h3>
+      <h3 class="card-title" style="margin:0">${ico('cart')} Belanja</h3>
       <button class="btn btn-primary btn-sm" data-act="add-belanja">+ Tambah</button>
     </div>
     ${!S.belanja.length ? '<div class="empty"><p>Belum ada item</p></div>' :
       S.belanja.map(b => `
         <div class="list-item">
-          <input type="checkbox" data-act="check-belanja" data-id="${esc(b.id)}" ${b.checked ? 'checked' : ''}>
+          <input type="checkbox" data-act="check-belanja" data-id="${esc(b.id)}" ${b.checked ? 'checked' : ''} style="margin-top:2px">
           <div class="list-item-main">
             <div class="list-item-title ${b.checked ? 'strike' : ''}">${esc(b.item)}</div>
             <div class="list-item-sub">${b.qty}x · ${fmtRp(b.hargaAktual || b.estimasiHarga)}${b.checked && b.kasId ? ' · ✓ Kas' : ''}</div>
@@ -843,9 +923,6 @@ function tabBelanja() {
         </div>`).join('')}`;
 }
 
-// ============================================
-//  TAB: JADWAL
-// ============================================
 function tabJadwal() {
   return `
     <div class="row-between mb-3">
@@ -855,7 +932,7 @@ function tabJadwal() {
     ${!S.jadwal.length ? '<div class="empty"><p>Belum ada jadwal</p></div>' :
       S.jadwal.map(j => `
         <div class="list-item">
-          <input type="checkbox" data-act="toggle-jadwal" data-id="${esc(j.id)}" ${j.done ? 'checked' : ''}>
+          <input type="checkbox" data-act="toggle-jadwal" data-id="${esc(j.id)}" ${j.done ? 'checked' : ''} style="margin-top:2px">
           <div class="list-item-main">
             <div class="list-item-title ${j.done ? 'strike' : ''}">${esc(j.supplierNama)}</div>
             <div class="list-item-sub">${esc(j.tanggal)} · ${esc(j.tipe)}</div>
@@ -868,16 +945,13 @@ function tabJadwal() {
         </div>`).join('')}`;
 }
 
-// ============================================
-//  TAB: KASBON
-// ============================================
 function tabKasbon() {
   const data = S.kasbon || { list: [], summary: [] };
   const outstanding = (data.summary || []).filter(s => s.outstanding > 0);
   let html = `<div class="row-between mb-3"><h3 class="card-title" style="margin:0">${ico('money')} Kasbon</h3><button class="btn btn-primary btn-sm" data-act="add-kasbon">+ Tambah</button></div>`;
   if (outstanding.length) {
     html += `<div class="card"><div class="card-title">Outstanding</div>` +
-      outstanding.map(s => `<div class="row-between text-sm" style="padding:4px 0;border-bottom:1px solid var(--gray-100)"><span>${esc(s.userName)}</span><strong class="text-red">${fmtRp(s.outstanding)}</strong></div>`).join('') + `</div>`;
+      outstanding.map(s => `<div class="row-between text-sm" style="padding:6px 0;border-bottom:1px solid #f8fafc"><span>${esc(s.userName)}</span><strong class="text-red">${fmtRp(s.outstanding)}</strong></div>`).join('') + `</div>`;
   }
   html += !data.list.length ? '<div class="empty"><p>Belum ada kasbon</p></div>' :
     data.list.map(k => `
@@ -885,7 +959,6 @@ function tabKasbon() {
         <div class="list-item-main">
           <div class="list-item-title">${esc(k.userName)}</div>
           <div class="list-item-sub">${esc(k.tanggal)} · ${esc(k.tipe)}</div>
-          ${k.keterangan ? `<div class="text-xs text-gray mt-2">${esc(k.keterangan)}</div>` : ''}
           <span class="badge ${k.status === 'Outstanding' ? 'badge-warn' : k.status === 'Lunas' ? 'badge-success' : 'badge-gray'} mt-2">${esc(k.status)}</span>
         </div>
         <div class="text-right">
@@ -900,24 +973,124 @@ function tabKasbon() {
 }
 
 // ============================================
-//  TAB: GAJI (lama)
+//  TAB: KARTU STOK / RETUR / HARGA / TUTUP BUKU
+// ============================================
+function tabKartuStok() {
+  const saldo = S.stokSaldo || [];
+  const list = S.kartuStok || [];
+  let html = `<div class="row-between mb-3"><h3 class="card-title" style="margin:0">${ico('boxes')} Stok</h3>
+    <button class="btn btn-ghost btn-sm" data-act="refresh-stok">${ico('refresh','ico-sm')}</button></div>`;
+  html += `<div class="card"><div class="card-title">Saldo</div>`;
+  if (!saldo.length) html += '<p class="text-xs text-gray">Belum ada pergerakan.</p>';
+  else html += saldo.map(s => `
+    <div class="row-between text-sm" style="padding:8px 0;border-bottom:1px solid #f8fafc">
+      <div style="min-width:0;flex:1"><strong>${esc(s.nama)}</strong><div class="text-xs text-gray">In ${s.masuk} · Out ${s.keluar}</div></div>
+      <strong class="${s.saldo < 10 ? 'text-red' : 'text-green'}">${s.saldo}</strong>
+    </div>`).join('');
+  html += `</div>`;
+  if (list.length) {
+    html += `<div class="card"><div class="card-title">Riwayat (50)</div>`;
+    html += list.slice(0, 50).map(k => `
+      <div class="row-between text-xs" style="padding:8px 0;border-bottom:1px solid #f8fafc">
+        <div style="min-width:0;flex:1">
+          <strong>${esc(k.nama)}</strong>
+          <div class="text-gray">${esc(k.tanggal)} · ${esc(k.tipe)} · ${esc(k.lapakNama || '-')}</div>
+        </div>
+        <div class="text-right">
+          ${k.masuk > 0 ? `<div class="text-green font-bold">+${k.masuk}</div>` : ''}
+          ${k.keluar > 0 ? `<div class="text-red font-bold">-${k.keluar}</div>` : ''}
+          <div class="text-gray">${k.saldo}</div>
+        </div>
+      </div>`).join('');
+    html += `</div>`;
+  }
+  return html;
+}
+
+function tabRetur() {
+  const list = S.retur || [];
+  const pending = list.filter(r => r.status === 'pending');
+  let html = `<h3 class="card-title">${ico('return')} Retur (${pending.length})</h3>`;
+  if (!pending.length) html += '<div class="empty"><p>Tidak ada retur pending.</p></div>';
+  else html += pending.map(r => `
+    <div class="card">
+      <div class="row-between mb-2">
+        <div><strong>${esc(r.nama)}</strong><div class="text-xs text-gray">${esc(r.dariLapakNama)} · ${esc(r.tanggal)}</div></div>
+        <span class="badge ${r.kondisi === 'Layak' ? 'badge-success' : 'badge-danger'}">${esc(r.kondisi)}</span>
+      </div>
+      <div class="text-sm mb-3">Qty: <strong>${r.qty}</strong></div>
+      <div class="row" style="gap:8px">
+        <button class="btn btn-danger btn-sm" style="flex:1" data-act="reject-retur" data-id="${esc(r.id)}">Tolak</button>
+        <button class="btn btn-success btn-sm" style="flex:1" data-act="approve-retur" data-id="${esc(r.id)}">Setujui</button>
+      </div>
+    </div>`).join('');
+  return html;
+}
+
+function tabHargaTingkat() {
+  const list = S.hargaTingkat || [];
+  const katMap = {}; S.katalog.forEach(k => katMap[k.id] = k);
+  return `
+    <div class="row-between mb-3">
+      <h3 class="card-title" style="margin:0">${ico('tag')} Harga Grosir</h3>
+      <button class="btn btn-primary btn-sm" data-act="add-harga-tingkat">+ Tambah</button>
+    </div>
+    ${!list.length ? '<div class="empty"><p>Belum ada harga khusus.</p></div>' :
+      list.map(h => {
+        const k = katMap[h.katalogId] || {};
+        return `<div class="list-item">
+          <div class="list-item-main">
+            <div class="list-item-title">${esc(k.nama || h.katalogId)}</div>
+            <div class="list-item-sub">${esc(h.tipePelanggan)} · min ${h.minimalQty} pcs</div>
+            <div class="text-sm mt-2 font-bold text-green">${fmtRp(h.hargaJual)}</div>
+          </div>
+          <div class="list-item-actions">
+            <button class="action-btn action-edit" data-act="edit-harga-tingkat" data-id="${esc(h.id)}">${ico('edit','ico-sm')}</button>
+            <button class="action-btn action-del" data-act="del-harga-tingkat" data-id="${esc(h.id)}">${ico('trash','ico-sm')}</button>
+          </div>
+        </div>`;
+      }).join('')}`;
+}
+
+function tabTutupBuku() {
+  const list = S.tutupBuku || [];
+  return `
+    <div class="row-between mb-3">
+      <h3 class="card-title" style="margin:0">${ico('lock')} Tutup Buku</h3>
+      <button class="btn btn-primary btn-sm" data-act="add-tutup-buku">+ Kunci</button>
+    </div>
+    ${!list.length ? '<div class="empty"><p>Belum ada periode terkunci.</p></div>' :
+      list.map(t => `
+        <div class="list-item">
+          <div class="list-item-main">
+            <div class="list-item-title">${esc(t.periode)}</div>
+            <div class="list-item-sub">${esc(t.ditutupAt)} · ${esc(t.ditutupBy)}</div>
+          </div>
+          <div class="row" style="gap:4px">
+            <span class="badge ${t.status === 'Locked' ? 'badge-warn' : 'badge-success'}">${esc(t.status)}</span>
+            ${t.status === 'Locked' ? `<button class="action-btn action-del" data-act="unlock-periode" data-id="${esc(t.id)}">${ico('key','ico-sm')}</button>` : ''}
+          </div>
+        </div>`).join('')}`;
+}
+
+// ============================================
+//  TAB: GAJI LAMA / PESANAN / NOTIFIKASI / PROFIL
 // ============================================
 function tabGajiRiwayat() {
   const data = S.gaji || [];
-  let html = `<h3 class="card-title">${ico('money')} Riwayat Gaji (Single Bayar)</h3>
-    <p class="text-xs text-gray mb-3">Untuk payroll bulanan, gunakan menu <strong>Rekap Payroll</strong>.</p>`;
+  let html = `<h3 class="card-title">${ico('money')} Riwayat Gaji</h3>`;
   if (!data.length) html += '<div class="empty"><p>Belum ada riwayat</p></div>';
   else html += data.map(g => `
     <div class="list-item">
       <div class="list-item-main">
         <div class="list-item-title">${esc(g.userName)}</div>
-        <div class="list-item-sub">Periode: ${esc(g.periode)}</div>
-        <div class="text-xs text-gray mt-2">Pokok: ${fmtRp(g.gajiPokok)} · Tunjangan: ${fmtRp(g.tunjangan)} · Potongan: <span class="text-red">${fmtRp(g.potonganKasbon)}</span></div>
+        <div class="list-item-sub">${esc(g.periode)}</div>
       </div>
-      <div class="text-right"><div class="text-sm font-bold text-green">${fmtRp(g.gajiBersih)}</div></div>
+      <div class="text-sm font-bold text-green">${fmtRp(g.gajiBersih)}</div>
     </div>`).join('');
   return html;
 }
+
 function tabSettingGaji() {
   const list = S.settingGaji || [];
   return `
@@ -925,7 +1098,7 @@ function tabSettingGaji() {
       <h3 class="card-title" style="margin:0">${ico('money')} Setting Gaji Lama</h3>
       <button class="btn btn-primary btn-sm" data-act="add-setting-gaji">+ Tambah</button>
     </div>
-    <p class="text-xs text-gray mb-3">Modul lama. Untuk sistem baru, pakai <strong>Setting Payroll</strong>.</p>
+    <p class="text-xs text-gray mb-3">Gunakan <strong>Setting Payroll</strong> untuk sistem baru.</p>
     ${!list.length ? '<div class="empty"><p>Belum ada setting</p></div>' :
       list.map(g => `
         <div class="list-item">
@@ -938,21 +1111,7 @@ function tabSettingGaji() {
           </div>
         </div>`).join('')}`;
 }
-function tabRekapGaji() {
-  const L = S.rekapGaji;
-  if (!L) return '<div class="empty">Memuat...</div>';
-  return `
-    <h3 class="card-title">${ico('money')} Rekap Gaji Lama</h3>
-    <div class="grid-3 mb-3">
-      <div class="kpi"><div class="kpi-label">Karyawan</div><div class="kpi-value">${L.list.length}</div></div>
-      <div class="kpi"><div class="kpi-label">Gaji Pokok</div><div class="kpi-value" style="font-size:12px">${fmtRp(L.totals.gajiPokok)}</div></div>
-      <div class="kpi"><div class="kpi-label">Kasbon</div><div class="kpi-value text-red" style="font-size:12px">${fmtRp(L.totals.potonganKasbon)}</div></div>
-    </div>`;
-}
 
-// ============================================
-//  TAB: PESANAN
-// ============================================
 function tabPesanan() {
   const list = S.pesanan || [];
   const statusCls = { Draft:'badge-gray', Ordered:'badge-blue', Received:'badge-success', Cancelled:'badge-danger' };
@@ -976,208 +1135,6 @@ function tabPesanan() {
     ${!list.length ? '<div class="empty"><p>Belum ada pesanan</p></div>' : ''}`;
 }
 
-// ============================================
-//  TAB: LAPORAN
-// ============================================
-function tabLaporan() {
-  const L = S.laporan;
-  if (!L) return '<div class="empty">Memuat laporan...</div>';
-  const maxQty = L.topItems.length ? Math.max(...L.topItems.map(i => i.qtyLaku)) : 1;
-  return `
-    <h3 class="card-title">${ico('bar')} Laporan & Analitik</h3>
-    <div class="card">
-      <div class="form-grid">
-        <div class="field"><label>Dari</label><input type="date" data-lap-dari value="${L.periode.dari}" class="input field-sm"></div>
-        <div class="field"><label>Sampai</label><input type="date" data-lap-sampai value="${L.periode.sampai}" class="input field-sm"></div>
-      </div>
-      <button class="btn btn-primary btn-block btn-sm" data-act="load-laporan">Terapkan Filter</button>
-    </div>
-    <div class="grid-3 mb-3">
-      <div class="kpi"><div class="kpi-label">Omzet</div><div class="kpi-value text-green" style="font-size:13px">${fmtRp(L.ringkasan.totalOmzet)}</div></div>
-      <div class="kpi"><div class="kpi-label">Profit</div><div class="kpi-value text-blue" style="font-size:13px">${fmtRp(L.ringkasan.totalProfit)}</div></div>
-      <div class="kpi"><div class="kpi-label">Qty</div><div class="kpi-value text-amber">${L.ringkasan.totalQty}</div></div>
-    </div>
-    <div class="card">
-      <div class="card-title">Top 10 Item Terlaris</div>
-      ${!L.topItems.length ? '<p class="text-xs text-gray">Belum ada data.</p>' :
-        `<div class="bar-list">${L.topItems.map((it, i) => `
-          <div class="bar-row">
-            <div class="bar-meta"><span>${i + 1}. ${esc(it.nama)}</span><strong>${it.qtyLaku} pcs</strong></div>
-            <div class="bar-track"><div class="bar-fill" style="width:${(it.qtyLaku / maxQty * 100).toFixed(1)}%"></div></div>
-          </div>`).join('')}</div>`}
-    </div>
-    <div class="card">
-      <div class="card-title">Performa Supplier</div>
-      ${!L.perSupplier.length ? '<p class="text-xs text-gray">Belum ada data.</p>' :
-        L.perSupplier.map(s => `
-          <div style="padding:8px 0;border-bottom:1px solid var(--gray-100)">
-            <div class="row-between text-sm mb-2"><strong>${esc(s.nama)}</strong><span class="text-gray">${s.margin.toFixed(1)}% margin</span></div>
-            <div class="row-between text-xs text-gray"><span>${s.qtyLaku} pcs · ${s.itemCount} item</span><span class="text-green font-semibold">${fmtRp(s.omzet)}</span></div>
-          </div>`).join('')}
-    </div>
-    <div class="card">
-      <div class="card-title">Performa Lapak</div>
-      ${!L.perLapak.length ? '<p class="text-xs text-gray">Belum ada data.</p>' :
-        L.perLapak.map(l => `
-          <div style="padding:8px 0;border-bottom:1px solid var(--gray-100)">
-            <div class="row-between text-sm mb-2"><strong>${esc(l.nama)}</strong><span class="text-gray">${l.margin.toFixed(1)}%</span></div>
-            <div class="row-between text-xs text-gray"><span>${l.qtyLaku} pcs · ${l.setoranCount} setoran</span><span class="text-green font-semibold">${fmtRp(l.omzet)}</span></div>
-          </div>`).join('')}
-    </div>
-    <button class="btn btn-success btn-block" data-act="export-csv">${ico('csv','ico-sm')} Export CSV</button>`;
-}
-
-// ============================================
-//  TAB: USERS
-// ============================================
-function tabUsers() {
-  return `
-    <div class="row-between mb-3">
-      <h3 class="card-title" style="margin:0">${ico('users')} Users</h3>
-      <button class="btn btn-primary btn-sm" data-act="add-user">+ Tambah</button>
-    </div>
-    ${!S.users.length ? '<div class="empty"><p>Belum ada user</p></div>' :
-      S.users.map(u => `
-        <div class="list-item">
-          <div class="list-item-main">
-            <div class="list-item-title">${esc(u.name)}</div>
-            <div class="list-item-sub">@${esc(u.username)} · ${esc(u.role)}${u.lapakNama ? ' · ' + esc(u.lapakNama) : ''}</div>
-            ${u.lapakIds && u.lapakIds !== u.lapakId ? `<div class="text-xs text-gray mt-1">Akses: ${esc(u.lapakIds)}</div>` : ''}
-            ${u.mustChangePassword ? '<span class="badge badge-warn mt-1">Perlu ganti pwd</span>' : ''}
-          </div>
-          <div class="list-item-actions">
-            <button class="action-btn action-info" data-act="reset-user-pwd" data-id="${esc(u.id)}" title="Reset Password">${ico('key','ico-sm')}</button>
-            <button class="action-btn action-edit" data-act="edit-user" data-id="${esc(u.id)}">${ico('edit','ico-sm')}</button>
-            <button class="action-btn action-del" data-act="del-user" data-id="${esc(u.id)}">${ico('trash','ico-sm')}</button>
-          </div>
-        </div>`).join('')}`;
-}
-
-// ============================================
-//  TAB: KARTU STOK
-// ============================================
-function tabKartuStok() {
-  const saldo = S.stokSaldo || [];
-  const list = S.kartuStok || [];
-  let html = `<div class="row-between mb-3"><h3 class="card-title" style="margin:0">${ico('boxes')} Stok Real-Time</h3>
-    <button class="btn btn-ghost btn-sm" data-act="refresh-stok">${ico('refresh','ico-sm')}</button></div>`;
-  html += `<div class="card"><div class="card-title">Saldo per Item</div>`;
-  if (!saldo.length) html += '<p class="text-xs text-gray">Belum ada pergerakan stok.</p>';
-  else html += saldo.map(s => `
-    <div class="row-between text-sm" style="padding:6px 0;border-bottom:1px solid var(--gray-100)">
-      <div style="min-width:0;flex:1"><strong>${esc(s.nama)}</strong><div class="text-xs text-gray">In ${s.masuk} · Out ${s.keluar}</div></div>
-      <strong class="${s.saldo < 10 ? 'text-red' : 'text-green'}">${s.saldo}</strong>
-    </div>`).join('');
-  html += `</div>`;
-  html += `<div class="card"><div class="card-title">Riwayat (50 terakhir)</div>`;
-  if (!list.length) html += '<p class="text-xs text-gray">Belum ada.</p>';
-  else html += list.slice(0, 50).map(k => `
-    <div class="row-between text-xs" style="padding:6px 0;border-bottom:1px solid var(--gray-100)">
-      <div style="min-width:0;flex:1">
-        <strong>${esc(k.nama)}</strong>
-        <div class="text-gray">${esc(k.tanggal)} · ${esc(k.tipe)} · ${esc(k.lapakNama || '-')}</div>
-      </div>
-      <div class="text-right">
-        ${k.masuk > 0 ? `<div class="text-green font-bold">+${k.masuk}</div>` : ''}
-        ${k.keluar > 0 ? `<div class="text-red font-bold">-${k.keluar}</div>` : ''}
-        <div class="text-gray">Saldo: ${k.saldo}</div>
-      </div>
-    </div>`).join('');
-  html += `</div>`;
-  return html;
-}
-
-// ============================================
-//  TAB: RETUR
-// ============================================
-function tabRetur() {
-  const list = S.retur || [];
-  const pending = list.filter(r => r.status === 'pending');
-  const done = list.filter(r => r.status !== 'pending').slice(0, 20);
-  let html = `<h3 class="card-title">${ico('return')} Retur Kue (${pending.length} pending)</h3>`;
-  if (!pending.length) html += '<div class="empty"><p>Tidak ada retur pending.</p></div>';
-  else html += pending.map(r => `
-    <div class="card">
-      <div class="row-between mb-2">
-        <div><strong>${esc(r.nama)}</strong><div class="text-xs text-gray">${esc(r.dariLapakNama)} · ${esc(r.tanggal)}</div></div>
-        <span class="badge ${r.kondisi === 'Layak' ? 'badge-success' : 'badge-danger'}">${esc(r.kondisi)}</span>
-      </div>
-      <div class="text-sm mb-2">Qty: <strong>${r.qty}</strong></div>
-      <div class="row" style="gap:6px">
-        <button class="btn btn-danger btn-sm" style="flex:1" data-act="reject-retur" data-id="${esc(r.id)}">Tolak</button>
-        <button class="btn btn-success btn-sm" style="flex:1" data-act="approve-retur" data-id="${esc(r.id)}">Setujui</button>
-      </div>
-    </div>`).join('');
-  html += `<h3 class="card-title mt-3">${ico('file')} Riwayat Retur</h3>`;
-  if (!done.length) html += '<div class="empty"><p>Belum ada riwayat.</p></div>';
-  else html += done.map(r => `
-    <div class="list-item">
-      <div class="list-item-main">
-        <div class="list-item-title">${esc(r.nama)} · ${r.qty}</div>
-        <div class="list-item-sub">${esc(r.dariLapakNama)} · ${esc(r.tanggal)}</div>
-      </div>
-      <span class="badge ${r.status === 'approved' ? 'badge-success' : 'badge-danger'}">${esc(r.status)}</span>
-    </div>`).join('');
-  return html;
-}
-
-// ============================================
-//  TAB: HARGA TINGKAT
-// ============================================
-function tabHargaTingkat() {
-  const list = S.hargaTingkat || [];
-  const katMap = {}; S.katalog.forEach(k => katMap[k.id] = k);
-  return `
-    <div class="row-between mb-3">
-      <h3 class="card-title" style="margin:0">${ico('tag')} Harga Bertingkat</h3>
-      <button class="btn btn-primary btn-sm" data-act="add-harga-tingkat">+ Tambah</button>
-    </div>
-    <p class="text-xs text-gray mb-3">Harga khusus untuk Reseller/Grosir.</p>
-    ${!list.length ? '<div class="empty"><p>Belum ada harga khusus.</p></div>' :
-      list.map(h => {
-        const k = katMap[h.katalogId] || {};
-        return `<div class="list-item">
-          <div class="list-item-main">
-            <div class="list-item-title">${esc(k.nama || h.katalogId)}</div>
-            <div class="list-item-sub">${esc(h.tipePelanggan)} · min ${h.minimalQty} pcs</div>
-            <div class="text-sm mt-2 font-bold text-green">${fmtRp(h.hargaJual)}</div>
-          </div>
-          <div class="list-item-actions">
-            <button class="action-btn action-edit" data-act="edit-harga-tingkat" data-id="${esc(h.id)}">${ico('edit','ico-sm')}</button>
-            <button class="action-btn action-del" data-act="del-harga-tingkat" data-id="${esc(h.id)}">${ico('trash','ico-sm')}</button>
-          </div>
-        </div>`;
-      }).join('')}`;
-}
-
-// ============================================
-//  TAB: TUTUP BUKU
-// ============================================
-function tabTutupBuku() {
-  const list = S.tutupBuku || [];
-  return `
-    <div class="row-between mb-3">
-      <h3 class="card-title" style="margin:0">${ico('lock')} Tutup Buku</h3>
-      <button class="btn btn-primary btn-sm" data-act="add-tutup-buku">+ Kunci Periode</button>
-    </div>
-    <p class="text-xs text-gray mb-3">Setoran di periode terkunci tidak bisa diedit/diapprove ulang.</p>
-    ${!list.length ? '<div class="empty"><p>Belum ada periode terkunci.</p></div>' :
-      list.map(t => `
-        <div class="list-item">
-          <div class="list-item-main">
-            <div class="list-item-title">${esc(t.periode)}</div>
-            <div class="list-item-sub">${esc(t.ditutupAt)} · oleh ${esc(t.ditutupBy)}</div>
-          </div>
-          <div class="row" style="gap:4px">
-            <span class="badge ${t.status === 'Locked' ? 'badge-warn' : 'badge-success'}">${esc(t.status)}</span>
-            ${t.status === 'Locked' ? `<button class="action-btn action-del" data-act="unlock-periode" data-id="${esc(t.id)}">${ico('key','ico-sm')}</button>` : ''}
-          </div>
-        </div>`).join('')}`;
-}
-
-// ============================================
-//  TAB: NOTIFIKASI
-// ============================================
 function tabNotifikasi() {
   const list = S.notifikasi || [];
   return `
@@ -1187,7 +1144,7 @@ function tabNotifikasi() {
     </div>
     ${!list.length ? '<div class="empty"><p>Tidak ada notifikasi.</p></div>' :
       list.map(n => `
-        <div class="card" style="${n.status === 'unread' ? 'border:1px solid var(--amber)' : ''}">
+        <div class="card">
           <div class="row-between mb-2">
             <strong class="text-sm">${esc(n.subjek)}</strong>
             <span class="badge ${n.status === 'unread' ? 'badge-warn' : 'badge-gray'}">${esc(n.status)}</span>
@@ -1200,25 +1157,21 @@ function tabNotifikasi() {
         </div>`).join('')}`;
 }
 
-// ============================================
-//  TAB: PROFIL
-// ============================================
 function tabProfil() {
   return `
-    <h3 class="card-title">${ico('user')} Profil & Pengaturan</h3>
     <div class="card">
-      <div class="field"><label class="text-gray">Username</label><strong>${esc(S.user.username)}</strong></div>
-      <div class="field"><label class="text-gray">Nama</label><strong>${esc(S.user.name)}</strong></div>
-      <div class="field"><label class="text-gray">Role</label><strong>${esc(S.user.role)}</strong></div>
+      <div class="field"><label>Username</label><strong>${esc(S.user.username)}</strong></div>
+      <div class="field"><label>Nama</label><strong>${esc(S.user.name)}</strong></div>
+      <div class="field" style="margin-bottom:0"><label>Role</label><strong>${esc(S.user.role)}</strong></div>
     </div>
     <button class="btn btn-primary btn-block mb-2" data-act="change-password">${ico('key','ico-sm')} Ganti Password</button>
-    <button class="btn btn-ghost btn-block mb-2" data-act="backup-all">${ico('download','ico-sm')} Download Backup (JSON)</button>
-    <button class="btn btn-ghost btn-block mb-2" data-act="restore-modal">${ico('upload','ico-sm')} Restore dari Backup</button>
+    <button class="btn btn-ghost btn-block mb-2" data-act="backup-all">${ico('download','ico-sm')} Download Backup</button>
+    <button class="btn btn-ghost btn-block mb-2" data-act="restore-modal">${ico('upload','ico-sm')} Restore</button>
     <button class="btn btn-danger btn-block" data-act="logout">${ico('out','ico-sm')} Logout</button>`;
 }
 
 // ============================================
-//  TAB: ABSENSI (Fase 1)
+//  FASE 1 — ABSENSI / BONUS / PAYROLL / PROFIT
 // ============================================
 function tabAbsensi() {
   const f = S.absensiFilter || {};
@@ -1226,24 +1179,21 @@ function tabAbsensi() {
   const bulan = f.bulan || monthISO();
   const perUser = {};
   list.forEach(a => {
-    if (!perUser[a.userId]) perUser[a.userId] = { userId: a.userId, userName: a.userName, hadir: 0, telat: 0, setengah: 0, list: [] };
+    if (!perUser[a.userId]) perUser[a.userId] = { userId: a.userId, userName: a.userName, hadir: 0, telat: 0, setengah: 0 };
     perUser[a.userId].hadir++;
     if (a.jamMasuk) {
       const [hh, mm] = a.jamMasuk.split(':').map(Number);
-      const menit = hh * 60 + mm;
-      if (menit > 5 * 60 + 15) perUser[a.userId].telat++;
+      if (hh * 60 + mm > 5 * 60 + 15) perUser[a.userId].telat++;
     }
     if (a.status === 'SetengahHari') perUser[a.userId].setengah++;
-    perUser[a.userId].list.push(a);
   });
-
-  let html = `<h3 class="card-title">${ico('clock')} Absensi Karyawan</h3>`;
+  let html = `<h3 class="card-title">${ico('clock')} Absensi</h3>`;
   html += `<div class="card">
     <div class="form-grid">
       <div class="field"><label>Bulan</label><input type="month" data-abs-bulan value="${bulan}" class="input field-sm"></div>
       <div class="field"><label>Lapak</label>
         <select data-abs-lapak class="select field-sm">
-          <option value="">Semua Lapak</option>
+          <option value="">Semua</option>
           ${S.lapak.map(l => `<option value="${esc(l.id)}" ${f.lapakId === l.id ? 'selected' : ''}>${esc(l.nama)}</option>`).join('')}
         </select>
       </div>
@@ -1251,12 +1201,11 @@ function tabAbsensi() {
     <button class="btn btn-primary btn-block btn-sm" data-act="load-absensi">Terapkan</button>
   </div>`;
   html += `<div class="row-between mb-3">
-    <strong class="text-sm">Rekap Kehadiran (${bulanLabel(bulan)})</strong>
-    <button class="btn btn-ghost btn-sm" data-act="isi-absensi-form">${ico('plus','ico-sm')} Isi Manual</button>
+    <strong class="text-sm">Rekap (${bulanLabel(bulan)})</strong>
+    <button class="btn btn-ghost btn-sm" data-act="isi-absensi-form">${ico('plus','ico-sm')} Isi</button>
   </div>`;
-
   const users = Object.values(perUser);
-  if (!users.length) html += '<div class="empty"><p>Belum ada data absensi bulan ini.</p></div>';
+  if (!users.length) html += '<div class="empty"><p>Belum ada data.</p></div>';
   else html += users.map(u => {
     const skor = Math.max(0, Math.min(100, 100 - (u.telat * 2) - (u.setengah * 1)));
     const skorCls = skor >= 90 ? 'skor-high' : skor >= 70 ? 'skor-mid' : 'skor-low';
@@ -1272,11 +1221,12 @@ function tabAbsensi() {
           ${u.telat > 0 ? `<span class="kehadiran-tag telat">Telat ${u.telat}</span>` : ''}
           ${u.setengah > 0 ? `<span class="kehadiran-tag setengah">Setengah ${u.setengah}</span>` : ''}
         </div>
-        <button class="btn btn-ghost btn-sm btn-block mt-2" data-act="lihat-absensi-user" data-id="${esc(u.userId)}">Lihat Detail</button>
+        <button class="btn btn-ghost btn-sm btn-block mt-3" data-act="lihat-absensi-user" data-id="${esc(u.userId)}">Detail</button>
       </div>`;
   }).join('');
   return html;
 }
+
 function tabAbsensiHariIni() {
   const list = S.absensiList || [];
   const hariIni = todayISO();
@@ -1285,13 +1235,13 @@ function tabAbsensiHariIni() {
     <p class="text-xs text-gray mb-3">${fmtDateID(new Date())}</p>`;
   const karyawans = S.users.filter(u => u.role === 'karyawan' && u.aktif);
   if (!karyawans.length) return html + '<div class="empty"><p>Tidak ada karyawan aktif.</p></div>';
-  html += karyawans.map(u => {
+  html += `<div class="card">${karyawans.map(u => {
     const a = today.find(x => String(x.userId) === String(u.id));
     if (!a) {
       return `<div class="absensi-row">
         <div class="info">
           <div class="name">${esc(u.name)}</div>
-          <div class="meta"><span class="status-pill status-belum">Belum Absen</span></div>
+          <div class="meta"><span class="status-pill status-belum" style="background:var(--surface-2);color:var(--ink-4)">Belum Absen</span></div>
         </div>
         <button class="btn btn-primary btn-sm" data-act="isi-absensi-user" data-userid="${esc(u.id)}">Isi</button>
       </div>`;
@@ -1299,24 +1249,21 @@ function tabAbsensiHariIni() {
     return `<div class="absensi-row">
       <div class="info">
         <div class="name">${esc(u.name)}</div>
-        <div class="meta">${esc(a.lapakNama)} · ${esc(a.status)}${a.filledBy && a.filledBy !== u.username ? ` · diisi oleh ${esc(a.filledBy)}` : ''}</div>
+        <div class="meta">${esc(a.lapakNama)} · ${esc(a.status)}${a.filledBy && a.filledBy !== u.username ? ` · oleh ${esc(a.filledBy)}` : ''}</div>
       </div>
       <div class="time">
         <div><strong>${esc(a.jamMasuk)}</strong> → <strong>${esc(a.jamKeluar || '...')}</strong></div>
         <div class="text-xs text-gray">${a.jamKerja ? a.jamKerja + ' jam' : ''}</div>
       </div>
-      <div style="display:flex;gap:4px;margin-left:8px">
+      <div class="row" style="gap:4px;margin-left:8px">
         <button class="action-btn action-edit" data-act="edit-absensi" data-id="${esc(a.id)}">${ico('edit','ico-sm')}</button>
         <button class="action-btn action-del" data-act="del-absensi" data-id="${esc(a.id)}">${ico('trash','ico-sm')}</button>
       </div>
     </div>`;
-  }).join('');
+  }).join('')}</div>`;
   return html;
 }
 
-// ============================================
-//  TAB: BONUS ANTAR (Fase 1)
-// ============================================
 function tabBonusAntar() {
   const f = S.bonusFilter || {};
   const list = S.bonusAntar || [];
@@ -1324,7 +1271,7 @@ function tabBonusAntar() {
   const total = list.reduce((s, b) => s + (b.nominal || 0), 0);
   return `
     <div class="row-between mb-3">
-      <h3 class="card-title" style="margin:0">${ico('truck')} Bonus Mengantar</h3>
+      <h3 class="card-title" style="margin:0">${ico('truck')} Bonus Antar</h3>
       <button class="btn btn-primary btn-sm" data-act="add-bonus-antar">+ Tambah</button>
     </div>
     <div class="card">
@@ -1339,18 +1286,17 @@ function tabBonusAntar() {
       </div>
       <button class="btn btn-primary btn-block btn-sm" data-act="load-bonus">Terapkan</button>
     </div>
-    <div class="kpi-hero">
-      <div class="kpi-hero-label">Total Bonus (${bulanLabel(bulan)})</div>
-      <div class="kpi-hero-value">${fmtRp(total)}</div>
-      <div class="text-xs opacity-90">${list.length} pengantaran</div>
+    <div class="hero hero-amber">
+      <div class="hero-label">Total Bonus</div>
+      <div class="hero-value">${fmtRp(total)}</div>
+      <div class="hero-sub">${list.length} pengantaran</div>
     </div>
     ${!list.length ? '<div class="empty"><p>Belum ada bonus antar.</p></div>' :
       list.map(b => `
         <div class="list-item">
           <div class="list-item-main">
             <div class="list-item-title">${esc(b.userName)}</div>
-            <div class="list-item-sub">${esc(b.tanggal)} · ${esc(b.tujuan || '-')} ${b.jarakKm > 0 ? '· ' + b.jarakKm + ' km' : ''}</div>
-            ${b.keterangan ? `<div class="text-xs text-gray mt-2">${esc(b.keterangan)}</div>` : ''}
+            <div class="list-item-sub">${esc(b.tanggal)} · ${esc(b.tujuan || '-')}${b.jarakKm > 0 ? ' · ' + b.jarakKm + ' km' : ''}</div>
           </div>
           <div class="text-right">
             <div class="text-sm font-bold text-green">${fmtRp(b.nominal)}</div>
@@ -1362,15 +1308,11 @@ function tabBonusAntar() {
         </div>`).join('')}`;
 }
 
-// ============================================
-//  TAB: SETTING PAYROLL (Fase 1)
-// ============================================
 function tabSettingPayroll() {
   const list = S.settingPayroll || [];
   const heList = S.hariEfektif || [];
   const bulan = monthISO();
   let html = `<h3 class="card-title">${ico('settings')} Setting Payroll</h3>`;
-  html += `<p class="text-xs text-gray mb-3">Atur bonus merekap & tunjangan lapak per lapak.</p>`;
   html += `<div class="row-between mb-3">
     <strong class="text-sm">Rate per Lapak</strong>
     <button class="btn btn-primary btn-sm" data-act="add-setting-payroll">+ Tambah</button>
@@ -1380,8 +1322,7 @@ function tabSettingPayroll() {
     <div class="list-item">
       <div class="list-item-main">
         <div class="list-item-title">${esc(s.lapakNama)}</div>
-        <div class="list-item-sub">Bonus Merekap: <strong>${fmtRp(s.bonusMerekap)}</strong> · Tunjangan: <strong>${fmtRp(s.tunjanganLapak)}</strong></div>
-        <div class="text-xs text-gray mt-1">Berlaku dari: ${esc(s.berlakuDari)}</div>
+        <div class="list-item-sub">Merekap: <strong>${fmtRp(s.bonusMerekap)}</strong> · Tunjangan: <strong>${fmtRp(s.tunjanganLapak)}</strong></div>
       </div>
       <div class="list-item-actions">
         <button class="action-btn action-edit" data-act="edit-setting-payroll" data-id="${esc(s.id)}">${ico('edit','ico-sm')}</button>
@@ -1390,33 +1331,27 @@ function tabSettingPayroll() {
     </div>`).join('');
   html += `<div class="divider"></div>`;
   html += `<div class="row-between mb-3">
-    <strong class="text-sm">Hari Efektif per Bulan</strong>
+    <strong class="text-sm">Hari Efektif</strong>
     <button class="btn btn-ghost btn-sm" data-act="auto-hari-efektif" data-bulan="${bulan}">${ico('refresh','ico-sm')} Auto</button>
   </div>`;
   html += `<div class="card">
     <div class="field"><label>Bulan</label><input type="month" data-he-bulan value="${bulan}" class="input field-sm"></div>
-    <button class="btn btn-ghost btn-block btn-sm" data-act="load-hari-efektif">Muat Hari Efektif</button>
+    <button class="btn btn-ghost btn-block btn-sm" data-act="load-hari-efektif">Muat</button>
   </div>`;
-  if (!heList.length) html += '<div class="empty"><p>Belum ada data hari efektif.</p></div>';
-  else html += heList.map(h => `
+  if (heList.length) html += heList.map(h => `
     <div class="list-item">
       <div class="list-item-main">
         <div class="list-item-title">${esc(h.lapakNama)}</div>
         <div class="list-item-sub">${esc(bulanLabel(h.bulan))}</div>
       </div>
-      <div class="text-right">
+      <div class="row" style="gap:8px;align-items:center">
         <strong class="text-amber">${h.jumlahHari} hari</strong>
-        <div class="mt-2">
-          <button class="action-btn action-edit" data-act="edit-hari-efektif" data-id="${esc(h.id)}" data-bulan="${esc(h.bulan)}" data-lapak="${esc(h.lapakId)}" data-hari="${h.jumlahHari}">${ico('edit','ico-sm')}</button>
-        </div>
+        <button class="action-btn action-edit" data-act="edit-hari-efektif" data-id="${esc(h.id)}" data-bulan="${esc(h.bulan)}" data-lapak="${esc(h.lapakId)}" data-hari="${h.jumlahHari}">${ico('edit','ico-sm')}</button>
       </div>
     </div>`).join('');
   return html;
 }
 
-// ============================================
-//  TAB: PAYROLL (Fase 1)
-// ============================================
 function tabPayroll() {
   const bulan = S.payrollBulan || monthISO();
   const data = S.payrollData;
@@ -1424,38 +1359,38 @@ function tabPayroll() {
   let html = `<h3 class="card-title">${ico('money')} Rekap Payroll</h3>`;
   html += `<div class="card">
     <div class="field"><label>Bulan</label><input type="month" data-payroll-bulan value="${bulan}" class="input field-sm"></div>
-    <button class="btn btn-primary btn-block btn-sm" data-act="load-payroll">Tampilkan Rekap</button>
+    <button class="btn btn-primary btn-block btn-sm" data-act="load-payroll">Tampilkan</button>
   </div>`;
   if (!data) {
-    html += `<div class="alert alert-info">${ico('inbox','ico-sm')}<span>Pilih bulan lalu klik "Tampilkan Rekap".</span></div>`;
+    html += `<div class="alert alert-info">${ico('inbox','ico-sm')}<span>Pilih bulan lalu klik Tampilkan.</span></div>`;
     if (hist.length) {
-      html += `<h3 class="card-title mt-3">${ico('file')} Riwayat Bayar</h3>`;
+      html += `<h3 class="card-title mt-3">${ico('file')} Riwayat</h3>`;
       html += hist.slice(0, 20).map(h => `
         <div class="list-item">
           <div class="list-item-main">
             <div class="list-item-title">${esc(h.userName)}</div>
             <div class="list-item-sub">${esc(bulanLabel(h.bulan))} · ${esc(h.dibayarAt)}</div>
           </div>
-          <div class="text-right"><div class="text-sm font-bold text-green">${fmtRp(h.totalBersih)}</div></div>
+          <div class="text-sm font-bold text-green">${fmtRp(h.totalBersih)}</div>
         </div>`).join('');
     }
     return html;
   }
   html += `<div class="grid-3 mb-3">
     <div class="kpi"><div class="kpi-label">Karyawan</div><div class="kpi-value">${data.list.length}</div></div>
-    <div class="kpi"><div class="kpi-label">Total Bayar</div><div class="kpi-value text-green" style="font-size:12px">${fmtRp(data.totals.totalBersih)}</div></div>
+    <div class="kpi"><div class="kpi-label">Total</div><div class="kpi-value text-green" style="font-size:12px">${fmtRp(data.totals.totalBersih)}</div></div>
     <div class="kpi"><div class="kpi-label">Kasbon</div><div class="kpi-value text-red" style="font-size:12px">${fmtRp(data.totals.totalKasbon)}</div></div>
   </div>`;
   html += `<div class="row-between mb-3">
-    <strong class="text-sm">Detail per Karyawan</strong>
-    <button class="btn btn-success btn-sm" data-act="bayar-payroll-bulk">${ico('check','ico-sm')} Bayar Terpilih</button>
+    <strong class="text-sm">Detail</strong>
+    <button class="btn btn-success btn-sm" data-act="bayar-payroll-bulk">${ico('check','ico-sm')} Bayar</button>
   </div>`;
   html += data.list.map(x => {
     const skor = x.kehadiran.skor;
     const skorCls = skor >= 90 ? 'skor-high' : skor >= 70 ? 'skor-mid' : 'skor-low';
     return `
       <div class="card">
-        <div class="row mb-3">
+        <div class="row mb-3" style="gap:10px">
           <input type="checkbox" data-payroll-pick data-userid="${esc(x.userId)}" data-total="${x.totalBersih}">
           <div style="flex:1;min-width:0">
             <div class="row-between">
@@ -1463,21 +1398,21 @@ function tabPayroll() {
               <span class="skor-label">${skor}</span>
             </div>
             <div class="kehadiran-cell mt-2">
-              <span class="kehadiran-tag hadir">Hadir ${x.kehadiran.hadir}</span>
-              ${x.kehadiran.telat > 0 ? `<span class="kehadiran-tag telat">Telat ${x.kehadiran.telat}</span>` : ''}
-              ${x.kehadiran.setengahHari > 0 ? `<span class="kehadiran-tag setengah">Setengah ${x.kehadiran.setengahHari}</span>` : ''}
+              <span class="kehadiran-tag hadir">H${x.kehadiran.hadir}</span>
+              ${x.kehadiran.telat > 0 ? `<span class="kehadiran-tag telat">T${x.kehadiran.telat}</span>` : ''}
+              ${x.kehadiran.setengahHari > 0 ? `<span class="kehadiran-tag setengah">½${x.kehadiran.setengahHari}</span>` : ''}
             </div>
           </div>
         </div>
-        <div style="background:var(--gray-50);padding:12px;border-radius:8px">
+        <div class="card-flat" style="padding:12px">
           <div class="text-xs font-semibold text-gray mb-2">Bonus Merekap</div>
           ${x.rincianMerekap.length ? x.rincianMerekap.map(r => `
             <div class="payroll-line">
-              <span class="label">${esc(r.lapakNama)} (${r.hariMerekap}/${r.hariEfektif} × ${fmtRp(r.rate)})</span>
+              <span class="label">${esc(r.lapakNama)} (${r.hariMerekap}/${r.hariEfektif})</span>
               <span class="value">${fmtRp(r.bonus)}</span>
-            </div>`).join('') : '<p class="text-xs text-gray">Belum ada rekap</p>'}
+            </div>`).join('') : '<p class="text-xs text-gray">Belum ada</p>'}
           ${x.totalTunjangan > 0 ? `
-            <div class="text-xs font-semibold text-gray mb-2 mt-3">Tunjangan Lapak</div>
+            <div class="text-xs font-semibold text-gray mb-2 mt-3">Tunjangan</div>
             ${x.rincianTunjangan.map(r => `
               <div class="payroll-line">
                 <span class="label">${esc(r.lapakNama)}</span>
@@ -1504,9 +1439,6 @@ function tabPayroll() {
   return html;
 }
 
-// ============================================
-//  TAB: DASHBOARD PROFIT
-// ============================================
 function tabDashboardProfit() {
   const range = S.profitRange || 30;
   const data = S.dashboardProfit;
@@ -1519,19 +1451,19 @@ function tabDashboardProfit() {
     </div>
   </div>`;
   if (!data) {
-    html += `<div class="alert alert-info">${ico('inbox','ico-sm')}<span>Memuat data profit...</span></div>`;
+    html += `<div class="alert alert-info">${ico('inbox','ico-sm')}<span>Memuat...</span></div>`;
     return html;
   }
   html += `<div class="grid-3 mb-3">
-    <div class="kpi"><div class="kpi-label">Total Omzet</div><div class="kpi-value text-green" style="font-size:13px">${fmtRp(data.totalOmzet)}</div></div>
-    <div class="kpi"><div class="kpi-label">Total Profit</div><div class="kpi-value text-blue" style="font-size:13px">${fmtRp(data.totalProfit)}</div></div>
-    <div class="kpi"><div class="kpi-label">Rata-rata/Hari</div><div class="kpi-value text-amber" style="font-size:13px">${fmtRp(data.avgProfit)}</div></div>
+    <div class="kpi"><div class="kpi-label">Omzet</div><div class="kpi-value text-green" style="font-size:13px">${fmtRp(data.totalOmzet)}</div></div>
+    <div class="kpi"><div class="kpi-label">Profit</div><div class="kpi-value text-blue" style="font-size:13px">${fmtRp(data.totalProfit)}</div></div>
+    <div class="kpi"><div class="kpi-label">Rata-rata</div><div class="kpi-value text-amber" style="font-size:13px">${fmtRp(data.avgProfit)}</div></div>
   </div>`;
   const maxP = Math.max(1, ...data.daily.map(d => d.profit));
   html += `<div class="card">
-    <div class="card-title">Profit Harian (${range} hari)</div>
+    <div class="card-title">Profit Harian</div>
     <div class="grafik-simple">
-      ${data.daily.map(d => `<div class="grafik-bar" style="height:${(d.profit / maxP * 100).toFixed(1)}%" title="${d.tanggal}: ${fmtRp(d.profit)}"></div>`).join('')}
+      ${data.daily.map(d => `<div class="grafik-bar" style="height:${Math.max(3, d.profit / maxP * 100).toFixed(1)}%" title="${d.tanggal}: ${fmtRp(d.profit)}"></div>`).join('')}
     </div>
     <div class="row-between text-xs text-gray mt-2">
       <span>${data.daily[0] ? data.daily[0].tanggal : ''}</span>
@@ -1539,120 +1471,86 @@ function tabDashboardProfit() {
     </div>
   </div>`;
   const sorted = [...data.daily].sort((a, b) => b.profit - a.profit);
-  const best = sorted.slice(0, 3);
-  const worst = sorted.slice(-3).reverse();
   html += `<div class="card">
     <div class="card-title">Hari Terbaik</div>
-    ${best.map(d => `<div class="row-between text-sm" style="padding:4px 0"><span>${esc(d.tanggal)}</span><strong class="text-green">${fmtRp(d.profit)}</strong></div>`).join('')}
+    ${sorted.slice(0, 3).map(d => `<div class="row-between text-sm" style="padding:6px 0"><span>${esc(d.tanggal)}</span><strong class="text-green">${fmtRp(d.profit)}</strong></div>`).join('')}
   </div>`;
   html += `<div class="card">
     <div class="card-title">Hari Terendah</div>
-    ${worst.map(d => `<div class="row-between text-sm" style="padding:4px 0"><span>${esc(d.tanggal)}</span><strong class="text-red">${fmtRp(d.profit)}</strong></div>`).join('')}
+    ${sorted.slice(-3).reverse().map(d => `<div class="row-between text-sm" style="padding:6px 0"><span>${esc(d.tanggal)}</span><strong class="text-red">${fmtRp(d.profit)}</strong></div>`).join('')}
   </div>`;
   return html;
 }
 
 // ============================================
-//  FASE 2 — TAB: KONSINYASI
+//  FASE 2 — KONSINYASI
 // ============================================
 function tabKonsinyasi() {
   const saldo = S.saldoSupplier || [];
   const list = S.konsinyasi || [];
-  const f = S.konsinyasiFilter || {};
   const totalUtang = saldo.reduce((s, x) => s + (x.pending || 0), 0);
-
   let html = `<h3 class="card-title">${ico('truck')} Konsinyasi</h3>`;
-  html += `<div class="kpi-hero">
-    <div class="kpi-hero-label">Total Utang Supplier</div>
-    <div class="kpi-hero-value">${fmtRp(totalUtang)}</div>
-    <div class="text-xs opacity-90">${saldo.filter(s => s.pending > 0).length} supplier belum dibayar</div>
+  html += `<div class="hero hero-amber">
+    <div class="hero-label">Total Utang Supplier</div>
+    <div class="hero-value">${fmtRp(totalUtang)}</div>
+    <div class="hero-sub">${saldo.filter(s => s.pending > 0).length} supplier belum dibayar</div>
   </div>`;
-
   html += `<h3 class="card-title">${ico('list')} Saldo per Supplier</h3>`;
   const withPending = saldo.filter(s => s.pending > 0);
   if (!withPending.length) html += '<div class="empty"><p>Tidak ada utang pending.</p></div>';
   else html += withPending.map(s => `
     <div class="card">
-      <div class="row-between mb-2">
+      <div class="row-between mb-3">
         <div style="min-width:0;flex:1">
           <strong>${esc(s.nama)}</strong>
-          <div class="text-xs text-gray">
-            ${s.tipeTransaksi === 'TitipJual' ? '<span class="badge badge-warn" style="font-size:9px">TITIP JUAL</span>' : '<span class="badge badge-gray" style="font-size:9px">BELI PUTUS</span>'}
-            ${s.pendingCount} transaksi pending
+          <div class="text-xs text-gray mt-1">
+            ${s.tipeTransaksi === 'TitipJual' ? '<span class="badge badge-warn" style="font-size:9px">TITIP</span>' : '<span class="badge badge-gray" style="font-size:9px">BELI</span>'}
+            ${s.pendingCount} transaksi
           </div>
         </div>
-        <div class="text-right">
-          <div class="text-sm font-bold text-red">${fmtRp(s.pending)}</div>
-        </div>
+        <div class="text-sm font-bold text-red">${fmtRp(s.pending)}</div>
       </div>
-      <div class="row" style="gap:6px">
-        <button class="btn btn-ghost btn-sm" data-act="detail-konsinyasi" data-id="${esc(s.supplierId)}" style="flex:1">${ico('eye','ico-sm')} Detail</button>
-        <button class="btn btn-success btn-sm" data-act="bayar-supplier" data-id="${esc(s.supplierId)}" style="flex:1">${ico('money','ico-sm')} Bayar</button>
+      <div class="row" style="gap:8px">
+        <button class="btn btn-ghost btn-sm" data-act="detail-konsinyasi" data-id="${esc(s.supplierId)}" style="flex:1">Detail</button>
+        <button class="btn btn-success btn-sm" data-act="bayar-supplier" data-id="${esc(s.supplierId)}" style="flex:1">Bayar</button>
       </div>
     </div>`).join('');
-
   html += `<div class="divider"></div>`;
-  html += `<h3 class="card-title">${ico('file')} Riwayat Transaksi</h3>
-    <div class="card">
-      <div class="form-grid">
-        <div class="field"><label>Supplier</label>
-          <select data-kons-supplier class="select field-sm">
-            <option value="">Semua</option>
-            ${S.suppliers.filter(s => s.tipeTransaksi === 'TitipJual').map(s => `<option value="${esc(s.id)}" ${f.supplierId === s.id ? 'selected' : ''}>${esc(s.nama)}</option>`).join('')}
-          </select>
-        </div>
-        <div class="field"><label>Status</label>
-          <select data-kons-status class="select field-sm">
-            <option value="">Semua</option>
-            <option value="Pending" ${f.status === 'Pending' ? 'selected' : ''}>Pending</option>
-            <option value="Bayar" ${f.status === 'Bayar' ? 'selected' : ''}>Sudah Dibayar</option>
-          </select>
-        </div>
-      </div>
-      <button class="btn btn-primary btn-block btn-sm" data-act="load-konsinyasi">Terapkan</button>
-    </div>`;
-
-  if (!list.length) html += '<div class="empty"><p>Belum ada transaksi konsinyasi.</p></div>';
-  else html += list.slice(0, 50).map(k => `
+  html += `<h3 class="card-title">${ico('file')} Riwayat Transaksi</h3>`;
+  if (!list.length) html += '<div class="empty"><p>Belum ada transaksi.</p></div>';
+  else html += list.slice(0, 30).map(k => `
     <div class="list-item">
       <div class="list-item-main">
         <div class="list-item-title">${esc(k.nama)} · ${k.qtyLaku} pcs</div>
-        <div class="list-item-sub">${esc(k.supplierNama)} · ${esc(k.lapakNama)} · ${esc(k.tanggal)}</div>
-        <div class="text-xs text-gray mt-1">${k.qtyLaku} × ${fmtRp(k.hargaTitip)}</div>
+        <div class="list-item-sub">${esc(k.supplierNama)} · ${esc(k.tanggal)}</div>
       </div>
       <div class="text-right">
         <div class="text-sm font-bold ${k.status === 'Pending' ? 'text-red' : 'text-green'}">${fmtRp(k.utang)}</div>
         <span class="badge ${k.status === 'Pending' ? 'badge-warn' : 'badge-success'}" style="margin-top:4px">${esc(k.status)}</span>
       </div>
     </div>`).join('');
-
   return html;
 }
 
-// ============================================
-//  FASE 2 — TAB: RIWAYAT BAYAR SUPPLIER
-// ============================================
 function tabRiwayatBayarSupplier() {
   const list = S.riwayatBayarSupplier || [];
   const total = list.reduce((s, x) => s + (x.total || 0), 0);
   return `
     <h3 class="card-title">${ico('file')} Riwayat Bayar Supplier</h3>
-    <div class="kpi-hero">
-      <div class="kpi-hero-label">Total Dibayar</div>
-      <div class="kpi-hero-value">${fmtRp(total)}</div>
-      <div class="text-xs opacity-90">${list.length} pembayaran</div>
+    <div class="hero">
+      <div class="hero-label">Total Dibayar</div>
+      <div class="hero-value">${fmtRp(total)}</div>
+      <div class="hero-sub">${list.length} pembayaran</div>
     </div>
-    ${!list.length ? '<div class="empty"><p>Belum ada riwayat pembayaran.</p></div>' :
+    ${!list.length ? '<div class="empty"><p>Belum ada riwayat.</p></div>' :
       list.map(r => `
         <div class="list-item">
           <div class="list-item-main">
             <div class="list-item-title">${esc(r.supplierNama)}</div>
-            <div class="list-item-sub">${esc(r.bayarAt)} · oleh ${esc(r.bayarBy)}</div>
-            <div class="text-xs text-gray mt-1">${r.count} transaksi · Kas ID: ${esc(r.kasId.slice(0, 10))}</div>
+            <div class="list-item-sub">${esc(r.bayarAt)} · ${esc(r.bayarBy)}</div>
+            <div class="text-xs text-gray mt-1">${r.count} transaksi</div>
           </div>
-          <div class="text-right">
-            <div class="text-sm font-bold text-green">${fmtRp(r.total)}</div>
-          </div>
+          <div class="text-sm font-bold text-green">${fmtRp(r.total)}</div>
         </div>`).join('')}`;
 }
 
@@ -1674,6 +1572,7 @@ function handleClick(e) {
   if (a === 'refresh') return doRefresh();
   if (a === 'refresh-stok') return loadKartuStok();
 
+  // Karyawan
   if (a === 'buka') return karyawanAction('bukaLapak');
   if (a === 'tutup') return karyawanAction('tutupLapak');
   if (a === 'save-drop') return karyawanSaveDrop();
@@ -1687,6 +1586,7 @@ function handleClick(e) {
   if (a === 'absen-masuk') return doAbsenMasuk();
   if (a === 'absen-keluar') return doAbsenKeluar();
 
+  // Admin Setoran
   if (a === 'apply-setoran-filter') return applySetoranFilter();
   if (a === 'approve') return doApprove(id);
   if (a === 'reject') return doReject(id);
@@ -1717,12 +1617,9 @@ function handleClick(e) {
   if (a === 'del-kasbon') return delKasbon(id);
   if (a === 'add-setting-gaji') return formSettingGaji();
   if (a === 'edit-setting-gaji') return formSettingGaji(id);
-  if (a === 'rekap-gaji-load') return loadRekapGaji();
-  if (a === 'bayar-gaji-bulk') return doBayarGajiBulk();
   if (a === 'add-pesanan') return formPesanan();
   if (a === 'edit-pesanan') return formPesanan(id);
   if (a === 'del-pesanan') return delPesanan(id);
-  if (a === 'load-rekap-pesanan') return loadRekapPesanan();
   if (a === 'add-user') return formUser();
   if (a === 'edit-user') return formUser(id);
   if (a === 'del-user') return delUser(id);
@@ -1767,7 +1664,6 @@ function handleClick(e) {
 
   if (a === 'profit-range') { S.profitRange = parseInt(btn.dataset.range, 10); return loadDashboardProfit(); }
 
-  // FASE 2
   if (a === 'load-konsinyasi') return loadKonsinyasi();
   if (a === 'bayar-supplier') return formBayarSupplier(id);
   if (a === 'detail-konsinyasi') return showDetailKonsinyasi(id);
@@ -1814,7 +1710,7 @@ function handleChange(e) {
     api('toggleJadwal', { token: S.token, id: t.dataset.id, done: t.checked }).then(() => {
       const j = S.jadwal.find(x => x.id === t.dataset.id);
       if (j) j.done = t.checked;
-      render();
+      MEM.clear('jadwal');
     }).catch(err => toast(err.message, 'error'));
   }
 }
@@ -1834,22 +1730,46 @@ async function doLogin(form) {
     if (!res.success) { toast(res.message, 'error'); return; }
     S.token = res.token; S.user = res.user;
     localStorage.setItem('tk', res.token);
-    CACHE.clearAll();
-    if (res.user.mustChangePassword) toast('Anda harus ganti password', 'info');
-    await bootstrap();
+
+    // Login return bootstrap data langsung — 1 API call
+    if (res.bootstrap) {
+      applyBootstrap(res.bootstrap);
+    } else {
+      await bootstrap();
+    }
+    render();
+
+    // Preload tab paling sering di background
+    setTimeout(preloadCommon, 500);
   } catch (err) { toast(err.message, 'error'); }
   finally { hideLoader(); btn.disabled = false; btn.textContent = 'Masuk'; }
 }
+
+function applyBootstrap(b) {
+  if (!b) return;
+  if (b.lapak) S.lapak = b.lapak;
+  if (b.suppliers) S.suppliers = b.suppliers;
+  if (b.katalog) S.katalog = b.katalog;
+  if (b.users) S.users = b.users;
+  if (b.dash) S.dash = b.dash;
+  if (b.setoran) S.setoran = b.setoran;
+  if (b.kas) S.kas = b.kas;
+  if (b.laporan) S.laporan = b.laporan;
+  if (b.role === 'admin') {
+    S.view = 'admin'; S.tab = 'home';
+  }
+}
+
 async function doLogout() {
   try { if (S.token) await api('logout', { token: S.token }); } catch (e) {}
   localStorage.removeItem('tk');
   localStorage.removeItem('lapakAktif');
-  CACHE.clearAll();
+  MEM.clear();
   Object.assign(S, {
     user: null, token: null, lapakAktif: null, view: 'login', tab: 'home',
     lapak: [], suppliers: [], katalog: [], users: [], belanja: [], jadwal: [],
     dash: null, karyawan: null, kasbon: null, gaji: null, laporan: null, setoran: null,
-    pesanan: null, settingGaji: null, rekapGaji: null, rekapPesanan: null,
+    kas: null, pesanan: null, settingGaji: null, rekapGaji: null,
     kartuStok: null, stokSaldo: null, retur: null, hargaTingkat: null,
     tutupBuku: null, notifikasi: null, rekap: {},
     absensiList: null, absensiFilter: {}, bonusAntar: null, bonusFilter: {},
@@ -1861,123 +1781,55 @@ async function doLogout() {
   });
   render();
 }
+
 function sessionExpired() {
   localStorage.removeItem('tk');
   localStorage.removeItem('lapakAktif');
+  MEM.clear();
   S.token = null; S.user = null; S.lapakAktif = null; S.view = 'login';
   render();
   toast('Sesi berakhir. Login ulang.', 'error');
 }
+
 async function tryAutoLogin() {
   if (!S.token) return render();
   try {
-    const me = await api('getMe', { token: S.token });
-    S.user = me;
-    await bootstrap();
+    const res = await api('bootstrap', { token: S.token });
+    S.user = await api('getMe', { token: S.token }).catch(() => null);
+    if (!S.user) throw new Error('UNAUTHORIZED');
+    applyBootstrap(res);
+    render();
+    setTimeout(preloadCommon, 500);
   } catch (e) {
     localStorage.removeItem('tk'); S.token = null; render();
   }
 }
+
 async function bootstrap() {
   showLoader();
   try {
-    if (S.user.role === 'admin') {
-      const [dash, lapak, sup, kat, users] = await Promise.all([
-        api('getAdminDashboard', { token: S.token }),
-        api('getLapak', { token: S.token }),
-        api('getSuppliers', { token: S.token }),
-        api('getKatalog', { token: S.token }),
-        api('getUsers', { token: S.token })
-      ]);
-      Object.assign(S, { dash, lapak, suppliers: sup, katalog: kat, users });
-      S.view = 'admin'; S.tab = 'home';
-    } else {
-      const myLapak = await api('getMyLapak', { token: S.token });
-      if (myLapak.length > 1 && !S.lapakAktif) {
-        hideLoader();
-        return showPilihLapak(myLapak);
-      }
-      if (myLapak.length === 1) {
-        S.lapakAktif = myLapak[0];
-        localStorage.setItem('lapakAktif', JSON.stringify(S.lapakAktif));
-        await api('setLapakAktif', { token: S.token, lapakId: S.lapakAktif.id });
-      } else if (S.lapakAktif) {
-        await api('setLapakAktif', { token: S.token, lapakId: S.lapakAktif.id });
-      }
-      const [d, kb, ak] = await Promise.all([
-        api('getKaryawanDashboard', { token: S.token }),
-        api('getKasbon', { token: S.token, filter: {} }),
-        api('absensiHariIni', { token: S.token }).catch(() => ({ status: 'belum' }))
-      ]);
-      S.karyawan = d; S.kasbon = kb; S.absensiHariIni = ak;
-      if (S.karyawan.distribusi) {
-        S.karyawan.distribusi.forEach(x => { if (S.rekap[x.katalogId] === undefined) S.rekap[x.katalogId] = 0; });
-      }
-      S.view = 'karyawan';
-    }
+    const res = await api('bootstrap', { token: S.token });
+    applyBootstrap(res);
   } catch (e) {
     toast(e.message, 'error');
     if (String(e.message).indexOf('UNAUTHORIZED') !== -1) sessionExpired();
   } finally { hideLoader(); render(); }
 }
 
-function showPilihLapak(list) {
-  modal({
-    title: 'Pilih Lapak',
-    body: '<p class="text-sm text-gray mb-3">Anda punya akses ke beberapa lapak. Pilih lapak aktif:</p>' +
-      list.map(l => '<button data-lapak="' + esc(l.id) + '" class="btn btn-ghost btn-block mb-2" style="justify-content:flex-start">' + ico('store','ico-sm') + ' ' + esc(l.nama) + '</button>').join(''),
-    actions: [],
-    onMount: (wrap, close) => {
-      wrap.addEventListener('click', async e => {
-        const b = e.target.closest('[data-lapak]');
-        if (!b) return;
-        const lapakId = b.dataset.lapak;
-        const lapakObj = list.find(l => l.id === lapakId);
-        S.lapakAktif = lapakObj;
-        localStorage.setItem('lapakAktif', JSON.stringify(lapakObj));
-        try { await api('setLapakAktif', { token: S.token, lapakId }); } catch (err) {}
-        close();
-        await bootstrap();
-      });
-    }
-  });
-}
-
-async function showGantiLapakModal() {
-  showLoader();
+// Preload tab yang sering dipakai (silent)
+async function preloadCommon() {
+  if (!S.token || S.user.role !== 'admin') return;
   try {
-    const list = await api('getMyLapak', { token: S.token });
-    hideLoader();
-    if (list.length <= 1) return toast('Anda hanya punya akses 1 lapak.', 'info');
-    modal({
-      title: 'Ganti Lapak',
-      body: '<p class="text-sm text-gray mb-3">Pilih lapak baru:</p>' +
-        list.map(l => {
-          const isActive = S.lapakAktif && S.lapakAktif.id === l.id;
-          return '<button data-lapak="' + esc(l.id) + '" class="btn ' + (isActive ? 'btn-primary' : 'btn-ghost') + ' btn-block mb-2" style="justify-content:flex-start">' + ico('store','ico-sm') + ' ' + esc(l.nama) + (isActive ? ' (aktif)' : '') + '</button>';
-        }).join(''),
-      actions: [{ label: 'Tutup', onClick: c => c() }],
-      onMount: (wrap, close) => {
-        wrap.addEventListener('click', async e => {
-          const b = e.target.closest('[data-lapak]');
-          if (!b) return;
-          const lapakId = b.dataset.lapak;
-          const obj = list.find(l => l.id === lapakId);
-          if (S.lapakAktif && S.lapakAktif.id === lapakId) { close(); return; }
-          try {
-            const r = await api('setLapakAktif', { token: S.token, lapakId });
-            if (!r.success) return toast(r.message, 'error');
-            S.lapakAktif = obj;
-            localStorage.setItem('lapakAktif', JSON.stringify(obj));
-            close();
-            await reloadKaryawan();
-            toast('Lapak: ' + obj.nama, 'success');
-            render();
-          } catch (err) { toast(err.message, 'error'); }
-        });
-      }
-    });
-  } catch (e) { hideLoader(); toast(e.message, 'error'); }
+    // Preload belanja + jadwal di background
+    if (!S.belanja.length) {
+      apiCached('getBelanja', { token: S.token, filter: {} }, 'belanja', 60000)
+        .then(d => { S.belanja = d; }).catch(() => {});
+    }
+    if (!S.jadwal.length) {
+      apiCached('getJadwal', { token: S.token, days: 30 }, 'jadwal', 120000)
+        .then(d => { S.jadwal = d; }).catch(() => {});
+    }
+  } catch (e) {}
 }
 
 // ============================================
@@ -1992,6 +1844,7 @@ async function karyawanAction(action) {
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
+
 async function reloadKaryawan() {
   const [d, ak] = await Promise.all([
     api('getKaryawanDashboard', { token: S.token }),
@@ -2002,6 +1855,7 @@ async function reloadKaryawan() {
     S.karyawan.distribusi.forEach(x => { if (S.rekap[x.katalogId] === undefined) S.rekap[x.katalogId] = 0; });
   }
 }
+
 async function karyawanSaveDrop() {
   const items = [];
   $$('[data-drop-item]').forEach(inp => {
@@ -2017,6 +1871,7 @@ async function karyawanSaveDrop() {
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
+
 async function doSubmitRekap() {
   if (S.submitting) return;
   const d = S.karyawan;
@@ -2046,9 +1901,6 @@ async function doSubmitRekap() {
   finally { hideLoader(); S.submitting = false; render(); }
 }
 
-// ============================================
-//  ABSENSI KARYAWAN
-// ============================================
 async function doAbsenMasuk() {
   const lapakList = await api('getMyLapak', { token: S.token });
   const defaultLapak = (S.lapakAktif && S.lapakAktif.id) || (lapakList[0] && lapakList[0].id) || '';
@@ -2076,6 +1928,7 @@ async function doAbsenMasuk() {
     ]
   });
 }
+
 async function doAbsenKeluar() {
   const ok = await confirmDlg('Absen Keluar?', 'Anda yakin ingin absen keluar sekarang?', 'Ya, Keluar');
   if (!ok) return;
@@ -2097,76 +1950,71 @@ async function switchTab(tab) {
   await loadTabData(tab);
   render();
 }
+
 async function loadTabData(tab) {
   if (!S.token) return;
+  showLoader();
   try {
-    if (tab === 'setoran') S.setoran = await api('getSetoranList', { token: S.token, filter: S._setoranFilter || {} });
-    if (tab === 'belanja' && !S.belanja.length) S.belanja = await api('getBelanja', { token: S.token, filter: {} });
-    if (tab === 'jadwal' && !S.jadwal.length) S.jadwal = await api('getJadwal', { token: S.token, days: 30 });
+    if (tab === 'setoran') S.setoran = await apiCached('getSetoranList', { token: S.token, filter: S._setoranFilter || {} }, 'setoran_' + JSON.stringify(S._setoranFilter || {}), 30000);
+    if (tab === 'belanja') S.belanja = await apiCached('getBelanja', { token: S.token, filter: {} }, 'belanja', 60000);
+    if (tab === 'jadwal') S.jadwal = await apiCached('getJadwal', { token: S.token, days: 30 }, 'jadwal', 120000);
     if (tab === 'kasbon') S.kasbon = await api('getKasbon', { token: S.token, filter: {} });
-    if (tab === 'gaji' && !S.gaji) S.gaji = await api('getGaji', { token: S.token, filter: {} });
-    if (tab === 'setting-gaji' && !S.settingGaji) S.settingGaji = await api('getSettingGaji', { token: S.token });
-    if (tab === 'pesanan' && !S.pesanan) S.pesanan = await api('getPesanan', { token: S.token, filter: {} });
-    if (tab === 'laporan' && !S.laporan) S.laporan = await api('getLaporan', { token: S.token, filter: {} });
+    if (tab === 'gaji') S.gaji = await api('getGaji', { token: S.token, filter: {} });
+    if (tab === 'setting-gaji') S.settingGaji = await api('getSettingGaji', { token: S.token });
+    if (tab === 'pesanan') S.pesanan = await api('getPesanan', { token: S.token, filter: {} });
+    if (tab === 'laporan') S.laporan = await apiCached('getLaporan', { token: S.token, filter: {} }, 'laporan_default', 60000);
     if (tab === 'kartu-stok') await loadKartuStokData();
     if (tab === 'retur') S.retur = await api('getReturList', { token: S.token, filter: {} });
     if (tab === 'harga-tingkat') S.hargaTingkat = await api('getHargaTingkat', { token: S.token });
     if (tab === 'tutup-buku') S.tutupBuku = await api('getTutupBukuList', { token: S.token });
     if (tab === 'notifikasi') S.notifikasi = await api('getNotifikasi', { token: S.token, filter: {} });
     if (tab === 'absensi') await loadAbsensi();
-    if (tab === 'absensi-hari-ini') { S.absensiList = await api('getAbsensiKaryawan', { token: S.token, filter: { bulan: monthISO() } }); }
+    if (tab === 'absensi-hari-ini') S.absensiList = await api('getAbsensiKaryawan', { token: S.token, filter: { bulan: monthISO() } });
     if (tab === 'bonus-antar') await loadBonusAntar();
     if (tab === 'setting-payroll') {
       S.settingPayroll = await api('getSettingPayroll', { token: S.token });
       S.hariEfektif = await api('getHariEfektif', { token: S.token, bulan: monthISO() });
     }
-    if (tab === 'payroll') {
-      S.payrollHistory = await api('getPayrollHistory', { token: S.token, filter: {} });
-    }
+    if (tab === 'payroll') S.payrollHistory = await api('getPayrollHistory', { token: S.token, filter: {} });
     if (tab === 'dashboard-profit') await loadDashboardProfit();
-    // FASE 2
     if (tab === 'konsinyasi') await loadKonsinyasi();
-    if (tab === 'riwayat-bayar-supplier') {
-      S.riwayatBayarSupplier = await api('getRiwayatBayarSupplier', { token: S.token, filter: {} });
-    }
+    if (tab === 'riwayat-bayar-supplier') S.riwayatBayarSupplier = await api('getRiwayatBayarSupplier', { token: S.token, filter: {} });
   } catch (e) { toast(e.message, 'error'); }
+  finally { hideLoader(); }
 }
+
 async function loadKartuStokData() {
-  try {
-    const [stok, saldo] = await Promise.all([
-      api('getKartuStok', { token: S.token, filter: {} }),
-      api('getStokSaldo', { token: S.token })
-    ]);
-    S.kartuStok = stok; S.stokSaldo = saldo;
-  } catch (e) { toast(e.message, 'error'); }
+  const [stok, saldo] = await Promise.all([
+    api('getKartuStok', { token: S.token, filter: {} }),
+    api('getStokSaldo', { token: S.token })
+  ]);
+  S.kartuStok = stok; S.stokSaldo = saldo;
 }
 async function loadKartuStok() { await loadKartuStokData(); render(); }
+
 async function loadAbsensi() {
   const f = S.absensiFilter || {};
   const bulan = f.bulan || monthISO();
   const lapakId = f.lapakId || '';
-  try {
-    S.absensiList = await api('getAbsensiKaryawan', { token: S.token, filter: { bulan, lapakId } });
-    S.absensiFilter = { bulan, lapakId };
-  } catch (e) { toast(e.message, 'error'); }
+  S.absensiList = await api('getAbsensiKaryawan', { token: S.token, filter: { bulan, lapakId } });
+  S.absensiFilter = { bulan, lapakId };
 }
+
 async function loadBonusAntar() {
   const f = S.bonusFilter || {};
   const bulan = f.bulan || monthISO();
   const userId = f.userId || '';
-  try {
-    S.bonusAntar = await api('getBonusAntar', { token: S.token, filter: { bulan, userId } });
-    S.bonusFilter = { bulan, userId };
-  } catch (e) { toast(e.message, 'error'); }
+  S.bonusAntar = await api('getBonusAntar', { token: S.token, filter: { bulan, userId } });
+  S.bonusFilter = { bulan, userId };
 }
+
 async function loadHariEfektif() {
   const el = $('[data-he-bulan]');
   const bulan = el ? el.value : monthISO();
-  try {
-    S.hariEfektif = await api('getHariEfektif', { token: S.token, bulan });
-    render();
-  } catch (e) { toast(e.message, 'error'); }
+  S.hariEfektif = await api('getHariEfektif', { token: S.token, bulan });
+  render();
 }
+
 async function loadPayroll() {
   const el = $('[data-payroll-bulan]');
   const bulan = el ? el.value : monthISO();
@@ -2178,6 +2026,7 @@ async function loadPayroll() {
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
+
 async function loadDashboardProfit() {
   const range = S.profitRange || 30;
   showLoader();
@@ -2212,57 +2061,92 @@ async function loadDashboardProfit() {
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
+
 async function loadKonsinyasi() {
   const supEl = $('[data-kons-supplier]');
   const statEl = $('[data-kons-status]');
   const supplierId = supEl ? supEl.value : '';
   const status = statEl ? statEl.value : '';
   S.konsinyasiFilter = { supplierId, status };
-  showLoader();
-  try {
-    const [list, saldo] = await Promise.all([
-      api('getKonsinyasi', { token: S.token, filter: { supplierId, status } }),
-      api('getSaldoSupplier', { token: S.token })
-    ]);
-    S.konsinyasi = list;
-    S.saldoSupplier = saldo;
-  } catch (e) { toast(e.message, 'error'); }
-  finally { hideLoader(); render(); }
+  const [list, saldo] = await Promise.all([
+    api('getKonsinyasi', { token: S.token, filter: { supplierId, status } }),
+    api('getSaldoSupplier', { token: S.token })
+  ]);
+  S.konsinyasi = list;
+  S.saldoSupplier = saldo;
 }
 
+// ============================================
+//  MENU SHEET (Lainnya)
+// ============================================
 function showMoreMenu() {
-  const items = [
-    { id:'katalog',           label:'Katalog',        icon:'box' },
-    { id:'suppliers',         label:'Supplier',       icon:'truck' },
-    { id:'lapak',             label:'Lapak',          icon:'store' },
-    { id:'distribusi',        label:'Drop Stok',      icon:'boxes' },
-    { id:'kartu-stok',        label:'Kartu Stok',     icon:'boxes' },
-    { id:'retur',             label:'Retur',          icon:'return' },
-    { id:'harga-tingkat',     label:'Harga Grosir',   icon:'tag' },
-    { id:'pesanan',           label:'Pesanan',        icon:'cart' },
-    { id:'belanja',           label:'Belanja',        icon:'cart' },
-    { id:'jadwal',            label:'Jadwal',         icon:'cal' },
-    { id:'kasbon',            label:'Kasbon',         icon:'money' },
-    // FASE 2
-    { id:'konsinyasi',        label:'Konsinyasi',     icon:'truck' },
-    { id:'riwayat-bayar-supplier', label:'Bayar Supplier', icon:'file' },
-    // FASE 1
-    { id:'absensi',           label:'Absensi',        icon:'clock' },
-    { id:'absensi-hari-ini',  label:'Absen Hari Ini', icon:'list' },
-    { id:'bonus-antar',       label:'Bonus Antar',    icon:'truck' },
-    { id:'setting-payroll',   label:'Setting Payroll',icon:'settings' },
-    { id:'payroll',           label:'Rekap Payroll',  icon:'money' },
-    { id:'dashboard-profit',  label:'Dashboard Profit', icon:'trending' },
-    // Lama
-    { id:'setting-gaji',      label:'Setting Gaji Lama', icon:'settings' },
-    { id:'gaji',              label:'Riwayat Gaji',   icon:'money' },
-    { id:'tutup-buku',        label:'Tutup Buku',     icon:'lock' },
-    { id:'users',             label:'Users',          icon:'users' },
-    { id:'profil',            label:'Profil',         icon:'user' }
+  const sections = [
+    {
+      title: 'Operasional Harian',
+      items: [
+        { id:'distribusi', label:'Drop Stok', icon:'boxes' },
+        { id:'kartu-stok', label:'Kartu Stok', icon:'boxes' },
+        { id:'belanja', label:'Daftar Belanja', icon:'cart' },
+        { id:'jadwal', label:'Jadwal Supplier', icon:'cal' },
+        { id:'retur', label:'Retur Kue', icon:'return' }
+      ]
+    },
+    {
+      title: 'Master Data',
+      items: [
+        { id:'katalog', label:'Katalog Produk', icon:'box' },
+        { id:'suppliers', label:'Supplier', icon:'truck' },
+        { id:'lapak', label:'Lapak', icon:'store' },
+        { id:'harga-tingkat', label:'Harga Grosir', icon:'tag' },
+        { id:'users', label:'Users', icon:'users' }
+      ]
+    },
+    {
+      title: 'Karyawan & Payroll',
+      items: [
+        { id:'absensi', label:'Rekap Absensi', icon:'clock' },
+        { id:'absensi-hari-ini', label:'Absen Hari Ini', icon:'list' },
+        { id:'bonus-antar', label:'Bonus Antar', icon:'truck' },
+        { id:'payroll', label:'Rekap Payroll', icon:'money' },
+        { id:'setting-payroll', label:'Setting Payroll', icon:'settings' },
+        { id:'kasbon', label:'Kasbon', icon:'money' }
+      ]
+    },
+    {
+      title: 'Konsinyasi & Keuangan',
+      items: [
+        { id:'konsinyasi', label:'Konsinyasi', icon:'truck' },
+        { id:'riwayat-bayar-supplier', label:'Riwayat Bayar Supplier', icon:'file' },
+        { id:'tutup-buku', label:'Tutup Buku', icon:'lock' },
+        { id:'dashboard-profit', label:'Dashboard Profit', icon:'trending' }
+      ]
+    },
+    {
+      title: 'Akun',
+      items: [
+        { id:'profil', label:'Profil & Pengaturan', icon:'user' }
+      ]
+    }
   ];
+
+  const body = `<div class="menu-sheet">
+    ${sections.map(sec => `
+      <div>
+        <div class="menu-section-title">${esc(sec.title)}</div>
+        <div class="menu-list">
+          ${sec.items.map(m => `
+            <button class="menu-item" data-m="${m.id}">
+              ${ico(m.icon)}
+              <span class="menu-item-label">${esc(m.label)}</span>
+              ${ico('chevron-right', 'menu-item-chevron')}
+            </button>`).join('')}
+        </div>
+      </div>`).join('')}
+  </div>`;
+
   modal({
     title: 'Menu Lainnya',
-    body: '<div class="grid-3">' + items.map(m => '<button class="menu-tile" data-m="' + m.id + '">' + ico(m.icon) + '<span>' + m.label + '</span></button>').join('') + '</div>',
+    body,
     actions: [{ label: 'Tutup', onClick: c => c() }],
     onMount: (wrap, close) => {
       wrap.addEventListener('click', e => {
@@ -2276,39 +2160,32 @@ function showMoreMenu() {
 async function doRefresh() {
   showLoader();
   try {
-    if (S.user.role === 'admin') {
-      const [dash, lapak, sup, kat, users] = await Promise.all([
-        api('getAdminDashboard', { token: S.token }),
-        api('getLapak', { token: S.token }),
-        api('getSuppliers', { token: S.token }),
-        api('getKatalog', { token: S.token }),
-        api('getUsers', { token: S.token })
-      ]);
-      Object.assign(S, { dash, lapak, suppliers: sup, katalog: kat, users });
-    } else {
-      await reloadKaryawan();
-    }
+    MEM.clear();
+    await bootstrap();
     toast('Data dimuat ulang', 'success');
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
 
 // ============================================
-//  ADMIN ACTIONS — SETORAN
+//  ADMIN ACTIONS
 // ============================================
 async function applySetoranFilter() {
-  const dari = ($('[data-filter-dari]') || {}).value || '';
-  const sampai = ($('[data-filter-sampai]') || {}).value || '';
-  const lapakId = ($('[data-filter-lapak]') || {}).value || '';
-  const status = ($('[data-filter-status]') || {}).value || '';
-  S._setoranFilter = { dari, sampai, lapakId, status };
+  S._setoranFilter = {
+    dari: ($('[data-filter-dari]') || {}).value || '',
+    sampai: ($('[data-filter-sampai]') || {}).value || '',
+    lapakId: ($('[data-filter-lapak]') || {}).value || '',
+    status: ($('[data-filter-status]') || {}).value || ''
+  };
   showLoader();
   try {
     S.setoran = await api('getSetoranList', { token: S.token, filter: S._setoranFilter });
+    MEM.clear('setoran');
     toast('Filter diterapkan', 'success');
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
+
 async function doApprove(id) {
   const ok = await confirmDlg('Terima Setoran?', 'Uang akan masuk ke Kas Besar.', 'Terima');
   if (!ok) return;
@@ -2317,11 +2194,13 @@ async function doApprove(id) {
     const r = await api('approveSetoran', { token: S.token, id });
     if (!r.success) return toast(r.message, 'error');
     toast('Setoran diterima!', 'success');
+    MEM.clear();
     S.setoran = await api('getSetoranList', { token: S.token, filter: S._setoranFilter || {} });
     S.dash = await api('getAdminDashboard', { token: S.token });
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
+
 async function doReject(id) {
   const reason = await new Promise(resolve => {
     modal({
@@ -2339,23 +2218,25 @@ async function doReject(id) {
     const r = await api('rejectSetoran', { token: S.token, id, reason });
     if (!r.success) return toast(r.message, 'error');
     toast('Setoran ditolak.', 'info');
+    MEM.clear('setoran');
     S.setoran = await api('getSetoranList', { token: S.token, filter: S._setoranFilter || {} });
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
+
 async function showSetoranDetail(id) {
   showLoader();
   try {
     const d = await api('getSetoranDetail', { token: S.token, id });
     hideLoader();
     const itemsHtml = (d.items || []).length ? d.items.map(it =>
-      '<div class="row-between" style="padding:6px 0;border-bottom:1px solid var(--gray-100);font-size:13px">' +
+      '<div class="row-between" style="padding:8px 0;border-bottom:1px solid #f8fafc;font-size:13px">' +
       '<div style="min-width:0;flex:1"><strong style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(it.nama) + '</strong>' +
       '<span class="text-xs text-gray">Drop ' + it.qtyDrop + ' · Sisa ' + it.qtySisa + ' · Laku ' + it.qtyLaku + '</span></div>' +
       '<strong class="text-green">' + fmtRp(it.subtotal) + '</strong></div>'
     ).join('') : '<p class="text-xs text-gray">Tidak ada item.</p>';
     const pengHtml = (d.pengeluaran || []).length ? d.pengeluaran.map(p =>
-      '<div class="row-between" style="padding:4px 0;font-size:13px"><span>' + esc(p.keterangan) + '</span><span class="text-red">- ' + fmtRp(p.nominal) + '</span></div>'
+      '<div class="row-between" style="padding:6px 0;font-size:13px"><span>' + esc(p.keterangan) + '</span><span class="text-red">- ' + fmtRp(p.nominal) + '</span></div>'
     ).join('') : '<p class="text-xs text-gray">Tidak ada pengeluaran.</p>';
     modal({
       title: 'Detail Setoran',
@@ -2364,14 +2245,14 @@ async function showSetoranDetail(id) {
     });
   } catch (e) { hideLoader(); toast(e.message, 'error'); }
 }
+
 async function formEditSetoran(id) {
   const s = (S.setoran || []).find(x => x.id === id);
   if (!s) return toast('Setoran tidak ditemukan', 'error');
-  if (s.locked) return toast('Setoran terkunci (tutup buku).', 'error');
+  if (s.locked) return toast('Setoran terkunci.', 'error');
   modal({
     title: 'Edit Setoran',
     body: `
-      <p class="text-xs text-gray mb-3">Koreksi data. Perubahan tercatat di audit log.</p>
       <div class="field"><label>Total Tunai</label><input type="number" data-f="totalTunai" class="input" value="${s.totalTunai}"></div>
       <div class="field"><label>Total QRIS</label><input type="number" data-f="totalQris" class="input" value="${s.totalQris}"></div>
       <div class="field"><label>Pengeluaran</label><input type="number" data-f="pengeluaran" class="input" value="${s.pengeluaran}"></div>
@@ -2393,13 +2274,17 @@ async function formEditSetoran(id) {
         try {
           const r = await api('editSetoran', { token: S.token, id, updates });
           toast(r.message, r.success ? 'success' : 'error');
-          if (r.success) S.setoran = await api('getSetoranList', { token: S.token, filter: S._setoranFilter || {} });
+          if (r.success) {
+            MEM.clear('setoran');
+            S.setoran = await api('getSetoranList', { token: S.token, filter: S._setoranFilter || {} });
+          }
         } catch (e) { toast(e.message, 'error'); }
         finally { hideLoader(); render(); }
       } }
     ]
   });
 }
+
 async function showStruk(setoranId) {
   showLoader();
   try {
@@ -2426,7 +2311,7 @@ async function showStruk(setoranId) {
         <div style="text-align:center;margin-top:12px;font-size:10px">-- Terima Kasih --</div>
       </div>`;
     modal({
-      title: 'Struk / Nota',
+      title: 'Struk',
       body: strukHTML,
       actions: [
         { label: 'Tutup', onClick: c => c() },
@@ -2440,12 +2325,9 @@ async function showStruk(setoranId) {
   } catch (e) { hideLoader(); toast(e.message, 'error'); }
 }
 
-// ============================================
-//  ADMIN ACTIONS — KAS
-// ============================================
 function formKas() {
   formModal({
-    title: 'Transaksi Kas Manual',
+    title: 'Transaksi Kas',
     fields: [
       { key:'tipe', label:'Tipe', type:'select', options:[{v:'Masuk',l:'Masuk'},{v:'Keluar',l:'Keluar'}] },
       { key:'keterangan', label:'Keterangan', placeholder:'Contoh: Beli gas' },
@@ -2464,9 +2346,7 @@ function formKas() {
   });
 }
 
-// ============================================
-//  ADMIN ACTIONS — KATALOG
-// ============================================
+// Master CRUD
 function formKatalog(id) {
   const item = id ? S.katalog.find(k => k.id === id) : null;
   formModal({
@@ -2486,26 +2366,22 @@ function formKatalog(id) {
       try {
         const r = await api('saveKatalog', { token: S.token, item: data });
         toast(r.message, r.success ? 'success' : 'error');
-        if (r.success) S.katalog = await api('getKatalog', { token: S.token });
+        if (r.success) { S.katalog = await api('getKatalog', { token: S.token }); MEM.clear(); }
       } catch (e) { toast(e.message, 'error'); }
       finally { hideLoader(); render(); }
     }
   });
 }
 async function delKatalog(id) {
-  if (!(await confirmDlg('Hapus item?', 'Akan dihapus permanen.'))) return;
+  if (!(await confirmDlg('Hapus item?', ''))) return;
   showLoader();
   try {
     const r = await api('deleteKatalog', { token: S.token, id });
     toast(r.message, r.success ? 'success' : 'error');
-    if (r.success) S.katalog = await api('getKatalog', { token: S.token });
+    if (r.success) { S.katalog = await api('getKatalog', { token: S.token }); MEM.clear(); }
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
-
-// ============================================
-//  ADMIN ACTIONS — SUPPLIER (+ tipeTransaksi)
-// ============================================
 function formSupplier(id) {
   const item = id ? S.suppliers.find(s => s.id === id) : null;
   formModal({
@@ -2516,9 +2392,9 @@ function formSupplier(id) {
       { key:'tipeTransaksi', label:'Tipe Transaksi', type:'radio',
         options: [
           { v:'BeliPutus', l:'Beli Putus', selected: item && item.tipeTransaksi === 'BeliPutus' },
-          { v:'TitipJual', l:'Titip Jual (Konsinyasi)', selected: item && item.tipeTransaksi === 'TitipJual' }
+          { v:'TitipJual', l:'Titip Jual', selected: item && item.tipeTransaksi === 'TitipJual' }
         ] },
-      { key:'jadwalPesan', label:'Jadwal Pesan', value: item ? item.jadwalPesan : '', placeholder:'mis: Senin,Kamis' },
+      { key:'jadwalPesan', label:'Jadwal Pesan', value: item ? item.jadwalPesan : '', placeholder:'Senin,Kamis' },
       { key:'catatan', label:'Catatan', type:'textarea', value: item ? item.catatan : '' }
     ],
     onSubmit: async (data, c) => {
@@ -2528,7 +2404,7 @@ function formSupplier(id) {
       try {
         const r = await api('saveSupplier', { token: S.token, item: data });
         toast(r.message, r.success ? 'success' : 'error');
-        if (r.success) S.suppliers = await api('getSuppliers', { token: S.token });
+        if (r.success) { S.suppliers = await api('getSuppliers', { token: S.token }); MEM.clear(); }
       } catch (e) { toast(e.message, 'error'); }
       finally { hideLoader(); render(); }
     }
@@ -2540,13 +2416,10 @@ async function delSupplier(id) {
   try {
     await api('deleteSupplier', { token: S.token, id });
     S.suppliers = await api('getSuppliers', { token: S.token });
+    MEM.clear();
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
-
-// ============================================
-//  ADMIN ACTIONS — LAPAK
-// ============================================
 function formLapak(id) {
   const item = id ? S.lapak.find(l => l.id === id) : null;
   formModal({
@@ -2562,7 +2435,7 @@ function formLapak(id) {
       try {
         const r = await api('saveLapak', { token: S.token, item: data });
         toast(r.message, r.success ? 'success' : 'error');
-        if (r.success) S.lapak = await api('getLapak', { token: S.token });
+        if (r.success) { S.lapak = await api('getLapak', { token: S.token }); MEM.clear(); }
       } catch (e) { toast(e.message, 'error'); }
       finally { hideLoader(); render(); }
     }
@@ -2574,13 +2447,63 @@ async function delLapak(id) {
   try {
     await api('deleteLapak', { token: S.token, id });
     S.lapak = await api('getLapak', { token: S.token });
+    MEM.clear();
+  } catch (e) { toast(e.message, 'error'); }
+  finally { hideLoader(); render(); }
+}
+function formUser(id) {
+  const item = id ? S.users.find(u => u.id === id) : null;
+  formModal({
+    title: item ? 'Edit User' : 'Tambah User',
+    fields: [
+      { key:'name', label:'Nama', value: item ? item.name : '' },
+      { key:'username', label:'Username', value: item ? item.username : '' },
+      { key:'password', label:'Password ' + (item ? '(kosongkan jika tidak diubah)' : '(min 6)'), type:'password' },
+      { key:'role', label:'Role', type:'select', value: item ? item.role : 'karyawan',
+        options: [{v:'karyawan',l:'Karyawan',selected: item && item.role === 'karyawan'},{v:'admin',l:'Admin',selected: item && item.role === 'admin'}] },
+      { key:'lapakId', label:'Lapak Utama', type:'select', value: item ? item.lapakId : '',
+        options: [{v:'',l:'--'}].concat(S.lapak.map(l => ({ v:l.id, l:l.nama, selected: item && item.lapakId === l.id }))) },
+      { key:'lapakIds', label:'Akses Lapak (koma)', value: item ? item.lapakIds : '', placeholder:'L01,L02' },
+      { key:'aktif', label:'Aktif', type:'checkbox', checked: !item || item.aktif }
+    ],
+    onSubmit: async (data, c) => {
+      data.id = item ? item.id : null;
+      if (!data.password) data.password = undefined;
+      c(); showLoader();
+      try {
+        const r = await api('saveUser', { token: S.token, item: data });
+        toast(r.message, r.success ? 'success' : 'error');
+        if (r.success) { S.users = await api('getUsers', { token: S.token }); MEM.clear(); }
+      } catch (e) { toast(e.message, 'error'); }
+      finally { hideLoader(); render(); }
+    }
+  });
+}
+async function delUser(id) {
+  if (!(await confirmDlg('Hapus user?', ''))) return;
+  showLoader();
+  try {
+    await api('deleteUser', { token: S.token, id });
+    S.users = await api('getUsers', { token: S.token });
+    MEM.clear();
+  } catch (e) { toast(e.message, 'error'); }
+  finally { hideLoader(); render(); }
+}
+async function resetUserPwd(id) {
+  const u = S.users.find(x => x.id === id);
+  if (!u) return;
+  const ok = await confirmDlg('Reset Password?', 'Password ' + u.name + ' akan direset ke "kue1234".', 'Reset');
+  if (!ok) return;
+  showLoader();
+  try {
+    const r = await api('adminResetPassword', { token: S.token, userId: id });
+    toast(r.message, r.success ? 'success' : 'error');
+    if (r.success) { S.users = await api('getUsers', { token: S.token }); MEM.clear(); }
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
 
-// ============================================
-//  ADMIN ACTIONS — DISTRIBUSI / BELANJA / JADWAL
-// ============================================
+// Distribusi / Belanja / Jadwal
 async function loadDistribusi() {
   const tanggal = $('[data-dist-tgl]').value;
   const lapakId = $('[data-dist-lapak]').value;
@@ -2608,6 +2531,7 @@ async function saveDistribusi() {
     const r = await api('saveDistribusi', { token: S.token, lapakId, tanggal, items });
     toast(r.message, r.success ? 'success' : 'error');
     S._distItems = {};
+    MEM.clear();
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
@@ -2629,7 +2553,7 @@ function formBelanja(id) {
       try {
         const r = await api('saveBelanja', { token: S.token, item: data });
         toast(r.message, r.success ? 'success' : 'error');
-        if (r.success) S.belanja = await api('getBelanja', { token: S.token, filter: {} });
+        if (r.success) { S.belanja = await api('getBelanja', { token: S.token, filter: {} }); MEM.clear('belanja'); }
       } catch (e) { toast(e.message, 'error'); }
       finally { hideLoader(); render(); }
     }
@@ -2642,6 +2566,7 @@ async function doCheckBelanja(id, checked, hargaAktual) {
     toast(r.message, r.success ? 'success' : 'error');
     S.belanja = await api('getBelanja', { token: S.token, filter: {} });
     S.dash = await api('getAdminDashboard', { token: S.token });
+    MEM.clear('belanja');
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
@@ -2651,6 +2576,7 @@ async function delBelanja(id) {
   try {
     await api('deleteBelanja', { token: S.token, id });
     S.belanja = await api('getBelanja', { token: S.token, filter: {} });
+    MEM.clear('belanja');
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
@@ -2673,7 +2599,7 @@ function formJadwal(id) {
       try {
         const r = await api('saveJadwal', { token: S.token, item: data });
         toast(r.message, r.success ? 'success' : 'error');
-        if (r.success) S.jadwal = await api('getJadwal', { token: S.token, days: 30 });
+        if (r.success) { S.jadwal = await api('getJadwal', { token: S.token, days: 30 }); MEM.clear('jadwal'); }
       } catch (e) { toast(e.message, 'error'); }
       finally { hideLoader(); render(); }
     }
@@ -2685,13 +2611,12 @@ async function delJadwal(id) {
   try {
     await api('deleteJadwal', { token: S.token, id });
     S.jadwal = await api('getJadwal', { token: S.token, days: 30 });
+    MEM.clear('jadwal');
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
 
-// ============================================
-//  ADMIN ACTIONS — KASBON
-// ============================================
+// Kasbon
 function formKasbon(isAdmin) {
   if (isAdmin) {
     const karyawans = S.users.filter(u => u.role === 'karyawan');
@@ -2700,7 +2625,7 @@ function formKasbon(isAdmin) {
       title: 'Tambah Kasbon',
       fields: [
         { key:'userId', label:'Karyawan', type:'select', options: karyawans.map(u => ({ v:u.id, l:u.name })) },
-        { key:'tipe', label:'Tipe', type:'select', options: [{v:'Kasbon',l:'Kasbon (utang)'},{v:'Bayar',l:'Bayar (angsuran)'}] },
+        { key:'tipe', label:'Tipe', type:'select', options: [{v:'Kasbon',l:'Kasbon (utang)'},{v:'Bayar',l:'Bayar'}] },
         { key:'nominal', label:'Nominal', type:'number' },
         { key:'keterangan', label:'Keterangan', type:'textarea' }
       ],
@@ -2754,9 +2679,7 @@ async function delKasbon(id) {
   finally { hideLoader(); render(); }
 }
 
-// ============================================
-//  ADMIN ACTIONS — SETTING GAJI LAMA
-// ============================================
+// Setting Gaji Lama
 function formSettingGaji(id) {
   const item = id && S.settingGaji ? S.settingGaji.find(x => x.id === id) : null;
   const karyawans = S.users.filter(u => u.role === 'karyawan');
@@ -2782,20 +2705,8 @@ function formSettingGaji(id) {
     }
   });
 }
-async function loadRekapGaji() {
-  showLoader();
-  try {
-    const dari = monthStartISO();
-    const sampai = todayISO();
-    S.rekapGaji = await api('rekapGaji', { token: S.token, filter: { tipe: 'Bulanan', dari, sampai } });
-  } catch (e) { toast(e.message, 'error'); }
-  finally { hideLoader(); render(); }
-}
-async function doBayarGajiBulk() { return toast('Gunakan Rekap Payroll untuk bayar.', 'info'); }
 
-// ============================================
-//  ADMIN ACTIONS — PESANAN
-// ============================================
+// Pesanan
 function formPesanan(id) {
   const item = id && S.pesanan ? S.pesanan.find(p => p.id === id) : null;
   formModal({
@@ -2832,73 +2743,16 @@ async function delPesanan(id) {
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
-async function loadRekapPesanan() { return toast('Rekap pesanan otomatis dihitung.', 'info'); }
 
-// ============================================
-//  ADMIN ACTIONS — USERS
-// ============================================
-function formUser(id) {
-  const item = id ? S.users.find(u => u.id === id) : null;
-  formModal({
-    title: item ? 'Edit User' : 'Tambah User',
-    fields: [
-      { key:'name', label:'Nama', value: item ? item.name : '' },
-      { key:'username', label:'Username', value: item ? item.username : '' },
-      { key:'password', label: 'Password ' + (item ? '(kosongkan jika tidak diubah)' : '(min 6)'), type:'password' },
-      { key:'role', label:'Role', type:'select', value: item ? item.role : 'karyawan',
-        options: [{v:'karyawan',l:'Karyawan',selected: item && item.role === 'karyawan'},{v:'admin',l:'Admin',selected: item && item.role === 'admin'}] },
-      { key:'lapakId', label:'Lapak Utama', type:'select', value: item ? item.lapakId : '',
-        options: [{v:'',l:'--'}].concat(S.lapak.map(l => ({ v:l.id, l:l.nama, selected: item && item.lapakId === l.id }))) },
-      { key:'lapakIds', label:'Akses Lapak (pisahkan koma)', value: item ? item.lapakIds : '', placeholder:'L01,L02' },
-      { key:'aktif', label:'Aktif', type:'checkbox', checked: !item || item.aktif }
-    ],
-    onSubmit: async (data, c) => {
-      data.id = item ? item.id : null;
-      if (!data.password) data.password = undefined;
-      c(); showLoader();
-      try {
-        const r = await api('saveUser', { token: S.token, item: data });
-        toast(r.message, r.success ? 'success' : 'error');
-        if (r.success) S.users = await api('getUsers', { token: S.token });
-      } catch (e) { toast(e.message, 'error'); }
-      finally { hideLoader(); render(); }
-    }
-  });
-}
-async function delUser(id) {
-  if (!(await confirmDlg('Hapus user?', ''))) return;
-  showLoader();
-  try {
-    await api('deleteUser', { token: S.token, id });
-    S.users = await api('getUsers', { token: S.token });
-  } catch (e) { toast(e.message, 'error'); }
-  finally { hideLoader(); render(); }
-}
-async function resetUserPwd(id) {
-  const u = S.users.find(x => x.id === id);
-  if (!u) return;
-  const ok = await confirmDlg('Reset Password?', 'Password ' + u.name + ' akan direset ke "kue1234".', 'Reset');
-  if (!ok) return;
-  showLoader();
-  try {
-    const r = await api('adminResetPassword', { token: S.token, userId: id });
-    toast(r.message, r.success ? 'success' : 'error');
-    if (r.success) S.users = await api('getUsers', { token: S.token });
-  } catch (e) { toast(e.message, 'error'); }
-  finally { hideLoader(); render(); }
-}
-
-// ============================================
-//  ADMIN ACTIONS — RETUR / HARGA / TUTUP BUKU
-// ============================================
+// Retur / Harga / Tutup Buku
 function formReturKaryawan() {
   const dist = (S.karyawan && S.karyawan.distribusi) || [];
-  if (!dist.length) return toast('Tidak ada distribusi hari ini', 'error');
+  if (!dist.length) return toast('Tidak ada distribusi', 'error');
   modal({
     title: 'Ajukan Retur',
-    body: `<p class="text-sm text-gray mb-3">Masukkan jumlah yang perlu diretur:</p>
+    body: `<p class="text-sm text-gray mb-3">Masukkan jumlah retur:</p>
       ${dist.map(it => `
-        <div class="card" style="padding:10px;margin-bottom:8px" data-retur-item="${esc(it.katalogId)}">
+        <div class="card card-flat" style="padding:10px;margin-bottom:8px" data-retur-item="${esc(it.katalogId)}">
           <strong class="text-sm">${esc(it.nama)}</strong>
           <div class="row mt-2" style="gap:6px">
             <input type="number" min="0" max="${it.qtyDrop}" value="0" data-r-qty placeholder="Qty" class="input field-sm" style="flex:1">
@@ -2918,7 +2772,7 @@ function formReturKaryawan() {
           const kondisi = el.querySelector('[data-r-kondisi]').value;
           if (qty > 0) items.push({ katalogId, qty, kondisi });
         });
-        if (!items.length) return toast('Isi minimal 1 item', 'error');
+        if (!items.length) return toast('Isi minimal 1', 'error');
         c(); showLoader();
         try {
           const r = await api('submitRetur', { token: S.token, payload: { items } });
@@ -2933,8 +2787,7 @@ async function approveRetur(id) {
   const lapaks = (S.lapak || []).filter(l => l.aktif);
   modal({
     title: 'Setujui Retur',
-    body: '<p class="text-sm text-gray mb-3">Kirim ke lapak mana?</p>' +
-      '<div class="field"><label>Kirim ke</label><select data-f="tujuan" class="select"><option value="">-- Tetap di lapak asal --</option>' +
+    body: '<div class="field"><label>Kirim ke</label><select data-f="tujuan" class="select"><option value="">-- Lapak asal --</option>' +
       lapaks.map(l => `<option value="${esc(l.id)}">${esc(l.nama)}</option>`).join('') + '</select></div>',
     actions: [
       { label: 'Batal', onClick: c => c() },
@@ -2952,12 +2805,12 @@ async function approveRetur(id) {
   });
 }
 async function rejectRetur(id) {
-  if (!(await confirmDlg('Tolak retur ini?', ''))) return;
+  if (!(await confirmDlg('Tolak retur?', ''))) return;
   showLoader();
   try {
     await api('rejectRetur', { token: S.token, id, reason: '' });
     S.retur = await api('getReturList', { token: S.token, filter: {} });
-    toast('Retur ditolak', 'success');
+    toast('Ditolak', 'success');
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
@@ -2969,7 +2822,7 @@ function formHargaTingkat(id) {
     fields: [
       { key:'katalogId', label:'Item', type:'select', value: item ? item.katalogId : '',
         options: S.katalog.map(k => ({ v:k.id, l:k.nama, selected: item && item.katalogId === k.id })) },
-      { key:'tipePelanggan', label:'Tipe Pelanggan', type:'select', value: item ? item.tipePelanggan : 'Umum',
+      { key:'tipePelanggan', label:'Tipe', type:'select', value: item ? item.tipePelanggan : 'Umum',
         options: ['Umum','Reseller','Grosir'].map(t => ({ v:t, l:t, selected: item && item.tipePelanggan === t })) },
       { key:'minimalQty', label:'Minimal Qty', type:'number', value: item ? item.minimalQty : 1 },
       { key:'hargaJual', label:'Harga Jual', type:'number', value: item ? item.hargaJual : 0 },
@@ -2988,7 +2841,7 @@ function formHargaTingkat(id) {
   });
 }
 async function delHargaTingkat(id) {
-  if (!(await confirmDlg('Hapus harga khusus?', ''))) return;
+  if (!(await confirmDlg('Hapus harga?', ''))) return;
   showLoader();
   try {
     await api('deleteHargaTingkat', { token: S.token, id });
@@ -2999,10 +2852,10 @@ async function delHargaTingkat(id) {
 function formTutupBuku() {
   modal({
     title: 'Kunci Periode',
-    body: `<p class="text-xs text-gray mb-3">Setoran dalam rentang ini tidak bisa diedit lagi.</p>
+    body: `<p class="text-xs text-gray mb-3">Setoran dalam rentang ini tidak bisa diedit.</p>
       <div class="field"><label>Dari</label><input type="date" data-f="dari" class="input" value="${monthStartISO()}"></div>
       <div class="field"><label>Sampai</label><input type="date" data-f="sampai" class="input" value="${todayISO()}"></div>
-      <div class="field"><label>Catatan</label><textarea data-f="catatan" class="textarea" placeholder="Opsional"></textarea></div>`,
+      <div class="field"><label>Catatan</label><textarea data-f="catatan" class="textarea"></textarea></div>`,
     actions: [
       { label: 'Batal', onClick: c => c() },
       { label: 'Kunci', className: 'btn-danger', onClick: async (c, w) => {
@@ -3025,7 +2878,7 @@ function formTutupBuku() {
   });
 }
 async function unlockPeriode(id) {
-  const ok = await confirmDlg('Buka Kunci Periode?', 'Setoran dalam rentang ini bisa diedit lagi.', 'Buka');
+  const ok = await confirmDlg('Buka Kunci?', 'Setoran bisa diedit lagi.', 'Buka');
   if (!ok) return;
   showLoader();
   try {
@@ -3039,9 +2892,7 @@ async function unlockPeriode(id) {
   finally { hideLoader(); render(); }
 }
 
-// ============================================
-//  ADMIN ACTIONS — NOTIFIKASI / LAPORAN / PROFIL
-// ============================================
+// Notifikasi / Laporan / Profil
 async function markNotifRead(id) {
   try {
     await api('markNotifRead', { token: S.token, id });
@@ -3107,7 +2958,7 @@ function formChangePwd() {
   });
 }
 async function doBackupAll() {
-  if (!(await confirmDlg('Download Backup?', 'Semua sheet akan di-download dalam 1 file JSON.', 'Download'))) return;
+  if (!(await confirmDlg('Download Backup?', 'Semua sheet jadi 1 file JSON.', 'Download'))) return;
   showLoader();
   try {
     const r = await api('backupAll', { token: S.token });
@@ -3124,23 +2975,22 @@ async function doBackupAll() {
 }
 function formRestore() {
   modal({
-    title: 'Restore dari Backup',
+    title: 'Restore Backup',
     body: `<p class="text-xs text-gray mb-3">Pilih file JSON backup.</p>
       <div class="field"><label>Mode</label>
         <select data-mode class="select">
-          <option value="replace">Replace (ganti semua)</option>
-          <option value="merge">Merge (tambahkan)</option>
+          <option value="replace">Replace</option>
+          <option value="merge">Merge</option>
         </select>
       </div>
-      <div class="field"><label>File JSON</label><input type="file" accept=".json" data-file class="input"></div>
-      <div class="alert alert-warn text-xs">${ico('lock','ico-sm')} Restore tidak bisa dibatalkan.</div>`,
+      <div class="field"><label>File JSON</label><input type="file" accept=".json" data-file class="input"></div>`,
     actions: [
       { label: 'Batal', onClick: c => c() },
       { label: 'Restore', className: 'btn-danger', onClick: async (c, w) => {
         const file = w.querySelector('[data-file]').files[0];
         const mode = w.querySelector('[data-mode]').value;
-        if (!file) return toast('Pilih file dulu', 'error');
-        const ok = await confirmDlg('Konfirmasi Restore', 'Data akan di-' + mode + '. Lanjutkan?', 'Restore');
+        if (!file) return toast('Pilih file', 'error');
+        const ok = await confirmDlg('Konfirmasi', 'Data akan di-' + mode, 'Restore');
         if (!ok) return;
         const text = await file.text();
         c(); showLoader();
@@ -3155,7 +3005,7 @@ function formRestore() {
 }
 
 // ============================================
-//  FASE 1 — ABSENSI ADMIN
+//  ABSENSI ADMIN
 // ============================================
 async function loadAbsensi() {
   const bulanEl = $('[data-abs-bulan]');
@@ -3169,14 +3019,14 @@ async function loadAbsensi() {
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
+
 function formIsiAbsensi(userId) {
   const karyawans = S.users.filter(u => u.role === 'karyawan');
   if (!karyawans.length) return toast('Tidak ada karyawan', 'error');
   const defaultUserId = userId || karyawans[0].id;
   modal({
-    title: 'Isi Absensi Manual',
+    title: 'Isi Absensi',
     body: `
-      <p class="text-xs text-gray mb-3">Untuk karyawan yang lupa absen.</p>
       <div class="field"><label>Karyawan</label>
         <select data-f="userId" class="select">
           ${karyawans.map(u => `<option value="${esc(u.id)}" ${u.id === defaultUserId ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}
@@ -3200,7 +3050,7 @@ function formIsiAbsensi(userId) {
           <option value="Sakit">Sakit</option>
         </select>
       </div>
-      <div class="field"><label>Catatan</label><textarea data-f="catatan" class="textarea" placeholder="Opsional"></textarea></div>
+      <div class="field"><label>Catatan</label><textarea data-f="catatan" class="textarea"></textarea></div>
     `,
     actions: [
       { label: 'Batal', onClick: c => c() },
@@ -3222,9 +3072,10 @@ function formIsiAbsensi(userId) {
     ]
   });
 }
+
 function formEditAbsensi(id) {
   const a = (S.absensiList || []).find(x => x.id === id);
-  if (!a) return toast('Absensi tidak ditemukan', 'error');
+  if (!a) return toast('Tidak ditemukan', 'error');
   modal({
     title: 'Edit Absensi',
     body: `
@@ -3265,8 +3116,9 @@ function formEditAbsensi(id) {
     ]
   });
 }
+
 async function delAbsensi(id) {
-  if (!(await confirmDlg('Hapus absensi ini?', ''))) return;
+  if (!(await confirmDlg('Hapus absensi?', ''))) return;
   showLoader();
   try {
     await api('deleteAbsensi', { token: S.token, id });
@@ -3275,6 +3127,7 @@ async function delAbsensi(id) {
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
+
 async function lihatDetailAbsensiUser(userId) {
   const bulan = (S.absensiFilter || {}).bulan || monthISO();
   showLoader();
@@ -3298,21 +3151,21 @@ async function lihatDetailAbsensiUser(userId) {
 }
 
 // ============================================
-//  FASE 1 — BONUS ANTAR
+//  BONUS ANTAR
 // ============================================
 function formBonusAntar(id) {
   const item = id && S.bonusAntar ? S.bonusAntar.find(x => x.id === id) : null;
   const karyawans = S.users.filter(u => u.role === 'karyawan');
   if (!karyawans.length) return toast('Tidak ada karyawan', 'error');
   formModal({
-    title: item ? 'Edit Bonus Antar' : 'Tambah Bonus Antar',
+    title: item ? 'Edit Bonus' : 'Tambah Bonus Antar',
     fields: [
       { key:'tanggal', label:'Tanggal', type:'date', value: item ? item.tanggal : todayISO() },
       { key:'userId', label:'Karyawan', type:'select', options: karyawans.map(u => ({ v:u.id, l:u.name, selected: item && item.userId === u.id })) },
-      { key:'tujuan', label:'Tujuan', value: item ? item.tujuan : '', placeholder:'Contoh: Jl. Merdeka 5' },
+      { key:'tujuan', label:'Tujuan', value: item ? item.tujuan : '', placeholder:'Jl. Merdeka 5' },
       { key:'jarakKm', label:'Jarak (km)', type:'number', value: item ? item.jarakKm : 0 },
       { key:'qty', label:'Jumlah Item', type:'number', value: item ? item.qty : 0 },
-      { key:'nominal', label:'Nominal Bonus (Rp)', type:'number', value: item ? item.nominal : 0 },
+      { key:'nominal', label:'Nominal Bonus', type:'number', value: item ? item.nominal : 0 },
       { key:'keterangan', label:'Keterangan', type:'textarea', value: item ? item.keterangan : '' }
     ],
     onSubmit: async (data, c) => {
@@ -3339,7 +3192,7 @@ async function delBonusAntar(id) {
 }
 
 // ============================================
-//  FASE 1 — SETTING PAYROLL
+//  SETTING PAYROLL
 // ============================================
 function formSettingPayroll(id) {
   const item = id && S.settingPayroll ? S.settingPayroll.find(x => x.id === id) : null;
@@ -3348,8 +3201,8 @@ function formSettingPayroll(id) {
     fields: [
       { key:'lapakId', label:'Lapak', type:'select', value: item ? item.lapakId : '',
         options: S.lapak.map(l => ({ v:l.id, l:l.nama, selected: item && item.lapakId === l.id })) },
-      { key:'bonusMerekap', label:'Bonus Merekap (Rp)', type:'number', value: item ? item.bonusMerekap : 0 },
-      { key:'tunjanganLapak', label:'Tunjangan Lapak (Rp)', type:'number', value: item ? item.tunjanganLapak : 0 },
+      { key:'bonusMerekap', label:'Bonus Merekap', type:'number', value: item ? item.bonusMerekap : 0 },
+      { key:'tunjanganLapak', label:'Tunjangan Lapak', type:'number', value: item ? item.tunjanganLapak : 0 },
       { key:'berlakuDari', label:'Berlaku Dari', type:'date', value: item ? item.berlakuDari : todayISO() },
       { key:'aktif', label:'Aktif', type:'checkbox', checked: !item || item.aktif }
     ],
@@ -3381,22 +3234,22 @@ async function autoHariEfektif(bulan) {
     const r = await api('autoHariEfektif', { token: S.token, bulan });
     if (!r.success) { toast(r.message, 'error'); return; }
     for (const item of r.list) {
-      await api('saveHariEfektif', { token: S.token, item: { bulan, lapakId: item.lapakId, jumlahHari: item.jumlahHari, catatan: 'Auto-hitung' } });
+      await api('saveHariEfektif', { token: S.token, item: { bulan, lapakId: item.lapakId, jumlahHari: item.jumlahHari, catatan: 'Auto' } });
     }
     S.hariEfektif = await api('getHariEfektif', { token: S.token, bulan });
-    toast('Hari efektif dihitung dari absensi', 'success');
+    toast('Hari efektif dihitung', 'success');
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
 function formEditHariEfektif(dataset) {
-  const bulan = dataset.bulan, lapakId = dataset.lapak, hari = dataset.hari;
+  const { bulan, lapak, hari } = dataset;
   modal({
     title: 'Edit Hari Efektif',
     body: `
       <div class="field"><label>Bulan</label><strong>${esc(bulanLabel(bulan))}</strong></div>
-      <div class="field"><label>Lapak</label><strong>${esc(lapakId)}</strong></div>
-      <div class="field"><label>Jumlah Hari Efektif</label><input type="number" data-f="hari" class="input" value="${hari}"></div>
-      <div class="field"><label>Catatan</label><input type="text" data-f="catatan" class="input" placeholder="Opsional"></div>
+      <div class="field"><label>Lapak</label><strong>${esc(lapak)}</strong></div>
+      <div class="field"><label>Jumlah Hari</label><input type="number" data-f="hari" class="input" value="${hari}"></div>
+      <div class="field"><label>Catatan</label><input type="text" data-f="catatan" class="input"></div>
     `,
     actions: [
       { label: 'Batal', onClick: c => c() },
@@ -3405,7 +3258,7 @@ function formEditHariEfektif(dataset) {
         const catatan = w.querySelector('[data-f="catatan"]').value;
         c(); showLoader();
         try {
-          await api('saveHariEfektif', { token: S.token, item: { bulan, lapakId, jumlahHari, catatan } });
+          await api('saveHariEfektif', { token: S.token, item: { bulan, lapakId: lapak, jumlahHari, catatan } });
           S.hariEfektif = await api('getHariEfektif', { token: S.token, bulan });
           toast('Tersimpan', 'success');
         } catch (e) { toast(e.message, 'error'); }
@@ -3415,12 +3268,9 @@ function formEditHariEfektif(dataset) {
   });
 }
 
-// ============================================
-//  FASE 1 — PAYROLL BAYAR
-// ============================================
 async function bayarPayrollBulk() {
   const checks = $$('[data-payroll-pick]:checked');
-  if (!checks.length) return toast('Pilih minimal 1 karyawan', 'error');
+  if (!checks.length) return toast('Pilih minimal 1', 'error');
   const userIds = checks.map(c => c.dataset.userid);
   const total = checks.reduce((s, c) => s + (parseInt(c.dataset.total, 10) || 0), 0);
   const bulan = S.payrollBulan || monthISO();
@@ -3435,13 +3285,14 @@ async function bayarPayrollBulk() {
       S.payrollHistory = await api('getPayrollHistory', { token: S.token, filter: {} });
       S.kasbon = await api('getKasbon', { token: S.token, filter: {} });
       S.dash = await api('getAdminDashboard', { token: S.token });
+      MEM.clear();
     }
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
 
 // ============================================
-//  FASE 2 — BAYAR SUPPLIER
+//  KONSINYASI — BAYAR & DETAIL
 // ============================================
 async function formBayarSupplier(supplierId) {
   if (!supplierId) return toast('Supplier wajib', 'error');
@@ -3454,18 +3305,18 @@ async function formBayarSupplier(supplierId) {
     modal({
       title: 'Bayar Supplier',
       body: `
-        <div class="card" style="background:var(--gray-50);border:none;padding:12px;margin-bottom:12px">
+        <div class="card-flat" style="padding:12px;margin-bottom:12px">
           <strong>${esc(sup.nama || supplierId)}</strong>
           <div class="text-xs text-gray mt-1">${detail.count} transaksi pending</div>
-          <div class="kpi-hero" style="margin-top:12px;margin-bottom:0">
-            <div class="kpi-hero-label">Total Bayar</div>
-            <div class="kpi-hero-value" style="font-size:22px;margin-bottom:0">${fmtRp(detail.total)}</div>
+          <div class="hero" style="margin-top:12px;margin-bottom:0;padding:16px">
+            <div class="hero-label">Total Bayar</div>
+            <div class="hero-value" style="font-size:22px;margin-bottom:0">${fmtRp(detail.total)}</div>
           </div>
         </div>
-        <p class="text-xs font-semibold text-gray mb-2">Rincian Transaksi</p>
+        <p class="text-xs font-semibold text-gray mb-2">Rincian</p>
         <div style="max-height:300px;overflow-y:auto">
           ${detail.items.map(it => `
-            <div class="row-between text-xs" style="padding:6px 0;border-bottom:1px solid var(--gray-100)">
+            <div class="row-between text-xs" style="padding:8px 0;border-bottom:1px solid #f8fafc">
               <div style="min-width:0;flex:1">
                 <div class="font-semibold">${esc(it.nama)}</div>
                 <div class="text-gray">${esc(it.tanggal)} · ${esc(it.lapakNama)}</div>
@@ -3473,9 +3324,7 @@ async function formBayarSupplier(supplierId) {
               </div>
               <div class="text-right font-bold">${fmtRp(it.utang)}</div>
             </div>`).join('')}
-        </div>
-        <div class="alert alert-warn text-xs mt-3">${ico('money','ico-sm')} Kas akan berkurang sebesar total di atas.</div>
-      `,
+        </div>`,
       actions: [
         { label: 'Batal', onClick: c => c() },
         { label: 'Bayar ' + fmtRp(detail.total), className: 'btn-success', onClick: async (c) => {
@@ -3486,6 +3335,7 @@ async function formBayarSupplier(supplierId) {
             if (r.success) {
               await loadKonsinyasi();
               S.dash = await api('getAdminDashboard', { token: S.token });
+              MEM.clear();
             }
           } catch (e) { toast(e.message, 'error'); }
           finally { hideLoader(); render(); }
@@ -3504,29 +3354,68 @@ async function showDetailKonsinyasi(supplierId) {
       title: 'Detail: ' + (sup.nama || supplierId),
       body: `
         <div class="row-between mb-3">
-          <div><strong>Total Utang</strong></div>
+          <strong>Total Utang</strong>
           <div class="text-lg font-bold text-red">${fmtRp(detail.total)}</div>
         </div>
         <div class="text-xs text-gray mb-3">${detail.count} transaksi pending</div>
         <div style="max-height:400px;overflow-y:auto">
           ${detail.items.length ? detail.items.map(it => `
-            <div class="row-between text-sm" style="padding:8px 0;border-bottom:1px solid var(--gray-100)">
+            <div class="row-between text-sm" style="padding:10px 0;border-bottom:1px solid #f8fafc">
               <div style="min-width:0;flex:1">
                 <div class="font-semibold">${esc(it.nama)}</div>
                 <div class="text-xs text-gray">${esc(it.tanggal)} · ${esc(it.lapakNama)}</div>
                 <div class="text-xs text-gray">${it.qtyLaku} × ${fmtRp(it.hargaTitip)}</div>
               </div>
               <div class="text-right font-bold">${fmtRp(it.utang)}</div>
-            </div>`).join('') : '<p class="text-xs text-gray text-center" style="padding:16px">Tidak ada transaksi pending.</p>'}
-        </div>
-      `,
+            </div>`).join('') : '<p class="text-xs text-gray text-center" style="padding:20px">Tidak ada transaksi pending.</p>'}
+        </div>`,
       actions: [
         { label: 'Tutup', onClick: c => c() },
-        { label: 'Bayar Sekarang', className: 'btn-success', onClick: (c) => {
-          c();
-          formBayarSupplier(supplierId);
-        } }
+        { label: 'Bayar', className: 'btn-success', onClick: (c) => { c(); formBayarSupplier(supplierId); } }
       ]
+    });
+  } catch (e) { hideLoader(); toast(e.message, 'error'); }
+}
+
+// ============================================
+//  MULTI-LAPAK
+// ============================================
+async function showGantiLapakModal() {
+  showLoader();
+  try {
+    const list = await api('getMyLapak', { token: S.token });
+    hideLoader();
+    if (list.length <= 1) return toast('Anda hanya punya 1 lapak.', 'info');
+    modal({
+      title: 'Ganti Lapak',
+      body: list.map(l => {
+        const isActive = S.lapakAktif && S.lapakAktif.id === l.id;
+        return `<button data-lapak="${esc(l.id)}" class="menu-item" style="background:${isActive ? 'var(--amber-50)' : 'transparent'};border:1px solid #f1f5f9;border-radius:12px;margin-bottom:6px">
+          ${ico('store')}
+          <span class="menu-item-label" style="color:${isActive ? 'var(--amber-600)' : 'var(--ink-2)'}">${esc(l.nama)}${isActive ? ' (aktif)' : ''}</span>
+        </button>`;
+      }).join(''),
+      actions: [{ label: 'Tutup', onClick: c => c() }],
+      onMount: (wrap, close) => {
+        wrap.addEventListener('click', async e => {
+          const b = e.target.closest('[data-lapak]');
+          if (!b) return;
+          const lapakId = b.dataset.lapak;
+          const obj = list.find(l => l.id === lapakId);
+          if (S.lapakAktif && S.lapakAktif.id === lapakId) { close(); return; }
+          try {
+            const r = await api('setLapakAktif', { token: S.token, lapakId });
+            if (!r.success) return toast(r.message, 'error');
+            S.lapakAktif = obj;
+            localStorage.setItem('lapakAktif', JSON.stringify(obj));
+            close();
+            MEM.clear();
+            await reloadKaryawan();
+            toast('Lapak: ' + obj.nama, 'success');
+            render();
+          } catch (err) { toast(err.message, 'error'); }
+        });
+      }
     });
   } catch (e) { hideLoader(); toast(e.message, 'error'); }
 }
