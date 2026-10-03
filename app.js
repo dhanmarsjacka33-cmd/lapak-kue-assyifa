@@ -673,7 +673,7 @@ function tabHome() {
       <div class="alert alert-warn">
         ${ico('truck','ico')}
         <div style="flex:1">
-          <strong>Utang Konsinyasi: ${fmtRp(d.utangKonsinyasi)}</strong>
+          <strong>Utang Titip Jual: ${fmtRp(d.utangKonsinyasi)}</strong>
           <br><button class="btn btn-primary btn-sm mt-2" data-act="tab" data-tab="konsinyasi">Bayar</button>
         </div>
       </div>` : ''}
@@ -1694,7 +1694,7 @@ function tabKonsinyasi() {
   const saldo = S.saldoSupplier || [];
   const list = S.konsinyasi || [];
   const totalUtang = saldo.reduce((s, x) => s + (x.pending || 0), 0);
-  let html = `<h3 class="card-title">${ico('truck')} Konsinyasi</h3>`;
+  let html = `<h3 class="card-title">${ico('truck')} Titip Jual</h3>`;
   html += `<div class="hero hero-amber">
     <div class="hero-label">Total Utang Supplier</div>
     <div class="hero-value">${fmtRp(totalUtang)}</div>
@@ -3270,9 +3270,9 @@ function showMoreMenu() {
       ]
     },
     {
-      title: 'Konsinyasi & Keuangan',
+      title: 'Titip Jual & Keuangan',
       items: [
-        { id:'konsinyasi', label:'Konsinyasi', icon:'truck' },
+        { id:'konsinyasi', label:'Titip Jual', icon:'truck' },
         { id:'riwayat-bayar-supplier', label:'Riwayat Bayar Supplier', icon:'file' },
         { id:'tutup-buku', label:'Tutup Buku', icon:'lock' },
         { id:'dashboard-profit', label:'Dashboard Profit', icon:'trending' },
