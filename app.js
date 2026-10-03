@@ -1,5 +1,5 @@
 'use strict';
-/* Kue As-Syifa POS v5.5 — Frontend Final */
+/* Kue As-Syifa POS v5.6 — Frontend Optimized */
 
 const CFG = window.APP_CONFIG || {};
 const API = CFG.API_URL;
@@ -223,69 +223,180 @@ function formModal({ title, fields, onSubmit, submitLabel = 'Simpan', submitClas
 }
 
 // ============================================
-//  RENDER
+//  RENDER — Partial Update (OPTIMIZED)
 // ============================================
 function render() {
-  const app = $('#app'); if (!app) return;
-  let html = '';
-  if (S.view === 'login') html = vLogin();
-  else if (S.view === 'karyawan') html = vKaryawan();
-  else if (S.view === 'admin') html = vAdmin();
-  app.innerHTML = html;
-  if (S.view === 'karyawan' && S.karyawan && S.karyawan.absen && S.karyawan.absen.isOpen &&
-      S.karyawan.distribusi && S.karyawan.distribusi.length && !S.karyawan.sudahSubmit) {
-    const l = $('[data-peng-list]');
-    if (l && !l.children.length) addPengRow();
+  const app = $('#app');
+  if (!app) return;
+  const view = S.view;
+  const prevView = app.dataset.view;
+
+  // Full rebuild HANYA saat berpindah view (login ↔ admin ↔ karyawan)
+  if (view !== prevView) {
+    app.dataset.view = view;
+    if (view === 'login') {
+      app.innerHTML = vLogin();
+      return; // login view tidak butuh partial update
+    } else if (view === 'karyawan') {
+      app.innerHTML = vKaryawanShell();
+    } else if (view === 'admin') {
+      app.innerHTML = vAdminShell();
+    }
   }
-  if (S.view === 'karyawan') startClock();
-}
 
-document.addEventListener('click', handleClick);
-document.addEventListener('input', handleInput);
-document.addEventListener('change', handleChange);
-
-let __clockTimer = null;
-function startClock() {
-  if (__clockTimer) clearInterval(__clockTimer);
-  if (!$('[data-live-clock]')) return;
-  const upd = () => {
-    const e = $('[data-live-clock]');
-    if (!e) { clearInterval(__clockTimer); __clockTimer = null; return; }
-    const d = new Date();
-    e.textContent = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0');
-  };
-  upd();
-  __clockTimer = setInterval(upd, 1000);
+  // Partial update per view
+  if (view === 'karyawan') {
+    updateKaryawanTopbar();
+    updateKaryawanBody();
+    if (S.karyawan && S.karyawan.absen && S.karyawan.absen.isOpen &&
+        S.karyawan.distribusi && S.karyawan.distribusi.length && !S.karyawan.sudahSubmit) {
+      const l = $('[data-peng-list]');
+      if (l && !l.children.length) addPengRow();
+    }
+    startClock();
+  } else if (view === 'admin') {
+    updateAdminTopbar();
+    updateAdminTabbar();
+    updateAdminBody();
+  }
 }
 
 // ============================================
-//  LOGIN
+//  ADMIN SHELL + PARTIAL UPDATES
 // ============================================
-function vLogin() {
+function vAdminShell() {
   return `
-    <div class="login">
-      <div class="login-logo">${ico('cookie', 'ico-lg')}</div>
-      <h1>Kue As-Syifa</h1>
-      <p class="sub">Sistem Manajemen POS &amp; ERP</p>
-      <form class="login-form" data-form="login">
-        <div class="field"><label>Username / Nama</label>
-          <input class="input" name="username" autocomplete="username" autofocus placeholder="admin / Siti">
-        </div>
-        <div class="field"><label>Password</label>
-          <input class="input" type="password" name="password" autocomplete="current-password" placeholder="••••••">
-        </div>
-        <button class="btn btn-primary btn-block btn-lg mt-2" type="submit">Masuk</button>
-      </form>
-      <p class="text-center text-xs text-gray mt-3">v5.5 · Kue As-Syifa</p>
+    <div class="page">
+      <div class="topbar" data-admin-topbar></div>
+      <div class="page-body fade-in" data-admin-body></div>
+      <div class="tabbar" data-admin-tabbar></div>
     </div>`;
 }
 
+function updateAdminTopbar() {
+  const el = $('[data-admin-topbar]');
+  if (!el) return;
+  const unread = S.dash ? (S.dash.unreadNotif || 0) : 0;
+  el.innerHTML = `
+    <div class="topbar-title">
+      <h2>${esc(S.user.name)}</h2>
+      <p>Admin Panel</p>
+    </div>
+    <div class="row" style="gap:4px">
+      <button class="icon-btn icon-btn-relative" data-act="open-notif">
+        ${ico('bell')}
+        ${unread > 0 ? `<span class="badge-dot">${unread > 9 ? '9+' : unread}</span>` : ''}
+      </button>
+      <button class="icon-btn" data-act="logout">${ico('out')}</button>
+    </div>`;
+}
+
+function updateAdminTabbar() {
+  const el = $('[data-admin-tabbar]');
+  if (!el) return;
+  const tabs = [
+    { id:'home',    label:'Home',    icon:'chart' },
+    { id:'kas',     label:'Kas',     icon:'wallet' },
+    { id:'setoran', label:'Setoran', icon:'file', badge: S.dash ? S.dash.pendingCount : 0 },
+    { id:'pesanan-pelanggan', label:'Pesanan', icon:'shopping-bag' },
+    { id:'more',    label:'Menu',    icon:'menu' }
+  ];
+  const pesananBadge = S.dash ? (S.dash.todayPesananCount || 0) : 0;
+  el.innerHTML = tabs.map(t => {
+    const badge = t.id === 'pesanan-pelanggan' ? pesananBadge : t.badge;
+    return `
+      <button class="tab ${S.tab === t.id ? 'active' : ''}" data-act="tab" data-tab="${t.id}">
+        ${ico(t.icon)}<span>${t.label}</span>
+        ${badge > 0 ? `<span class="badge-dot">${badge > 9 ? '9+' : badge}</span>` : ''}
+      </button>`;
+  }).join('');
+}
+
+function updateAdminBody() {
+  const el = $('[data-admin-body]');
+  if (!el) return;
+  const prevTab = el.dataset.tab;
+  el.innerHTML = renderAdminTabContent();
+  if (prevTab !== S.tab) {
+    el.dataset.tab = S.tab;
+    el.classList.remove('fade-in');
+    void el.offsetWidth; // force reflow agar animasi restart
+    el.classList.add('fade-in');
+  }
+}
+
+function renderAdminTabContent() {
+  const T = S.tab;
+  if (T === 'home') return tabHome();
+  if (T === 'kas') return tabKas();
+  if (T === 'setoran') return tabSetoran();
+  if (T === 'laporan') return tabLaporan();
+  if (T === 'analytics') return tabAnalytics();
+  if (T === 'katalog') return tabKatalog();
+  if (T === 'suppliers') return tabSuppliers();
+  if (T === 'lapak') return tabLapak();
+  if (T === 'distribusi') return tabDistribusi();
+  if (T === 'belanja') return tabBelanja();
+  if (T === 'jadwal') return tabJadwal();
+  if (T === 'kasbon') return tabKasbon();
+  if (T === 'gaji') return tabGajiRiwayat();
+  if (T === 'setting-gaji') return tabSettingGaji();
+  if (T === 'pesanan') return tabPesanan();
+  if (T === 'users') return tabUsers();
+  if (T === 'kartu-stok') return tabKartuStok();
+  if (T === 'retur') return tabRetur();
+  if (T === 'harga-tingkat') return tabHargaTingkat();
+  if (T === 'tutup-buku') return tabTutupBuku();
+  if (T === 'notifikasi') return tabNotifikasi();
+  if (T === 'profil') return tabProfil();
+  if (T === 'absensi') return tabAbsensi();
+  if (T === 'absensi-hari-ini') return tabAbsensiHariIni();
+  if (T === 'bonus-antar') return tabBonusAntar();
+  if (T === 'setting-payroll') return tabSettingPayroll();
+  if (T === 'payroll') return tabPayroll();
+  if (T === 'dashboard-profit') return tabDashboardProfit();
+  if (T === 'konsinyasi') return tabKonsinyasi();
+  if (T === 'riwayat-bayar-supplier') return tabRiwayatBayarSupplier();
+  if (T === 'template-box') return tabTemplateBox();
+  if (T === 'pesanan-pelanggan') return tabPesananPelanggan();
+  if (T === 'kalender-pesanan') return tabKalenderPesanan();
+  return '';
+}
+
 // ============================================
-//  KARYAWAN
+//  KARYAWAN SHELL + PARTIAL UPDATES
 // ============================================
-function vKaryawan() {
+function vKaryawanShell() {
+  return `
+    <div class="page">
+      <div class="topbar" data-kar-topbar></div>
+      <div class="page-body fade-in" data-kar-body></div>
+    </div>`;
+}
+
+function updateKaryawanTopbar() {
+  const el = $('[data-kar-topbar]');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="topbar-title">
+      <h2>${esc(S.user.name)}</h2>
+      <p>${esc((S.karyawan && S.karyawan.lapakNama) || '')}</p>
+    </div>
+    <div class="row" style="gap:4px">
+      <button class="icon-btn" data-act="ganti-lapak">${ico('store')}</button>
+      <button class="icon-btn" data-act="logout">${ico('out')}</button>
+    </div>`;
+}
+
+function updateKaryawanBody() {
+  const el = $('[data-kar-body]');
+  if (!el) return;
+  el.innerHTML = renderKaryawanBody();
+}
+
+function renderKaryawanBody() {
   const d = S.karyawan;
-  if (!d) return '<div class="page"><div class="empty">Memuat...</div></div>';
+  if (!d) return '<div class="empty">Memuat...</div>';
   const isOpen = d.absen && d.absen.isOpen;
   const ak = d.absensiKaryawan || S.absensiHariIni || { status: 'belum' };
   let body = '';
@@ -363,22 +474,55 @@ function vKaryawan() {
         </div>`).join('')}
   </div>`;
 
+  return body;
+}
+
+// ============================================
+//  CLOCK
+// ============================================
+document.addEventListener('click', handleClick);
+document.addEventListener('input', handleInput);
+document.addEventListener('change', handleChange);
+
+let __clockTimer = null;
+function startClock() {
+  if (__clockTimer) clearInterval(__clockTimer);
+  if (!$('[data-live-clock]')) return;
+  const upd = () => {
+    const e = $('[data-live-clock]');
+    if (!e) { clearInterval(__clockTimer); __clockTimer = null; return; }
+    const d = new Date();
+    e.textContent = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0');
+  };
+  upd();
+  __clockTimer = setInterval(upd, 1000);
+}
+
+// ============================================
+//  LOGIN
+// ============================================
+function vLogin() {
   return `
-    <div class="page">
-      <div class="topbar">
-        <div class="topbar-title">
-          <h2>${esc(S.user.name)}</h2>
-          <p>${esc(d.lapakNama || '')}</p>
+    <div class="login">
+      <div class="login-logo">${ico('cookie', 'ico-lg')}</div>
+      <h1>Kue As-Syifa</h1>
+      <p class="sub">Sistem Manajemen POS &amp; ERP</p>
+      <form class="login-form" data-form="login">
+        <div class="field"><label>Username / Nama</label>
+          <input class="input" name="username" autocomplete="username" autofocus placeholder="admin / Siti">
         </div>
-        <div class="row" style="gap:4px">
-          <button class="icon-btn" data-act="ganti-lapak">${ico('store')}</button>
-          <button class="icon-btn" data-act="logout">${ico('out')}</button>
+        <div class="field"><label>Password</label>
+          <input class="input" type="password" name="password" autocomplete="current-password" placeholder="••••••">
         </div>
-      </div>
-      <div class="page-body fade-in">${body}</div>
+        <button class="btn btn-primary btn-block btn-lg mt-2" type="submit">Masuk</button>
+      </form>
+      <p class="text-center text-xs text-gray mt-3">v5.6 · Kue As-Syifa</p>
     </div>`;
 }
 
+// ============================================
+//  KARYAWAN FORM RENDERS
+// ============================================
 function renderDropForm(d) {
   const katalog = d.katalogFull || [];
   if (!katalog.length) return `<div class="card empty">${ico('box','ico')}<p>Katalog kosong.</p></div>`;
@@ -470,86 +614,6 @@ function addPengRow() {
     '<input type="number" inputmode="numeric" data-peng-nom placeholder="Rp" class="input field-sm" style="width:100px">' +
     '<button class="action-btn action-del" data-act="del-peng">' + ico('x','ico-sm') + '</button>';
   list.appendChild(row);
-}
-
-// ============================================
-//  ADMIN VIEW
-// ============================================
-function vAdmin() {
-  const tabs = [
-    { id:'home',    label:'Home',    icon:'chart' },
-    { id:'kas',     label:'Kas',     icon:'wallet' },
-    { id:'setoran', label:'Setoran', icon:'file', badge: S.dash ? S.dash.pendingCount : 0 },
-    { id:'pesanan-pelanggan', label:'Pesanan', icon:'shopping-bag' },
-    { id:'more',    label:'Menu',    icon:'menu' }
-  ];
-
-  let body = '';
-  const T = S.tab;
-  if (T === 'home') body = tabHome();
-  else if (T === 'kas') body = tabKas();
-  else if (T === 'setoran') body = tabSetoran();
-  else if (T === 'laporan') body = tabLaporan();
-  else if (T === 'analytics') body = tabAnalytics();
-  else if (T === 'katalog') body = tabKatalog();
-  else if (T === 'suppliers') body = tabSuppliers();
-  else if (T === 'lapak') body = tabLapak();
-  else if (T === 'distribusi') body = tabDistribusi();
-  else if (T === 'belanja') body = tabBelanja();
-  else if (T === 'jadwal') body = tabJadwal();
-  else if (T === 'kasbon') body = tabKasbon();
-  else if (T === 'gaji') body = tabGajiRiwayat();
-  else if (T === 'setting-gaji') body = tabSettingGaji();
-  else if (T === 'pesanan') body = tabPesanan();
-  else if (T === 'users') body = tabUsers();
-  else if (T === 'kartu-stok') body = tabKartuStok();
-  else if (T === 'retur') body = tabRetur();
-  else if (T === 'harga-tingkat') body = tabHargaTingkat();
-  else if (T === 'tutup-buku') body = tabTutupBuku();
-  else if (T === 'notifikasi') body = tabNotifikasi();
-  else if (T === 'profil') body = tabProfil();
-  else if (T === 'absensi') body = tabAbsensi();
-  else if (T === 'absensi-hari-ini') body = tabAbsensiHariIni();
-  else if (T === 'bonus-antar') body = tabBonusAntar();
-  else if (T === 'setting-payroll') body = tabSettingPayroll();
-  else if (T === 'payroll') body = tabPayroll();
-  else if (T === 'dashboard-profit') body = tabDashboardProfit();
-  else if (T === 'konsinyasi') body = tabKonsinyasi();
-  else if (T === 'riwayat-bayar-supplier') body = tabRiwayatBayarSupplier();
-  else if (T === 'template-box') body = tabTemplateBox();
-  else if (T === 'pesanan-pelanggan') body = tabPesananPelanggan();
-  else if (T === 'kalender-pesanan') body = tabKalenderPesanan();
-
-  const unread = S.dash ? (S.dash.unreadNotif || 0) : 0;
-  const pesananBadge = S.dash ? (S.dash.todayPesananCount || 0) : 0;
-
-  return `
-    <div class="page">
-      <div class="topbar">
-        <div class="topbar-title">
-          <h2>${esc(S.user.name)}</h2>
-          <p>Admin Panel</p>
-        </div>
-        <div class="row" style="gap:4px">
-          <button class="icon-btn icon-btn-relative" data-act="open-notif">
-            ${ico('bell')}
-            ${unread > 0 ? `<span class="badge-dot">${unread > 9 ? '9+' : unread}</span>` : ''}
-          </button>
-          <button class="icon-btn" data-act="logout">${ico('out')}</button>
-        </div>
-      </div>
-      <div class="page-body fade-in">${body}</div>
-      <div class="tabbar">
-        ${tabs.map(t => {
-          const badge = t.id === 'pesanan-pelanggan' ? pesananBadge : t.badge;
-          return `
-          <button class="tab ${S.tab === t.id ? 'active' : ''}" data-act="tab" data-tab="${t.id}">
-            ${ico(t.icon)}<span>${t.label}</span>
-            ${badge > 0 ? `<span class="badge-dot">${badge > 9 ? '9+' : badge}</span>` : ''}
-          </button>`;
-        }).join('')}
-      </div>
-    </div>`;
 }
 
 // ============================================
@@ -768,7 +832,7 @@ function tabLaporan() {
 }
 
 // ============================================
-//  FASE 4: ANALYTICS DASHBOARD
+//  TAB: ANALYTICS
 // ============================================
 function tabAnalytics() {
   const range = S.analyticsRange || 30;
@@ -1308,7 +1372,7 @@ function tabProfil() {
 }
 
 // ============================================
-//  FASE 1: ABSENSI / BONUS / PAYROLL / PROFIT
+//  TAB: ABSENSI / BONUS / PAYROLL / PROFIT
 // ============================================
 function tabAbsensi() {
   const f = S.absensiFilter || {};
@@ -1593,7 +1657,7 @@ function tabDashboardProfit() {
 }
 
 // ============================================
-//  FASE 2: KONSINYASI
+//  TAB: KONSINYASI
 // ============================================
 function tabKonsinyasi() {
   const saldo = S.saldoSupplier || [];
@@ -1665,7 +1729,7 @@ function tabRiwayatBayarSupplier() {
 }
 
 // ============================================
-//  FASE 3: TEMPLATE BOX
+//  TAB: TEMPLATE BOX
 // ============================================
 function tabTemplateBox() {
   const list = S.templateBox || [];
@@ -1812,7 +1876,7 @@ async function delTemplateBox(id) {
 }
 
 // ============================================
-//  FASE 3: PESANAN PELANGGAN
+//  TAB: PESANAN PELANGGAN
 // ============================================
 function tabPesananPelanggan() {
   const f = S.pesananFilter || {};
@@ -1894,23 +1958,15 @@ function tabPesananPelanggan() {
 function formPesananPelanggan(id) {
   const item = id && S.pesananPelanggan ? S.pesananPelanggan.find(p => p.id === id) : null;
 
-  // State form: simpan item + box yang sudah ditambahkan agar bisa di-update qty
   const state = {
-    items: [],         // { katalogId, namaItem, qty, hargaJual, dariBoxId, dariBoxNama }
-    addedBoxes: {}     // { boxId: qtyBox } — untuk update qty box
+    items: [],
+    addedBoxes: {}
   };
 
-  /**
-   * Rebuild seluruh item dari box yang sudah ditambahkan (state.addedBoxes)
-   * + item bebas (state.items tanpa dariBoxId).
-   * Inilah logika inti updateBoxQuantity yang menyatukan antara box & item.
-   */
   const rebuildItemsFromBoxes = () => {
-    // 1. Ambil item bebas (non-box)
     const freeItems = state.items.filter(it => !it.dariBoxId);
     state.items = freeItems;
 
-    // 2. Loop semua box yang terdaftar
     Object.entries(state.addedBoxes).forEach(([boxId, qtyBox]) => {
       const qtyBoxNum = parseInt(qtyBox, 10) || 0;
       if (qtyBoxNum <= 0) { delete state.addedBoxes[boxId]; return; }
@@ -1933,16 +1989,12 @@ function formPesananPelanggan(id) {
     });
   };
 
-  /**
-   * Update qty box yang sudah ditambahkan (dipanggil dari input inline).
-   */
   const updateBoxQuantity = (boxId, qtyValue) => {
     const qtyBox = parseInt(qtyValue, 10) || 0;
     if (qtyBox <= 0) delete state.addedBoxes[boxId];
     else state.addedBoxes[boxId] = qtyBox;
     rebuildItemsFromBoxes();
     renderFormBody();
-    // Update display total tanpa re-render penuh
     const totalEl = $('#form-pesanan-body [data-total-display]');
     if (totalEl) {
       const total = state.items.reduce((s, it) => s + (it.qty * it.hargaJual), 0);
@@ -1950,7 +2002,6 @@ function formPesananPelanggan(id) {
     }
   };
 
-  // Ekspos agar bisa dipanggil dari atribut oninput di HTML
   window.__updateBoxQty = updateBoxQuantity;
 
   const initForm = async () => {
@@ -1962,7 +2013,6 @@ function formPesananPelanggan(id) {
           katalogId: it.katalogId, namaItem: it.nama, qty: it.qty,
           hargaJual: it.hargaJual, dariBoxId: it.dariBoxId, dariBoxNama: it.dariBoxNama
         }));
-        // Reconstruct addedBoxes dari detail items (parsing "×N" dari dariBoxNama)
         state.items.forEach(it => {
           if (it.dariBoxId) {
             const m = String(it.dariBoxNama || '').match(/×(\d+)/);
@@ -2202,7 +2252,6 @@ function formPesananPelanggan(id) {
         if (a === 'remove-item') {
           const idx = parseInt(btn.dataset.idx, 10);
           const removed = state.items[idx];
-          // Kalau item dari box, hapus juga dari addedBoxes bila tidak ada item lain dari box tsb
           if (removed && removed.dariBoxId) {
             const stillHas = state.items.some((it, i) => i !== idx && it.dariBoxId === removed.dariBoxId);
             if (!stillHas) delete state.addedBoxes[removed.dariBoxId];
@@ -2414,7 +2463,7 @@ async function cetakStrukPesanan(id) {
 }
 
 // ============================================
-//  FASE 3: KALENDER PESANAN
+//  TAB: KALENDER PESANAN
 // ============================================
 function tabKalenderPesanan() {
   const bulan = S.kalenderBulan || monthISO();
@@ -2526,18 +2575,6 @@ function kalenderDay(tgl) {
       </div>`).join(''),
     actions: [{ label: 'Tutup', onClick: c => c() }]
   });
-}
-
-// ============================================
-//  FASE 4: ANALYTICS
-// ============================================
-async function loadAnalytics() {
-  const range = S.analyticsRange || 30;
-  showLoader();
-  try {
-    S.analytics = await api('getAnalytics', { token: S.token, range });
-  } catch (e) { toast(e.message, 'error'); }
-  finally { hideLoader(); render(); }
 }
 
 // ============================================
@@ -2997,46 +3034,141 @@ async function doAbsenKeluar() {
 async function switchTab(tab) {
   if (tab === 'more') return showMoreMenu();
   S.tab = tab;
+  // Update tabbar visual segera (tanpa tunggu fetch selesai)
+  updateAdminTabbar();
   await loadTabData(tab);
   render();
 }
 
+// ============================================
+//  LOAD TAB DATA — PARALLEL FETCH (OPTIMIZED)
+// ============================================
 async function loadTabData(tab) {
   if (!S.token) return;
   showLoader();
   try {
-    if (tab === 'setoran') S.setoran = await apiCached('getSetoranList', { token: S.token, filter: S._setoranFilter || {} }, 'setoran_' + JSON.stringify(S._setoranFilter || {}), 30000);
-    if (tab === 'belanja') S.belanja = await apiCached('getBelanja', { token: S.token, filter: {} }, 'belanja', 60000);
-    if (tab === 'jadwal') S.jadwal = await apiCached('getJadwal', { token: S.token, days: 30 }, 'jadwal', 120000);
-    if (tab === 'kasbon') S.kasbon = await api('getKasbon', { token: S.token, filter: {} });
-    if (tab === 'gaji') S.gaji = await api('getGaji', { token: S.token, filter: {} });
-    if (tab === 'setting-gaji') S.settingGaji = await api('getSettingGaji', { token: S.token });
-    if (tab === 'pesanan') S.pesanan = await api('getPesanan', { token: S.token, filter: {} });
-    if (tab === 'laporan') S.laporan = await apiCached('getLaporan', { token: S.token, filter: {} }, 'laporan_default', 60000);
-    if (tab === 'analytics') await loadAnalytics();
-    if (tab === 'kartu-stok') await loadKartuStokData();
-    if (tab === 'retur') S.retur = await api('getReturList', { token: S.token, filter: {} });
-    if (tab === 'harga-tingkat') S.hargaTingkat = await api('getHargaTingkat', { token: S.token });
-    if (tab === 'tutup-buku') S.tutupBuku = await api('getTutupBukuList', { token: S.token });
-    if (tab === 'notifikasi') S.notifikasi = await api('getNotifikasi', { token: S.token, filter: {} });
-    if (tab === 'absensi') await loadAbsensi();
-    if (tab === 'absensi-hari-ini') S.absensiList = await api('getAbsensiKaryawan', { token: S.token, filter: { bulan: monthISO() } });
-    if (tab === 'bonus-antar') await loadBonusAntar();
-    if (tab === 'setting-payroll') {
-      S.settingPayroll = await api('getSettingPayroll', { token: S.token });
-      S.hariEfektif = await api('getHariEfektif', { token: S.token, bulan: monthISO() });
+    const tasks = [];
+
+    // --- Fetch sederhana (satu API call, langsung assign ke S.*) ---
+    const simpleFetches = {
+      'setoran': () => apiCached('getSetoranList', { token: S.token, filter: S._setoranFilter || {} }, 'setoran_' + JSON.stringify(S._setoranFilter || {}), 30000).then(d => S.setoran = d),
+      'belanja': () => apiCached('getBelanja', { token: S.token, filter: {} }, 'belanja', 60000).then(d => S.belanja = d),
+      'jadwal': () => apiCached('getJadwal', { token: S.token, days: 30 }, 'jadwal', 120000).then(d => S.jadwal = d),
+      'kasbon': () => api('getKasbon', { token: S.token, filter: {} }).then(d => S.kasbon = d),
+      'gaji': () => api('getGaji', { token: S.token, filter: {} }).then(d => S.gaji = d),
+      'setting-gaji': () => api('getSettingGaji', { token: S.token }).then(d => S.settingGaji = d),
+      'pesanan': () => api('getPesanan', { token: S.token, filter: {} }).then(d => S.pesanan = d),
+      'laporan': () => apiCached('getLaporan', { token: S.token, filter: {} }, 'laporan_default', 60000).then(d => S.laporan = d),
+      'retur': () => api('getReturList', { token: S.token, filter: {} }).then(d => S.retur = d),
+      'harga-tingkat': () => api('getHargaTingkat', { token: S.token }).then(d => S.hargaTingkat = d),
+      'tutup-buku': () => api('getTutupBukuList', { token: S.token }).then(d => S.tutupBuku = d),
+      'notifikasi': () => api('getNotifikasi', { token: S.token, filter: {} }).then(d => S.notifikasi = d),
+      'riwayat-bayar-supplier': () => api('getRiwayatBayarSupplier', { token: S.token, filter: {} }).then(d => S.riwayatBayarSupplier = d),
+      'pesanan-pelanggan': () => api('getPesananPelanggan', { token: S.token, filter: S.pesananFilter || {} }).then(d => S.pesananPelanggan = d),
+      'absensi-hari-ini': () => api('getAbsensiKaryawan', { token: S.token, filter: { bulan: monthISO() } }).then(d => S.absensiList = d),
+      'payroll': () => api('getPayrollHistory', { token: S.token, filter: {} }).then(d => S.payrollHistory = d),
+    };
+    if (simpleFetches[tab]) tasks.push(simpleFetches[tab]());
+
+    // --- Fetch bersyarat (skip kalau data sudah ada) ---
+    if (tab === 'template-box' && !S.templateBox) {
+      tasks.push(api('getTemplateBox', { token: S.token }).then(d => S.templateBox = d));
     }
-    if (tab === 'payroll') S.payrollHistory = await api('getPayrollHistory', { token: S.token, filter: {} });
-    if (tab === 'dashboard-profit') await loadDashboardProfit();
-    if (tab === 'konsinyasi') await loadKonsinyasi();
-    if (tab === 'riwayat-bayar-supplier') S.riwayatBayarSupplier = await api('getRiwayatBayarSupplier', { token: S.token, filter: {} });
-    if (tab === 'template-box' && !S.templateBox) S.templateBox = await api('getTemplateBox', { token: S.token });
-    if (tab === 'pesanan-pelanggan') S.pesananPelanggan = await api('getPesananPelanggan', { token: S.token, filter: S.pesananFilter || {} });
-    if (tab === 'kalender-pesanan' && !S.kalenderData) await loadKalender();
-  } catch (e) { toast(e.message, 'error'); }
-  finally { hideLoader(); }
+    if (tab === 'kalender-pesanan' && !S.kalenderData) {
+      const bulan = S.kalenderBulan || monthISO();
+      tasks.push(api('getPesananKalender', { token: S.token, bulan }).then(d => S.kalenderData = d));
+    }
+
+    // --- Parallel internal (2+ API call sekaligus dalam satu tab) ---
+    if (tab === 'setting-payroll') {
+      tasks.push(Promise.all([
+        api('getSettingPayroll', { token: S.token }).then(d => S.settingPayroll = d),
+        api('getHariEfektif', { token: S.token, bulan: monthISO() }).then(d => S.hariEfektif = d)
+      ]));
+    }
+    if (tab === 'kartu-stok') {
+      tasks.push(Promise.all([
+        api('getKartuStok', { token: S.token, filter: {} }).then(d => S.kartuStok = d),
+        api('getStokSaldo', { token: S.token }).then(d => S.stokSaldo = d)
+      ]));
+    }
+    if (tab === 'konsinyasi') {
+      const supEl = $('[data-kons-supplier]'), statEl = $('[data-kons-status]');
+      const supplierId = supEl ? supEl.value : '';
+      const status = statEl ? statEl.value : '';
+      S.konsinyasiFilter = { supplierId, status };
+      tasks.push(Promise.all([
+        api('getKonsinyasi', { token: S.token, filter: { supplierId, status } }).then(d => S.konsinyasi = d),
+        api('getSaldoSupplier', { token: S.token }).then(d => S.saldoSupplier = d)
+      ]));
+    }
+    if (tab === 'analytics') {
+      const range = S.analyticsRange || 30;
+      tasks.push(api('getAnalytics', { token: S.token, range }).then(d => S.analytics = d));
+    }
+    if (tab === 'absensi') {
+      const bulanEl = $('[data-abs-bulan]'), lapakEl = $('[data-abs-lapak]');
+      const bulan = bulanEl ? bulanEl.value : monthISO();
+      const lapakId = lapakEl ? lapakEl.value : '';
+      S.absensiFilter = { bulan, lapakId };
+      tasks.push(api('getAbsensiKaryawan', { token: S.token, filter: { bulan, lapakId } }).then(d => S.absensiList = d));
+    }
+    if (tab === 'bonus-antar') {
+      const f = S.bonusFilter || {};
+      const bulan = f.bulan || monthISO();
+      const userId = f.userId || '';
+      S.bonusFilter = { bulan, userId };
+      tasks.push(api('getBonusAntar', { token: S.token, filter: { bulan, userId } }).then(d => S.bonusAntar = d));
+    }
+
+    // --- Dashboard Profit: fetch paralel, komputasi setelahnya ---
+    if (tab === 'dashboard-profit') {
+      const range = S.profitRange || 30;
+      const end = todayISO();
+      const start = new Date(Date.now() - (range - 1) * 86400000).toISOString().slice(0, 10);
+      tasks.push(
+        Promise.all([
+          api('getLaporan', { token: S.token, filter: { dari: start, sampai: end } }),
+          api('getSetoranList', { token: S.token, filter: { dari: start, sampai: end } })
+        ]).then(([laporan, setoran]) => {
+          const dateMap = {};
+          setoran.forEach(s => {
+            if (s.status !== 'approved' && s.status !== 'pending') return;
+            if (!dateMap[s.tanggal]) dateMap[s.tanggal] = { tanggal: s.tanggal, omzet: 0, pengeluaran: 0 };
+            dateMap[s.tanggal].omzet += s.totalSistem || 0;
+            dateMap[s.tanggal].pengeluaran += s.pengeluaran || 0;
+          });
+          const totalOmzet = laporan.ringkasan.totalOmzet;
+          const totalProfit = laporan.ringkasan.totalProfit;
+          const avgMargin = totalOmzet > 0 ? (totalProfit / totalOmzet) : 0;
+          const daily = [];
+          for (let i = range - 1; i >= 0; i--) {
+            const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+            const info = dateMap[d] || { tanggal: d, omzet: 0, pengeluaran: 0 };
+            const profit = Math.round((info.omzet * avgMargin) - info.pengeluaran);
+            daily.push({ tanggal: d, omzet: info.omzet, profit });
+          }
+          S.dashboardProfit = {
+            daily,
+            totalOmzet: daily.reduce((s, d) => s + d.omzet, 0),
+            totalProfit: daily.reduce((s, d) => s + d.profit, 0),
+            avgProfit: Math.round(daily.reduce((s, d) => s + d.profit, 0) / daily.length)
+          };
+        })
+      );
+    }
+
+    await Promise.all(tasks);
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    hideLoader();
+  }
 }
 
+// ============================================
+//  INDIVIDUAL LOADERS (dipanggil dari tombol aksi)
+// ============================================
 async function loadKartuStokData() {
   const [stok, saldo] = await Promise.all([
     api('getKartuStok', { token: S.token, filter: {} }),
@@ -3076,8 +3208,11 @@ async function loadPayroll() {
   showLoader();
   try {
     S.payrollBulan = bulan;
-    S.payrollData = await api('rekapPayroll', { token: S.token, bulan });
-    S.payrollHistory = await api('getPayrollHistory', { token: S.token, filter: {} });
+    // PARALEL
+    [S.payrollData, S.payrollHistory] = await Promise.all([
+      api('rekapPayroll', { token: S.token, bulan }),
+      api('getPayrollHistory', { token: S.token, filter: {} })
+    ]);
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
@@ -3087,9 +3222,11 @@ async function loadDashboardProfit() {
   try {
     const end = todayISO();
     const start = new Date(Date.now() - (range - 1) * 86400000).toISOString().slice(0, 10);
-    const laporan = await api('getLaporan', { token: S.token, filter: { dari: start, sampai: end } });
-    const setoran = await api('getSetoranList', { token: S.token, filter: { dari: start, sampai: end } });
-    const daily = [];
+    // PARALEL
+    const [laporan, setoran] = await Promise.all([
+      api('getLaporan', { token: S.token, filter: { dari: start, sampai: end } }),
+      api('getSetoranList', { token: S.token, filter: { dari: start, sampai: end } })
+    ]);
     const dateMap = {};
     setoran.forEach(s => {
       if (s.status !== 'approved' && s.status !== 'pending') return;
@@ -3100,6 +3237,7 @@ async function loadDashboardProfit() {
     const totalOmzet = laporan.ringkasan.totalOmzet;
     const totalProfit = laporan.ringkasan.totalProfit;
     const avgMargin = totalOmzet > 0 ? (totalProfit / totalOmzet) : 0;
+    const daily = [];
     for (let i = range - 1; i >= 0; i--) {
       const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
       const info = dateMap[d] || { tanggal: d, omzet: 0, pengeluaran: 0 };
@@ -3120,11 +3258,20 @@ async function loadKonsinyasi() {
   const supplierId = supEl ? supEl.value : '';
   const status = statEl ? statEl.value : '';
   S.konsinyasiFilter = { supplierId, status };
+  // PARALEL
   const [list, saldo] = await Promise.all([
     api('getKonsinyasi', { token: S.token, filter: { supplierId, status } }),
     api('getSaldoSupplier', { token: S.token })
   ]);
   S.konsinyasi = list; S.saldoSupplier = saldo;
+}
+async function loadAnalytics() {
+  const range = S.analyticsRange || 30;
+  showLoader();
+  try {
+    S.analytics = await api('getAnalytics', { token: S.token, range });
+  } catch (e) { toast(e.message, 'error'); }
+  finally { hideLoader(); render(); }
 }
 
 // ============================================
@@ -4299,9 +4446,10 @@ async function autoHariEfektif(bulan) {
   try {
     const r = await api('autoHariEfektif', { token: S.token, bulan });
     if (!r.success) { toast(r.message, 'error'); return; }
-    for (const item of r.list) {
-      await api('saveHariEfektif', { token: S.token, item: { bulan, lapakId: item.lapakId, jumlahHari: item.jumlahHari, catatan: 'Auto' } });
-    }
+    // Paralel: simpan semua sekaligus
+    await Promise.all(r.list.map(item =>
+      api('saveHariEfektif', { token: S.token, item: { bulan, lapakId: item.lapakId, jumlahHari: item.jumlahHari, catatan: 'Auto' } })
+    ));
     S.hariEfektif = await api('getHariEfektif', { token: S.token, bulan });
     toast('Hari efektif dihitung', 'success');
   } catch (e) { toast(e.message, 'error'); }
@@ -4347,10 +4495,13 @@ async function bayarPayrollBulk() {
     const r = await api('bayarPayrollBulk', { token: S.token, bulan, userIds });
     toast(r.message, r.success ? 'success' : 'error');
     if (r.success) {
-      S.payrollData = await api('rekapPayroll', { token: S.token, bulan });
-      S.payrollHistory = await api('getPayrollHistory', { token: S.token, filter: {} });
-      S.kasbon = await api('getKasbon', { token: S.token, filter: {} });
-      S.dash = await api('getAdminDashboard', { token: S.token });
+      // PARALEL
+      [S.payrollData, S.payrollHistory, S.kasbon, S.dash] = await Promise.all([
+        api('rekapPayroll', { token: S.token, bulan }),
+        api('getPayrollHistory', { token: S.token, filter: {} }),
+        api('getKasbon', { token: S.token, filter: {} }),
+        api('getAdminDashboard', { token: S.token })
+      ]);
       MEM.clear();
     }
   } catch (e) { toast(e.message, 'error'); }
