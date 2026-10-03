@@ -146,7 +146,7 @@ async function setupOneSignalForUser() {
     const permission = OneSignal.Notifications.permission;
     console.log('[OneSignal] Status izin:', permission);
 
-    if (permission === 'granted') {
+    if (permission === true || permission === 'granted') {
       console.log('[OneSignal] Izin sudah diberikan');
       return true;
     }
