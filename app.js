@@ -556,7 +556,7 @@ function tabHome() {
       <div class="kpi"><div class="kpi-label">Penjualan Hari Ini</div><div class="kpi-value text-green" style="font-size:16px">${fmtRp(d.todayPenjualan)}</div></div>
       <div class="kpi"><div class="kpi-label">Pesanan Hari Ini</div><div class="kpi-value text-amber">${d.todayPesananCount || 0}</div></div>
     </div>
-    ${d.utangKonsinyasi > 0 ? `<div class="alert alert-warn">${ico('truck','ico')}<div style="flex:1"><strong>Utang Konsinyasi: ${fmtRp(d.utangKonsinyasi)}</strong><br><button class="btn btn-primary btn-sm mt-2" data-act="tab" data-tab="konsinyasi">Bayar</button></div></div>` : ''}
+    ${d.utangKonsinyasi > 0 ? `<div class="alert alert-warn">${ico('truck','ico')}<div style="flex:1"><strong>Utang Titipan: ${fmtRp(d.utangKonsinyasi)}</strong><br><button class="btn btn-primary btn-sm mt-2" data-act="tab" data-tab="konsinyasi">Bayar</button></div></div>` : ''}
     ${d.pendingCount > 0 ? `<div class="alert alert-warn">${ico('inbox','ico')}<div style="flex:1"><strong>${d.pendingCount} setoran pending</strong><br><button class="btn btn-primary btn-sm mt-2" data-act="tab" data-tab="setoran">Lihat</button></div></div>` : ''}
     <div class="row" style="gap:8px;margin-bottom:16px">
       <button class="btn btn-ghost btn-block" data-act="tab" data-tab="analisis-performa">${ico('pie-chart','ico-sm')} Analisis</button>
@@ -1409,7 +1409,7 @@ function tabKonsinyasi() {
   const saldo = S.saldoSupplier || [];
   const list = S.konsinyasi || [];
   const totalUtang = saldo.reduce((s, x) => s + (x.pending || 0), 0);
-  let html = `<h3 class="card-title">${ico('truck')} Konsinyasi</h3>`;
+  let html = `<h3 class="card-title">${ico('truck')} Titip Jual</h3>`;
   html += `<div class="hero hero-amber"><div class="hero-label">Total Utang Supplier</div><div class="hero-value">${fmtRp(totalUtang)}</div><div class="hero-sub">${saldo.filter(s => s.pending > 0).length} supplier belum dibayar</div></div>`;
   html += `<h3 class="card-title">${ico('list')} Saldo per Supplier</h3>`;
   const withPending = saldo.filter(s => s.pending > 0);
@@ -2861,8 +2861,8 @@ function showMoreMenu() {
       { id:'dashboard-profit', label:'Dashboard Profit', icon:'trending' },
       { id:'laporan', label:'Laporan Lengkap', icon:'bar' }
     ]},
-    { title: 'Konsinyasi & Keuangan', items: [
-      { id:'konsinyasi', label:'Konsinyasi', icon:'truck' },
+    { title: 'Titip Jual & Keuangan', items: [
+      { id:'konsinyasi', label:'Titip Jual', icon:'truck' },
       { id:'riwayat-bayar-supplier', label:'Riwayat Bayar Supplier', icon:'file' },
       { id:'tutup-buku', label:'Tutup Buku', icon:'lock' }
     ]},
