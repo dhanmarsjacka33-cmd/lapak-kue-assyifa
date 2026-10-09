@@ -1,7 +1,7 @@
 {
   "name": "Lapak Kue As-Syifa - Sistem Manajemen Kue",
   "short_name": "Kue As-Syifa",
-  "description": "Aplikasi POS & manajemen lapak kue: absensi, rekap harian, kasbon, payroll, dan analitik penjualan.",
+  "description": "Aplikasi POS & manajemen lapak kue.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -9,7 +9,6 @@
   "theme_color": "#f59e0b",
   "background_color": "#fffbeb",
   "lang": "id",
-  "categories": ["business", "productivity", "food"],
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
