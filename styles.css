@@ -656,3 +656,6 @@ input[type=radio]{accent-color:var(--amber);cursor:pointer}
 .table-scroll .analytics-table { min-width: 420px; }
 .chip-group .chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
 .chip-group .chip strong { color: inherit; opacity: .7; font-weight: 600; font-size: 10px; }
+
+/* Tidak ada background untuk install button */
+#pwa-install-btn { -webkit-tap-highlight-color: transparent; }
