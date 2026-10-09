@@ -33,7 +33,10 @@ const S = {
   _pesananFilter: JSON.parse(localStorage.getItem('pesananFilter') || '{}'),
   _distTanggal: null, _distLapakId: null, _distItems: {},
   _abortControllers: {},
-  _dirty: {} // Tandai list yang perlu refresh (untuk stale-while-revalidate)
+  _dirty: {} 
+  darkMode: localStorage.getItem('darkMode') === '1',
+  _pageSetoran: 1, _pageKas: 1, _pageKartuStok: 1, _pagePesanan: 1,
+  _pageSize: 15// Tandai list yang perlu refresh (untuk stale-while-revalidate)
 };
 
 // ============================================
@@ -285,8 +288,13 @@ function vAdminShell() {
 function updateAdminTopbar() {
   const el = $('[data-admin-topbar]'); if (!el) return;
   const unread = S.dash ? (S.dash.unreadNotif || 0) : 0;
+  const themeIcon = S.darkMode ? 'sun' : 'moon';
   el.innerHTML = `<div class="topbar-title"><h2>${esc(S.user.name)}</h2><p>Admin Panel</p></div>
-    <div class="row" style="gap:4px"><button class="icon-btn icon-btn-relative" data-act="open-notif">${ico('bell')}${unread > 0 ? `<span class="badge-dot">${unread > 9 ? '9+' : unread}</span>` : ''}</button><button class="icon-btn" data-act="logout">${ico('out')}</button></div>`;
+    <div class="row" style="gap:4px">
+      <button class="theme-toggle" data-act="toggle-theme" title="Ganti tema">${ico(themeIcon)}</button>
+      <button class="icon-btn icon-btn-relative" data-act="open-notif">${ico('bell')}${unread > 0 ? `<span class="badge-dot">${unread > 9 ? '9+' : unread}</span>` : ''}</button>
+      <button class="icon-btn" data-act="logout">${ico('out')}</button>
+    </div>`;
 }
 
 function updateAdminTabbar() {
@@ -344,8 +352,13 @@ function vKaryawanShell() {
 
 function updateKaryawanTopbar() {
   const el = $('[data-kar-topbar]'); if (!el) return;
+  const themeIcon = S.darkMode ? 'sun' : 'moon';
   el.innerHTML = `<div class="topbar-title"><h2>${esc(S.user.name)}</h2><p>${esc((S.karyawan && S.karyawan.lapakNama) || '')}</p></div>
-    <div class="row" style="gap:4px"><button class="icon-btn" data-act="ganti-lapak">${ico('store')}</button><button class="icon-btn" data-act="logout">${ico('out')}</button></div>`;
+    <div class="row" style="gap:4px">
+      <button class="theme-toggle" data-act="toggle-theme" title="Ganti tema">${ico(themeIcon)}</button>
+      <button class="icon-btn" data-act="ganti-lapak">${ico('store')}</button>
+      <button class="icon-btn" data-act="logout">${ico('out')}</button>
+    </div>`;
 }
 
 function updateKaryawanBody() {
@@ -535,10 +548,13 @@ function tabHome() {
 // ============================================
 function tabKas() {
   const d = S.dash || { kasBesar: 0, recentKas: [] };
+  const all = d.recentKas || [];
+  const p = paginate(all, S._pageKas, S._pageSize);
   return `<div class="row-between mb-3"><h3 class="card-title" style="margin:0">${ico('wallet')} Buku Kas</h3><button class="btn btn-primary btn-sm" data-act="add-kas">+ Transaksi</button></div>
     <div class="hero"><div class="hero-label">Saldo Saat Ini</div><div class="hero-value">${fmtRp(d.kasBesar)}</div></div>
-    ${!d.recentKas || !d.recentKas.length ? '<div class="empty">' + ico('inbox','ico') + '<p>Belum ada transaksi</p></div>' :
-      d.recentKas.map(k => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(k.keterangan)}</div><div class="list-item-sub">${esc(k.tanggal)}</div></div><div class="text-right"><div class="text-sm font-bold ${k.tipe === 'Masuk' ? 'text-green' : 'text-red'}">${k.tipe === 'Masuk' ? '+' : '-'} ${fmtRp(k.nominal)}</div><div class="text-xs text-gray">${fmtRp(k.saldo)}</div></div></div>`).join('')}`;
+    ${!all.length ? '<div class="empty">' + ico('inbox','ico') + '<p>Belum ada transaksi</p></div>' :
+      p.items.map(k => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(k.keterangan)}</div><div class="list-item-sub">${esc(k.tanggal)}</div></div><div class="text-right"><div class="text-sm font-bold ${k.tipe === 'Masuk' ? 'text-green' : 'text-red'}">${k.tipe === 'Masuk' ? '+' : '-'} ${fmtRp(k.nominal)}</div><div class="text-xs text-gray">${fmtRp(k.saldo)}</div></div></div>`).join('')}
+    ${paginationFooter(p, 'kas-page', '_pageKas')}`;
 }
 
 // ============================================
@@ -589,10 +605,13 @@ function tabSetoran() {
       </div>`;
   }).join('');
 
-  if (done.length) {
-    html += `<h3 class="card-title mt-3">${ico('file')} Riwayat</h3>`;
-    html += done.map(s => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(s.lapakId)} · ${esc(s.tanggal)}</div><div class="list-item-sub">${fmtRp(s.totalSistem)}${s.locked ? ' · 🔒' : ''}</div></div><span class="badge ${s.status === 'approved' ? 'badge-success' : 'badge-danger'}">${esc(s.status)}</span></div>`).join('');
+    if (done.length) {
+    const p = paginate(done, S._pageSetoran, S._pageSize);
+    html += `<h3 class="card-title mt-3">${ico('file')} Riwayat (${done.length})</h3>`;
+    html += p.items.map(s => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(s.lapakId)} · ${esc(s.tanggal)}</div><div class="list-item-sub">${fmtRp(s.totalSistem)}${s.locked ? ' · 🔒' : ''}</div></div><span class="badge ${s.status === 'approved' ? 'badge-success' : 'badge-danger'}">${esc(s.status)}</span></div>`).join('');
+    html += paginationFooter(p, 'setoran-page', '_pageSetoran');
   }
+  return html;
   return html;
 }
 
@@ -822,8 +841,15 @@ function tabKartuStok() {
   if (!saldo.length && !list.length) return skeletonList(3);
   let html = `<div class="row-between mb-3"><h3 class="card-title" style="margin:0">${ico('boxes')} Stok</h3><button class="btn btn-ghost btn-sm" data-act="refresh-stok">${ico('refresh','ico-sm')}</button></div>`;
   html += `<div class="card"><div class="card-title">Saldo</div>${!saldo.length ? '<p class="text-xs text-gray">Belum ada pergerakan.</p>' : saldo.map(s => `<div class="row-between text-sm" style="padding:8px 0;border-bottom:1px solid #f8fafc"><div style="min-width:0;flex:1"><strong>${esc(s.nama)}</strong><div class="text-xs text-gray">In ${s.masuk} · Out ${s.keluar}</div></div><strong class="${s.saldo < 10 ? 'text-red' : 'text-green'}">${s.saldo}</strong></div>`).join('')}</div>`;
-  if (list.length) html += `<div class="card"><div class="card-title">Riwayat (50)</div>` + list.slice(0, 50).map(k => `<div class="row-between text-xs" style="padding:8px 0;border-bottom:1px solid #f8fafc"><div style="min-width:0;flex:1"><strong>${esc(k.nama)}</strong><div class="text-gray">${esc(k.tanggal)} · ${esc(k.tipe)} · ${esc(k.lapakNama || '-')}</div></div><div class="text-right">${k.masuk > 0 ? `<div class="text-green font-bold">+${k.masuk}</div>` : ''}${k.keluar > 0 ? `<div class="text-red font-bold">-${k.keluar}</div>` : ''}<div class="text-gray">${k.saldo}</div></div></div>`).join('') + `</div>`;
-  return html;
+      ${!filtered.length ? '<div class="empty">' + ico('shopping-bag','ico') + '<p>Belum ada pesanan.</p></div>' :
+      (() => {
+        const p = paginate(filtered, S._pagePesanan, S._pageSize);
+        return p.items.map(pes => {
+          p._state = p; // trick: simpan state di dalam list agar footer bisa akses
+          return renderPesananCard(pes);
+        }).join('') + paginationFooter(p, 'pesanan-page', '_pagePesanan');
+      })()}`;
+}
 }
 
 function tabRetur() {
@@ -1081,7 +1107,41 @@ function tabPesananPelanggan() {
           </div>`;
       }).join('')}`;
 }
-
+function renderPesananCard(p) {
+  const statusMap = { 'Dipesan':'dipesan', 'Siap':'siap', 'Diambil':'diambil', 'Selesai':'selesai', 'Batal':'batal' };
+  const sCls = statusMap[p.status] || 'dipesan';
+  const metodeCls = p.metodeAmbil === 'Diantar' ? 'metode-diantar' : 'metode-ambil';
+  const jenisCls = p.jenisAmbil === 'WalkIn' ? 'metode-walkin' : 'metode-terjadwal';
+  return `<div class="pesanan-card status-${sCls}">
+    <div class="pesanan-header">
+      <div style="min-width:0;flex:1">
+        <div class="pesanan-nama">${esc(p.pelangganNama)}</div>
+        ${p.pelangganHp ? `<div class="pesanan-hp">${ico('phone','ico-sm')} ${esc(p.pelangganHp)}</div>` : ''}
+        <div class="pesanan-tanggal">${ico('cal','ico-sm')} Ambil: ${fmtDateShort(p.tanggalAmbil)}</div>
+      </div>
+      <div class="text-right" style="flex-shrink:0"><span class="status-badge ${sCls}">${esc(p.status)}</span></div>
+    </div>
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">
+      <span class="pesanan-metode ${metodeCls}">${p.metodeAmbil === 'Diantar' ? ico('truck','ico-sm') : ico('store','ico-sm')} ${esc(p.metodeAmbil)}</span>
+      <span class="pesanan-metode ${jenisCls}">${esc(p.jenisAmbil)}</span>
+    </div>
+    ${p.alamat ? `<div class="text-xs text-gray mt-2">${ico('home','ico-sm')} ${esc(p.alamat)}</div>` : ''}
+    <div class="pesanan-total">
+      <div class="row-between"><span class="text-gray">Total</span><strong>${fmtRp(p.totalSistem)}</strong></div>
+      ${p.dp > 0 ? `<div class="row-between"><span class="text-gray">DP</span><span class="text-green">${fmtRp(p.dp)}</span></div>` : ''}
+      ${p.sisaBayar > 0 ? `<div class="row-between"><span class="text-gray">Sisa</span><span class="text-amber font-semibold">${fmtRp(p.sisaBayar)}</span></div>` : ''}
+      <div class="row-between total"><span>Total Bayar</span><span class="value">${fmtRp(p.dp > 0 ? p.dp : p.totalSistem)}</span></div>
+    </div>
+    <div class="row mt-3" style="gap:6px;flex-wrap:wrap">
+      <button class="btn btn-ghost btn-sm" data-act="detail-pesanan-pelanggan" data-id="${esc(p.id)}">${ico('eye','ico-sm')} Detail</button>
+      <button class="btn btn-ghost btn-sm" data-act="cetak-struk-pesanan" data-id="${esc(p.id)}">${ico('print','ico-sm')}</button>
+      ${p.status === 'Dipesan' ? `<button class="btn btn-ghost btn-sm" data-act="status-pesanan" data-id="${esc(p.id)}" data-status="Siap">${ico('check','ico-sm')} Siap</button>` : ''}
+      ${(p.status === 'Siap' || p.status === 'Dipesan') ? `<button class="btn btn-success btn-sm" style="flex:1" data-act="selesaikan-pesanan" data-id="${esc(p.id)}">${ico('check','ico-sm')} Selesaikan</button>` : ''}
+      ${p.status !== 'Selesai' && p.status !== 'Batal' ? `<button class="btn btn-danger btn-sm" style="flex:0 0 auto" data-act="batal-pesanan" data-id="${esc(p.id)}">${ico('x','ico-sm')}</button>` : ''}
+      ${p.status === 'Batal' ? `<button class="btn btn-ghost btn-sm" data-act="del-pesanan-pelanggan" data-id="${esc(p.id)}" style="flex:0 0 auto">${ico('trash','ico-sm')}</button>` : ''}
+    </div>
+  </div>`;
+}
 // ============================================
 //  TAB: KALENDER PESANAN
 // ============================================
@@ -1183,6 +1243,12 @@ function handleClick(e) {
   if (a === 'absen-masuk') return doAbsenMasuk();
   if (a === 'absen-keluar') return doAbsenKeluar();
 
+    // Pagination
+  if (a === 'setoran-page') { S._pageSetoran = parseInt(btn.dataset.page, 10) || 1; render(); return; }
+  if (a === 'kas-page') { S._pageKas = parseInt(btn.dataset.page, 10) || 1; render(); return; }
+  if (a === 'kartu-stok-page') { S._pageKartuStok = parseInt(btn.dataset.page, 10) || 1; render(); return; }
+  if (a === 'pesanan-page') { S._pagePesanan = parseInt(btn.dataset.page, 10) || 1; render(); return; }
+
   // Setoran
   if (a === 'apply-setoran-filter') return applySetoranFilter();
   if (a === 'approve') return doApprove(id);
@@ -1241,6 +1307,7 @@ function handleClick(e) {
   if (a === 'unlock-periode') return unlockPeriode(id);
 
   // Notifikasi / Profil
+  if (a === 'toggle-theme') return toggleDarkMode();
   if (a === 'open-notif') return switchTab('notifikasi');
   if (a === 'mark-notif-read') return markNotifRead(id);
   if (a === 'test-notif') return testNotif();
@@ -1416,10 +1483,16 @@ function applyBootstrap(b) {
   if (b.kas) S.kas = b.kas;
   if (b.laporan) S.laporan = b.laporan;
   if (b.role === 'admin') { S.view = 'admin'; S.tab = 'home'; }
+  // Persist master data (untuk offline)
   if (b.katalog) MEM.set('katalog', b.katalog, 3600000, true);
   if (b.suppliers) MEM.set('suppliers', b.suppliers, 3600000, true);
   if (b.lapak) MEM.set('lapak', b.lapak, 3600000, true);
   if (b.users) MEM.set('users', b.users, 3600000, true);
+  if (b.templateBox) MEM.set('templateBox', b.templateBox, 3600000, true);
+  // Persist data transaksional (untuk offline — stale data lebih baik daripada kosong)
+  if (b.dash) MEM.set('dash', b.dash, 300000, true);       // 5 menit
+  if (b.setoran) MEM.set('setoran_last', b.setoran, 300000, true);
+  if (b.laporan) MEM.set('laporan_last', b.laporan, 300000, true);
 }
 
 async function initKaryawan() {
@@ -1473,6 +1546,14 @@ function sessionExpired() {
 
 async function tryAutoLogin() {
   if (!S.token) return render();
+  // Offline-first: kalau ada cache, tampilkan dulu
+  const cachedDash = MEM.get('dash');
+  const cachedKatalog = MEM.get('katalog');
+  const cachedLapak = MEM.get('lapak');
+  if (cachedKatalog) S.katalog = cachedKatalog;
+  if (cachedLapak) S.lapak = cachedLapak;
+  if (cachedDash) S.dash = cachedDash;
+
   try {
     const res = await api('bootstrap', { token: S.token });
     S.user = await api('getMe', { token: S.token });
@@ -1481,14 +1562,48 @@ async function tryAutoLogin() {
     if (S.user.role === 'karyawan') await initKaryawan();
     render();
     setTimeout(preloadCommon, 100);
-  } catch (e) { localStorage.removeItem('tk'); S.token = null; render(); }
+  } catch (e) {
+    // Kalau gagal & tidak ada cache → logout
+    if (String(e.message).includes('UNAUTHORIZED') || !MEM.get('katalog')) {
+      localStorage.removeItem('tk');
+      S.token = null;
+      render();
+      return;
+    }
+    // Kalau offline & ada cache → tampilkan mode offline
+    toast('Mode offline — data mungkin tidak terbaru', 'info');
+    // Coba load user dari session cache
+    if (!S.user) {
+      try {
+        const me = await api('getMe', { token: S.token }).catch(() => null);
+        if (me) S.user = me;
+      } catch (_) {}
+    }
+    if (!S.user) { localStorage.removeItem('tk'); S.token = null; render(); return; }
+    if (S.user.role === 'admin') { S.view = 'admin'; S.tab = 'home'; }
+    render();
+  }
 }
 
 async function bootstrap() {
   showLoader();
-  try { const res = await api('bootstrap', { token: S.token }); applyBootstrap(res); }
-  catch (e) { toast(e.message, 'error'); if (String(e.message).includes('UNAUTHORIZED')) sessionExpired(); }
-  finally { hideLoader(); render(); }
+  try {
+    const res = await api('bootstrap', { token: S.token });
+    applyBootstrap(res);
+  } catch (e) {
+    toast(e.message, 'error');
+    if (String(e.message).includes('UNAUTHORIZED')) { sessionExpired(); return; }
+    // Offline fallback: coba ambil dari cache
+    if (String(e.message).includes('Network') || String(e.message).includes('fetch')) {
+      const cachedDash = MEM.get('dash');
+      const cachedSetoran = MEM.get('setoran_last');
+      const cachedLaporan = MEM.get('laporan_last');
+      if (cachedDash) S.dash = cachedDash;
+      if (cachedSetoran) S.setoran = cachedSetoran;
+      if (cachedLaporan) S.laporan = cachedLaporan;
+      toast('Menampilkan data cache (offline)', 'info');
+    }
+  } finally { hideLoader(); render(); }
 }
 
 async function preloadCommon() {
@@ -1874,11 +1989,29 @@ function showMoreMenu() {
       { id:'profil', label:'Profil & Pengaturan', icon:'user' }
     ]}
   ];
-  const body = `<div class="menu-sheet">${sections.map(sec => `<div><div class="menu-section-title">${esc(sec.title)}</div><div class="menu-list">${sec.items.map(m => `<button class="menu-item" data-m="${m.id}">${ico(m.icon)}<span class="menu-item-label">${esc(m.label)}</span>${ico('chevron-right', 'menu-item-chevron')}</button>`).join('')}</div></div>`).join('')}</div>`;
+  const body = `<div class="menu-sheet">
+    <input type="text" class="menu-search" placeholder="🔍 Cari menu..." data-menu-search>
+    ${sections.map(sec => `<div data-menu-section><div class="menu-section-title">${esc(sec.title)}</div><div class="menu-list">${sec.items.map(m => `<button class="menu-item" data-m="${m.id}" data-menu-label="${esc(m.label.toLowerCase())}">${ico(m.icon)}<span class="menu-item-label">${esc(m.label)}</span>${ico('chevron-right', 'menu-item-chevron')}</button>`).join('')}</div></div>`).join('')}
+  </div>`;
   modal({
     title: 'Menu Lainnya', body,
     actions: [{ label: 'Tutup', onClick: c => c() }],
     onMount: (wrap, close) => {
+      // Search filter
+      const searchInput = wrap.querySelector('[data-menu-search]');
+      if (searchInput) {
+        searchInput.addEventListener('input', () => {
+          const q = searchInput.value.toLowerCase().trim();
+          wrap.querySelectorAll('[data-menu-label]').forEach(btn => {
+            btn.classList.toggle('hide', q && btn.dataset.menuLabel.indexOf(q) === -1);
+          });
+          wrap.querySelectorAll('[data-menu-section]').forEach(sec => {
+            const visible = Array.from(sec.querySelectorAll('[data-menu-label]')).some(b => !b.classList.contains('hide'));
+            sec.style.display = visible ? '' : 'none';
+          });
+        });
+        setTimeout(() => searchInput.focus(), 100);
+      }
       wrap.addEventListener('click', e => {
         const b = e.target.closest('[data-m]');
         if (b) { close(); switchTab(b.dataset.m); }
@@ -3328,6 +3461,36 @@ function kalenderDay(tgl) {
 //  BOOT
 // ============================================
 (function boot() {
+  // Apply tema SEBELUM render agar tidak ada "flash"
+  if (S.darkMode) document.documentElement.setAttribute('data-theme', 'dark');
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tryAutoLogin);
   else tryAutoLogin();
 })();
+
+function toggleDarkMode() {
+  S.darkMode = !S.darkMode;
+  localStorage.setItem('darkMode', S.darkMode ? '1' : '0');
+  if (S.darkMode) document.documentElement.setAttribute('data-theme', 'dark');
+  else document.documentElement.removeAttribute('data-theme');
+  render();
+}
+
+// Pagination helper — return slice + info
+function paginate(list, page, pageSize) {
+  if (!Array.isArray(list)) return { items: [], total: 0, page: 1, totalPages: 1, hasMore: false };
+  const total = list.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const start = (safePage - 1) * pageSize;
+  return {
+    items: list.slice(start, start + pageSize),
+    total, page: safePage, totalPages,
+    hasMore: safePage < totalPages,
+    start, end: Math.min(start + pageSize, total)
+  };
+}
+function paginationFooter(state, actionName, pageKey) {
+  if (state.total === 0) return '';
+  return `<div class="pagination-info">Menampilkan ${state.start + 1}–${state.end} dari ${state.total}</div>` +
+    (state.hasMore ? `<button class="load-more-btn" data-act="${actionName}" data-page="${state.page + 1}">↓ Muat ${Math.min(S._pageSize, state.total - state.end)} lagi</button>` : '');
+}
