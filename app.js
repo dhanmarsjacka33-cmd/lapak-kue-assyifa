@@ -1,5 +1,5 @@
 'use strict';
-/* Kue As-Syifa POS v6.2 — Stable */
+/* Kue As-Syifa POS v6.3 — Stable + Fix Katalog */
 
 const CFG = window.APP_CONFIG || {};
 const API = CFG.API_URL;
@@ -90,7 +90,7 @@ const bulanLabel = ym => { if (!ym) return ''; const [y, m] = ym.split('-'); con
 const skeletonList = (n = 3) => `<div class="skeleton-list">${Array.from({ length: n }, () => '<div class="skeleton-item"></div>').join('')}</div>`;
 
 // ============================================
-//  PAGINATION — Simple
+//  PAGINATION
 // ============================================
 function paginate(list, page, pageSize) {
   pageSize = pageSize || S._pageSize;
@@ -202,7 +202,11 @@ function confirmDlg(title, msg, okText = 'Ya') {
 
 function formModal({ title, fields, onSubmit, submitLabel = 'Simpan', submitClass = 'btn-primary' }) {
   const body = fields.map(f => {
-    if (f.type === 'select') return `<div class="field"><label>${esc(f.label)}</label><select data-f="${f.key}" class="select">${(f.options || []).map(o => `<option value="${esc(o.v)}" ${o.selected ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}</select></div>`;
+    if (f.type === 'select') {
+      let opts = f.options || [];
+      if (f.allowEmpty) opts = [{ v: '', l: '-- Pilih --' }].concat(opts);
+      return `<div class="field"><label>${esc(f.label)}</label><select data-f="${f.key}" class="select">${opts.map(o => `<option value="${esc(o.v)}" ${o.selected ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}</select></div>`;
+    }
     if (f.type === 'radio') return `<div class="field"><label>${esc(f.label)}</label><div class="row" style="gap:16px;margin-top:6px;flex-wrap:wrap">${(f.options || []).map(o => `<label class="row text-sm" style="cursor:pointer;gap:6px"><input type="radio" name="__r_${f.key}" value="${esc(o.v)}" ${o.selected ? 'checked' : ''} data-f="${f.key}"><span>${esc(o.l)}</span></label>`).join('')}</div></div>`;
     if (f.type === 'textarea') return `<div class="field"><label>${esc(f.label)}</label><textarea data-f="${f.key}" class="textarea">${esc(f.value || '')}</textarea></div>`;
     if (f.type === 'checkbox') return `<label class="row text-sm mb-3" style="gap:8px;cursor:pointer"><input type="checkbox" data-f="${f.key}" ${f.checked ? 'checked' : ''}> ${esc(f.label)}</label>`;
@@ -441,7 +445,7 @@ function vLogin() {
       <div data-login-error class="hide" style="margin-bottom:12px"></div>
       <button class="btn btn-primary btn-block btn-lg mt-2" type="submit" data-login-btn><span data-login-btn-text>Masuk</span></button>
     </form>
-    <p class="text-center text-xs text-gray mt-3">v6.2 · Kue As-Syifa</p>
+    <p class="text-center text-xs text-gray mt-3">v6.3 · Kue As-Syifa</p>
   </div>`;
 }
 
@@ -454,7 +458,7 @@ function renderDropForm(d) {
   return `<div class="card" style="border:1.5px solid var(--amber);background:var(--amber-50)">
     <div class="card-title" style="color:var(--amber-600)">${ico('boxes')} Input Stok Diterima</div>
     <p class="text-xs text-gray mb-4">Masukkan jumlah kue yang Anda terima pagi ini.</p>
-    ${katalog.map(k => `<div class="row-between" style="padding:10px 0;border-bottom:1px solid rgba(245,158,11,.15)"><div style="min-width:0;flex:1;padding-right:8px"><p class="text-sm font-semibold">${esc(k.nama)}</p><p class="text-xs text-gray">${esc(k.supplierNama)} · ${fmtRp(k.hargaJual)}</p></div><div class="quick-input"><button type="button" class="quick-btn minus" data-drop-dec="${esc(k.id)}" data-step="1">−</button><input type="number" min="0" inputmode="numeric" value="0" data-drop-item="${esc(k.id)}" class="input field-sm" style="width:60px"><button type="button" class="quick-btn plus" data-drop-inc="${esc(k.id)}" data-step="1">+</button><button type="button" class="quick-btn plus" data-drop-inc="${esc(k.id)}" data-step="5" style="font-size:11px">+5</button></div></div>`).join('')}
+    ${katalog.map(k => `<div class="row-between" style="padding:10px 0;border-bottom:1px solid rgba(245,158,11,.15)"><div style="min-width:0;flex:1;padding-right:8px"><p class="text-sm font-semibold">${esc(k.nama)}</p><p class="text-xs text-gray">${esc(k.supplierNama || '-')} · ${fmtRp(k.hargaJual)}</p></div><div class="quick-input"><button type="button" class="quick-btn minus" data-drop-dec="${esc(k.id)}" data-step="1">−</button><input type="number" min="0" inputmode="numeric" value="0" data-drop-item="${esc(k.id)}" class="input field-sm" style="width:60px"><button type="button" class="quick-btn plus" data-drop-inc="${esc(k.id)}" data-step="1">+</button><button type="button" class="quick-btn plus" data-drop-inc="${esc(k.id)}" data-step="5" style="font-size:11px">+5</button></div></div>`).join('')}
     <button class="btn btn-primary btn-block mt-3" data-act="save-drop">Simpan Stok Diterima</button>
   </div>`;
 }
@@ -533,7 +537,7 @@ function tabHome() {
 }
 
 // ============================================
-//  TAB: KAS (dengan pagination)
+//  TAB: KAS
 // ============================================
 function tabKas() {
   const d = S.dash || { kasBesar: 0, recentKas: [] };
@@ -666,16 +670,25 @@ function analisisControlBar(range, groupBy, selectedEntities, allEntities) {
 }
 
 // ============================================
-//  TAB: KATALOG / SUPPLIERS / LAPAK / USERS
+//  TAB: KATALOG (dengan Warning Supplier Kosong)
 // ============================================
 function tabKatalog() {
   const isAdmin = S.user.role === 'admin';
   if (!S.katalog.length) return skeletonList(3);
   let html = `<div class="row-between mb-3"><h3 class="card-title" style="margin:0">${ico('box')} Katalog (${S.katalog.length})</h3><div class="row" style="gap:4px"><button class="btn btn-ghost btn-sm" data-act="tab" data-tab="harga-tingkat">${ico('tag','ico-sm')}</button><button class="btn btn-primary btn-sm" data-act="add-katalog">+ Tambah</button></div></div>`;
-  html += S.katalog.map(k => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(k.nama)}</div><div class="list-item-sub">${esc(k.supplierNama)} · ${esc(k.kategori || '-')}</div><div class="text-sm mt-2"><strong class="text-green">${fmtRp(k.hargaJual)}</strong>${isAdmin ? ` <span class="text-xs text-gray">· Beli ${fmtRp(k.hargaBeli)} · Margin ${fmtRp(k.margin)}</span>` : ''}</div></div><div class="list-item-actions"><button class="action-btn action-edit" data-act="edit-katalog" data-id="${esc(k.id)}">${ico('edit','ico-sm')}</button><button class="action-btn action-del" data-act="del-katalog" data-id="${esc(k.id)}">${ico('trash','ico-sm')}</button></div></div>`).join('');
+  html += S.katalog.map(k => {
+    const hasSupplier = k.supplierNama && String(k.supplierNama).trim() !== '';
+    const subText = hasSupplier
+      ? esc(k.supplierNama) + ' · ' + esc(k.kategori || '-')
+      : '<span style="color:var(--red);font-weight:600">⚠ Belum ada supplier — klik Edit</span>';
+    return `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(k.nama)}</div><div class="list-item-sub">${subText}</div><div class="text-sm mt-2"><strong class="text-green">${fmtRp(k.hargaJual)}</strong>${isAdmin ? ` <span class="text-xs text-gray">· Beli ${fmtRp(k.hargaBeli)} · Margin ${fmtRp(k.margin)}</span>` : ''}</div></div><div class="list-item-actions"><button class="action-btn action-edit" data-act="edit-katalog" data-id="${esc(k.id)}">${ico('edit','ico-sm')}</button><button class="action-btn action-del" data-act="del-katalog" data-id="${esc(k.id)}">${ico('trash','ico-sm')}</button></div></div>`;
+  }).join('');
   return html;
 }
 
+// ============================================
+//  TAB: SUPPLIERS / LAPAK / USERS
+// ============================================
 function tabSuppliers() {
   if (!S.suppliers.length) return skeletonList(2);
   let html = `<div class="row-between mb-3"><h3 class="card-title" style="margin:0">${ico('truck')} Suppliers</h3><button class="btn btn-primary btn-sm" data-act="add-supplier">+ Tambah</button></div>`;
@@ -708,7 +721,7 @@ function tabDistribusi() {
     <div class="card"><div class="form-grid"><div class="field"><label>Tanggal</label><input type="date" data-dist-tgl value="${tgl}" class="input field-sm"></div><div class="field"><label>Lapak</label><select data-dist-lapak class="select field-sm">${S.lapak.map(l => `<option value="${esc(l.id)}" ${l.id === lapakId ? 'selected' : ''}>${esc(l.nama)}</option>`).join('')}</select></div></div><button class="btn btn-ghost btn-block btn-sm" data-act="load-distribusi">Muat</button></div>
     <div class="card">`;
   if (!S.katalog.length) html += '<p class="text-xs text-gray">Katalog kosong.</p>';
-  else html += S.katalog.map(k => `<div class="row-between" style="padding:10px 0;border-bottom:1px solid #f8fafc"><div style="min-width:0;flex:1;padding-right:8px"><p class="text-sm font-semibold">${esc(k.nama)}</p><p class="text-xs text-gray">${esc(k.supplierNama)} · ${fmtRp(k.hargaJual)}</p></div><input type="number" min="0" inputmode="numeric" value="${items[k.id] || 0}" data-dist-item="${esc(k.id)}" class="input field-sm" style="width:72px;text-align:center"></div>`).join('');
+  else html += S.katalog.map(k => `<div class="row-between" style="padding:10px 0;border-bottom:1px solid #f8fafc"><div style="min-width:0;flex:1;padding-right:8px"><p class="text-sm font-semibold">${esc(k.nama)}</p><p class="text-xs text-gray">${esc(k.supplierNama || '-')} · ${fmtRp(k.hargaJual)}</p></div><input type="number" min="0" inputmode="numeric" value="${items[k.id] || 0}" data-dist-item="${esc(k.id)}" class="input field-sm" style="width:72px;text-align:center"></div>`).join('');
   html += `</div><button class="btn btn-primary btn-block mt-3" data-act="save-distribusi">Simpan Drop</button>`;
   return html;
 }
@@ -982,7 +995,7 @@ function tabTemplateBox() {
 }
 
 // ============================================
-//  TAB: PESANAN PELANGGAN — SIMPLE VERSION (NO IIFE)
+//  TAB: PESANAN PELANGGAN
 // ============================================
 function renderPesananCard(p) {
   const statusMap = { 'Dipesan':'dipesan', 'Siap':'siap', 'Diambil':'diambil', 'Selesai':'selesai', 'Batal':'batal' };
@@ -1026,7 +1039,6 @@ function tabPesananPelanggan() {
   const showDone = f.showDone === true;
   const filtered = list.filter(p => showDone ? true : (p.status !== 'Selesai' && p.status !== 'Batal'));
   const p = paginate(filtered, S._pagePesanan);
-
   let html = `<div class="row-between mb-3">
       <h3 class="card-title" style="margin:0">${ico('shopping-bag')} Pesanan</h3>
       <div class="row" style="gap:4px">
@@ -1038,7 +1050,6 @@ function tabPesananPelanggan() {
       <div class="form-grid"><div class="field"><label>Dari Tanggal</label><input type="date" data-pes-filter-dari value="${f.dari || ''}" class="input field-sm"></div><div class="field"><label>Sampai</label><input type="date" data-pes-filter-sampai value="${f.sampai || ''}" class="input field-sm"></div></div>
       <div class="row" style="gap:6px"><button class="btn btn-primary btn-block btn-sm" data-act="apply-pesanan-filter">Terapkan</button><button class="btn ${showDone ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="toggle-pesanan-done" data-show="${showDone ? '0' : '1'}" style="flex:0 0 auto">${showDone ? '✓ Selesai' : 'Semua'}</button>${f.dari || f.sampai ? `<button class="btn btn-ghost btn-sm" data-act="clear-pesanan-filter" style="flex:0 0 auto">${ico('x','ico-sm')}</button>` : ''}</div>
     </div>`;
-
   if (!filtered.length) {
     html += '<div class="empty">' + ico('shopping-bag','ico') + '<p>Belum ada pesanan.</p></div>';
   } else {
@@ -1093,7 +1104,6 @@ function handleClick(e) {
   const form = e.target.closest('[data-form="login"]');
   if (form && e.target.type === 'submit') { e.preventDefault(); doLogin(form); return; }
 
-  // Quick input buttons
   const incBtn = e.target.closest('[data-rekap-inc], [data-rekap-dec], [data-rekap-set]');
   if (incBtn) {
     e.preventDefault();
@@ -1137,7 +1147,6 @@ function handleClick(e) {
   if (a === 'clear-pesanan-filter') return clearPesananFilter();
   if (a === 'toggle-theme') return toggleDarkMode();
 
-  // Pagination
   if (a === 'setoran-page') { S._pageSetoran = parseInt(btn.dataset.page, 10) || 1; render(); return; }
   if (a === 'kas-page') { S._pageKas = parseInt(btn.dataset.page, 10) || 1; render(); return; }
   if (a === 'kartu-stok-page') { S._pageKartuStok = parseInt(btn.dataset.page, 10) || 1; render(); return; }
@@ -1418,7 +1427,6 @@ async function tryAutoLogin() {
   if (cachedKatalog) S.katalog = cachedKatalog;
   if (cachedLapak) S.lapak = cachedLapak;
   if (cachedDash) S.dash = cachedDash;
-
   try {
     const res = await api('bootstrap', { token: S.token });
     S.user = await api('getMe', { token: S.token });
@@ -1791,9 +1799,7 @@ function showMoreMenu() {
       if (searchInput) {
         searchInput.addEventListener('input', () => {
           const q = searchInput.value.toLowerCase().trim();
-          wrap.querySelectorAll('[data-menu-label]').forEach(btn => {
-            btn.classList.toggle('hide', q && btn.dataset.menuLabel.indexOf(q) === -1);
-          });
+          wrap.querySelectorAll('[data-menu-label]').forEach(btn => { btn.classList.toggle('hide', q && btn.dataset.menuLabel.indexOf(q) === -1); });
           wrap.querySelectorAll('[data-menu-section]').forEach(sec => {
             const visible = Array.from(sec.querySelectorAll('[data-menu-label]')).some(b => !b.classList.contains('hide'));
             sec.style.display = visible ? '' : 'none';
@@ -1828,13 +1834,11 @@ async function applySetoranFilter() {
   catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
-
 function clearSetoranFilter() {
   S._setoranFilter = {}; S._pageSetoran = 1;
   localStorage.removeItem('setoranFilter');
   loadTabData('setoran').then(() => render());
 }
-
 async function doApprove(id) {
   const ok = await confirmDlg('Terima Setoran?', 'Uang akan masuk ke Kas Besar.', 'Terima');
   if (!ok) return;
@@ -1852,7 +1856,6 @@ async function doApprove(id) {
   } catch (e) { if (s) s.status = oldStatus; toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
-
 async function doReject(id) {
   const reason = await new Promise(resolve => modal({ title: 'Tolak Setoran', body: '<div class="field"><label>Alasan (opsional)</label><textarea data-reason class="textarea" autofocus></textarea></div>', actions: [{ label: 'Batal', onClick: c => { c(); resolve(null); } }, { label: 'Tolak', className: 'btn-danger', onClick: (c, w) => { const r = w.querySelector('[data-reason]').value; c(); resolve(r); } }] }));
   if (reason === null) return;
@@ -1868,7 +1871,6 @@ async function doReject(id) {
   } catch (e) { if (s) s.status = oldStatus; toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
-
 async function showSetoranDetail(id) {
   showLoader();
   try {
@@ -1879,7 +1881,6 @@ async function showSetoranDetail(id) {
     modal({ title: 'Detail Setoran', body: '<strong class="text-sm">Item Terjual</strong><div class="mb-3 mt-2">' + itemsHtml + '</div><strong class="text-sm">Pengeluaran</strong><div class="mt-2">' + pengHtml + '</div>', actions: [{ label: 'Tutup', onClick: c => c() }] });
   } catch (e) { hideLoader(); toast(e.message, 'error'); }
 }
-
 async function formEditSetoran(id) {
   const s = (S.setoran || []).find(x => x.id === id);
   if (!s) return toast('Setoran tidak ditemukan', 'error');
@@ -1900,7 +1901,6 @@ async function formEditSetoran(id) {
     ]
   });
 }
-
 async function showStruk(setoranId) {
   showLoader();
   try {
@@ -1911,7 +1911,6 @@ async function showStruk(setoranId) {
     modal({ title: 'Struk', body: html, actions: [{ label: 'Tutup', onClick: c => c() }, { label: '🖨️ Cetak', className: 'btn-primary', onClick: () => { const w = window.open('', '_blank'); w.document.write('<html><head><title>Struk</title></head><body onload="window.print();window.close()">' + html + '</body></html>'); w.document.close(); } }] });
   } catch (e) { hideLoader(); toast(e.message, 'error'); }
 }
-
 function formKas() {
   formModal({
     title: 'Transaksi Kas',
@@ -1931,29 +1930,46 @@ function formKas() {
 }
 
 // ============================================
-//  MASTER CRUD
+//  MASTER CRUD — Katalog (dengan validasi supplier)
 // ============================================
 function formKatalog(id) {
   const item = id ? S.katalog.find(k => k.id === id) : null;
+  if (!S.suppliers.length) return toast('Tambah supplier dulu di menu Supplier.', 'error');
+  const options = S.suppliers.map(s => ({
+    v: s.id,
+    l: s.nama + (s.tipeTransaksi === 'TitipJual' ? ' (Titip)' : ''),
+    selected: item ? String(item.supplierId) === String(s.id) : false
+  }));
   formModal({
     title: item ? 'Edit Item' : 'Tambah Item',
     fields: [
-      { key:'nama', label:'Nama', value: item ? item.nama : '' },
-      { key:'supplierId', label:'Supplier', type:'select', value: item ? item.supplierId : '', options: [{v:'',l:'-- Pilih --'}].concat(S.suppliers.map(s => ({ v:s.id, l:s.nama, selected: item && item.supplierId === s.id }))) },
+      { key:'nama', label:'Nama', value: item ? item.nama : '', placeholder:'Contoh: Pastel Telur (Bu Tejo)' },
+      { key:'supplierId', label:'Supplier', type:'select', value: item ? item.supplierId : '', options: options },
       { key:'kategori', label:'Kategori', value: item ? item.kategori : '', placeholder:'Opsional' },
       { key:'hargaBeli', label:'Harga Beli', type:'number', value: item ? item.hargaBeli : 0 },
       { key:'hargaJual', label:'Harga Jual', type:'number', value: item ? item.hargaJual : 0 },
       { key:'aktif', label:'Aktif', type:'checkbox', checked: !item || item.aktif }
     ],
     onSubmit: async (data, c) => {
+      if (!data.supplierId) return toast('Pilih supplier dulu!', 'error');
+      if (!data.nama || !String(data.nama).trim()) return toast('Nama wajib diisi.', 'error');
+      if ((data.hargaJual || 0) <= 0) return toast('Harga jual harus > 0.', 'error');
+      if ((data.hargaJual || 0) < (data.hargaBeli || 0)) return toast('Harga jual harus ≥ harga beli.', 'error');
       data.id = item ? item.id : null;
       c(); showLoader();
-      try { const r = await api('saveKatalog', { token: S.token, item: data }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) { S.katalog = await api('getKatalog', { token: S.token }); MEM.set('katalog', S.katalog, 3600000, true); } }
-      catch (e) { toast(e.message, 'error'); }
+      try {
+        const r = await api('saveKatalog', { token: S.token, item: data });
+        toast(r.message, r.success ? 'success' : 'error');
+        if (r.success) {
+          S.katalog = await api('getKatalog', { token: S.token });
+          MEM.set('katalog', S.katalog, 3600000, true);
+        }
+      } catch (e) { toast(e.message, 'error'); }
       finally { hideLoader(); render(); }
     }
   });
 }
+
 async function delKatalog(id) {
   if (!(await confirmDlg('Hapus item?', 'Item akan dihapus permanen.'))) return;
   const oldList = S.katalog.slice();
@@ -2801,9 +2817,12 @@ function formPesananPelanggan(id) {
       { label: 'Batal', onClick: c => c() },
       { label: 'Simpan', className: 'btn-primary', onClick: async (c, w) => {
         const get = s => (w.querySelector('[data-f="' + s + '"]') || {}).value || '';
-        const jenis = (w.querySelector('[data-f="jenisAmbil"] .chip.active') || {}).dataset ? w.querySelector('[data-f="jenisAmbil"] .chip.active').dataset.val : 'Terjadwal';
-        const metode = (w.querySelector('[data-f="metodeAmbil"] .chip.active') || {}).dataset ? w.querySelector('[data-f="metodeAmbil"] .chip.active').dataset.val : 'Ambil';
-        const metodeBayar = (w.querySelector('[data-f="metodeBayar"] .chip.active') || {}).dataset ? w.querySelector('[data-f="metodeBayar"] .chip.active').dataset.val : 'Tunai';
+        const jenisEl = w.querySelector('[data-f="jenisAmbil"] .chip.active');
+        const metodeEl = w.querySelector('[data-f="metodeAmbil"] .chip.active');
+        const metodeBayarEl = w.querySelector('[data-f="metodeBayar"] .chip.active');
+        const jenis = jenisEl ? jenisEl.dataset.val : 'Terjadwal';
+        const metode = metodeEl ? metodeEl.dataset.val : 'Ambil';
+        const metodeBayar = metodeBayarEl ? metodeBayarEl.dataset.val : 'Tunai';
         if (!get('pelangganNama').trim()) return toast('Nama pelanggan wajib.', 'error');
         if (!state.items.length) return toast('Tambahkan minimal 1 item.', 'error');
         c(); showLoader();
