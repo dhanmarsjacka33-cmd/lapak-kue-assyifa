@@ -639,3 +639,20 @@ input[type=radio]{accent-color:var(--amber);cursor:pointer}
 /* ============ STATUS BADGE ENHANCED ============ */
 .status-line { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
 .status-line .badge { font-size: 10px; padding: 4px 8px; }
+/* ============ SKELETON ============ */
+.skeleton-list { padding: 16px; }
+.skeleton-item { height: 60px; background: linear-gradient(90deg,#f1f5f9 25%,#e2e8f0 50%,#f1f5f9 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 12px; margin-bottom: 10px; }
+
+/* ============ QUICK INPUT ============ */
+.quick-input { display: flex; align-items: center; gap: 4px; }
+.quick-input input { text-align: center; font-weight: 700; font-size: 15px; }
+.quick-btn { width: 32px; height: 32px; border-radius: 8px; border: none; background: var(--surface-2); color: var(--ink-3); font-weight: 700; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .1s; }
+.quick-btn:active { transform: scale(.9); }
+.quick-btn.plus { background: var(--green-bg); color: var(--green); }
+.quick-btn.minus { background: var(--red-bg); color: var(--red); }
+
+/* ============ TABLE SCROLL ============ */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll .analytics-table { min-width: 420px; }
+.chip-group .chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+.chip-group .chip strong { color: inherit; opacity: .7; font-weight: 600; font-size: 10px; }
