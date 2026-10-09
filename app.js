@@ -33,7 +33,7 @@ const S = {
   _pesananFilter: JSON.parse(localStorage.getItem('pesananFilter') || '{}'),
   _distTanggal: null, _distLapakId: null, _distItems: {},
   _abortControllers: {},
-  _dirty: {} 
+  _dirty: {},
   darkMode: localStorage.getItem('darkMode') === '1',
   _pageSetoran: 1, _pageKas: 1, _pageKartuStok: 1, _pagePesanan: 1,
   _pageSize: 15// Tandai list yang perlu refresh (untuk stale-while-revalidate)
