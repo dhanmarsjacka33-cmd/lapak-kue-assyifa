@@ -1,5 +1,5 @@
 'use strict';
-/* Kue As-Syifa POS v6.5 — Titipan Supplier Kapan Saja + Partial Bayar */
+/* Kue As-Syifa POS v6.6 — Karyawan: Tab Home + Tab Titipan Terpisah */
 
 const CFG = window.APP_CONFIG || {};
 const API = CFG.API_URL;
@@ -250,7 +250,7 @@ function render() {
     else if (view === 'admin') app.innerHTML = vAdminShell();
   }
   if (view === 'karyawan') {
-    updateKaryawanTopbar(); updateKaryawanBody();
+    updateKaryawanTopbar(); updateKaryawanTabbar(); updateKaryawanBody();
     if (S.karyawan && S.karyawan.absen && S.karyawan.absen.isOpen && S.karyawan.distribusi && S.karyawan.distribusi.length && !S.karyawan.sudahSubmit) {
       const l = $('[data-peng-list]'); if (l && !l.children.length) addPengRow();
     }
@@ -342,26 +342,51 @@ function renderAdminTabContent() {
 }
 
 function vKaryawanShell() {
-  return `<div class="page"><div class="topbar" data-kar-topbar></div><div class="page-body fade-in" data-kar-body></div></div>`;
+  return `<div class="page"><div class="topbar" data-kar-topbar></div><div class="page-body fade-in" data-kar-body></div><div class="tabbar" data-kar-tabbar></div></div>`;
 }
 
 function updateKaryawanTopbar() {
   const el = $('[data-kar-topbar]'); if (!el) return;
   const themeIcon = S.darkMode ? 'sun' : 'moon';
-  const tk = S.titipanKaryawan || {};
-  const pendingCount = (tk.pending || []).length;
   el.innerHTML = `<div class="topbar-title"><h2>${esc(S.user.name)}</h2><p>${esc((S.karyawan && S.karyawan.lapakNama) || '')}</p></div>
     <div class="row" style="gap:4px">
       <button class="theme-toggle" data-act="toggle-theme">${ico(themeIcon)}</button>
-      ${pendingCount > 0 ? `<button class="icon-btn icon-btn-relative" data-act="scroll-to-titipan" title="Titipan Supplier">${ico('truck')}<span class="badge-dot">${pendingCount > 9 ? '9+' : pendingCount}</span></button>` : ''}
       <button class="icon-btn" data-act="ganti-lapak">${ico('store')}</button>
       <button class="icon-btn" data-act="logout">${ico('out')}</button>
     </div>`;
 }
 
+function updateKaryawanTabbar() {
+  const el = $('[data-kar-tabbar]'); if (!el) return;
+  const tk = S.titipanKaryawan || {};
+  const pendingCount = (tk.pending || []).length;
+  const tabs = [
+    { id:'home', label:'Home', icon:'chart' },
+    { id:'titipan', label:'Titipan', icon:'truck', badge: pendingCount }
+  ];
+  el.innerHTML = tabs.map(t => {
+    const badge = t.badge || 0;
+    return `<button class="tab ${S.tab === t.id ? 'active' : ''}" data-act="kar-tab" data-tab="${t.id}">${ico(t.icon)}<span>${t.label}</span>${badge > 0 ? `<span class="badge-dot">${badge > 9 ? '9+' : badge}</span>` : ''}</button>`;
+  }).join('');
+}
+
 function updateKaryawanBody() {
   const el = $('[data-kar-body]'); if (!el) return;
-  el.innerHTML = renderKaryawanBody();
+  if (S.tab === 'titipan') {
+    el.innerHTML = renderTitipanTab();
+  } else {
+    el.innerHTML = renderKaryawanBody();
+  }
+}
+
+function renderTitipanTab() {
+  const tk = S.titipanKaryawan || {};
+  const pending = tk.pending || [];
+  const sudahBayar = tk.sudahBayar || [];
+  if (!pending.length && !sudahBayar.length) {
+    return `<div class="empty">${ico('truck','ico')}<p>Tidak ada titipan supplier saat ini.</p></div>`;
+  }
+  return renderTitipanSection();
 }
 
 function renderKaryawanBody() {
@@ -373,9 +398,6 @@ function renderKaryawanBody() {
   const statusCls = { belum: 'status-belum', bekerja: 'status-bekerja', selesai: 'status-selesai' };
 
   let body = '';
-
-  // ============ TITIPAN SUPPLIER (Feature A: SELALU DI ATAS) ============
-  body += renderTitipanSection();
 
   // ============ CLOCK CARD ============
   body += `<div class="clock-card">
@@ -1248,9 +1270,10 @@ function handleClick(e) {
   if (a === 'absen-keluar') return doAbsenKeluar();
   if (a === 'bayar-titipan') return formBayarTitipan(id);
   if (a === 'batal-bayar-titipan') return batalBayarTitipan(id);
-  if (a === 'scroll-to-titipan') {
-    const el = $('[data-titipan-section]');
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (a === 'kar-tab') {
+    S.tab = tab || 'home';
+    updateKaryawanTabbar();
+    updateKaryawanBody();
     return;
   }
 
@@ -1489,6 +1512,7 @@ async function initKaryawan() {
     S.karyawan = results[0]; S.kasbon = results[1]; S.absensiHariIni = results[2]; S.retur = results[3]; S.titipanKaryawan = results[4];
     if (S.karyawan.distribusi) S.karyawan.distribusi.forEach(x => { if (S.rekap[x.katalogId] === undefined) S.rekap[x.katalogId] = 0; });
     S.view = 'karyawan'; S.tab = 'home';
+    updateKaryawanTabbar && updateKaryawanTabbar();
   } catch (e) { console.error(e); toast('Gagal memuat data karyawan: ' + e.message, 'error'); S.view = 'login'; }
 }
 
