@@ -1,5 +1,5 @@
 'use strict';
-/* Kue As-Syifa POS v6.3 — Stable + Fix Katalog */
+/* Kue As-Syifa POS v6.5 — Titipan Supplier Kapan Saja + Partial Bayar */
 
 const CFG = window.APP_CONFIG || {};
 const API = CFG.API_URL;
@@ -28,6 +28,7 @@ const S = {
   analytics: null, analyticsRange: 30,
   analisisPerforma: null, analisisGroupBy: 'item', analisisRange: 30,
   analisisSelectedIds: [], _analisisCharts: {},
+  titipanKaryawan: null,
   rekap: {},
   _setoranFilter: JSON.parse(localStorage.getItem('setoranFilter') || '{}'),
   _pesananFilter: JSON.parse(localStorage.getItem('pesananFilter') || '{}'),
@@ -347,9 +348,12 @@ function vKaryawanShell() {
 function updateKaryawanTopbar() {
   const el = $('[data-kar-topbar]'); if (!el) return;
   const themeIcon = S.darkMode ? 'sun' : 'moon';
+  const tk = S.titipanKaryawan || {};
+  const pendingCount = (tk.pending || []).length;
   el.innerHTML = `<div class="topbar-title"><h2>${esc(S.user.name)}</h2><p>${esc((S.karyawan && S.karyawan.lapakNama) || '')}</p></div>
     <div class="row" style="gap:4px">
       <button class="theme-toggle" data-act="toggle-theme">${ico(themeIcon)}</button>
+      ${pendingCount > 0 ? `<button class="icon-btn icon-btn-relative" data-act="scroll-to-titipan" title="Titipan Supplier">${ico('truck')}<span class="badge-dot">${pendingCount > 9 ? '9+' : pendingCount}</span></button>` : ''}
       <button class="icon-btn" data-act="ganti-lapak">${ico('store')}</button>
       <button class="icon-btn" data-act="logout">${ico('out')}</button>
     </div>`;
@@ -368,7 +372,13 @@ function renderKaryawanBody() {
   const statusMap = { belum: 'Belum Absen', bekerja: 'Bekerja', selesai: 'Selesai' };
   const statusCls = { belum: 'status-belum', bekerja: 'status-bekerja', selesai: 'status-selesai' };
 
-  let body = `<div class="clock-card">
+  let body = '';
+
+  // ============ TITIPAN SUPPLIER (Feature A: SELALU DI ATAS) ============
+  body += renderTitipanSection();
+
+  // ============ CLOCK CARD ============
+  body += `<div class="clock-card">
       <div class="clock-time" data-live-clock>--:--:--</div>
       <div class="clock-label">${esc(fmtDateID(new Date()))} · <span class="status-pill ${statusCls[ak.status] || 'status-belum'}">${statusMap[ak.status] || 'Belum Absen'}</span></div>
       ${ak.jamMasuk ? `<div class="text-xs" style="opacity:.7;margin-bottom:12px">Masuk: ${esc(ak.jamMasuk)}${ak.jamKeluar ? ' · Keluar: ' + esc(ak.jamKeluar) : ''}</div>` : ''}
@@ -385,6 +395,7 @@ function renderKaryawanBody() {
       </div>
     </div>`;
 
+  // ============ FORM DROP / REKAP ============
   if (d.sudahSubmit) {
     body += `<div class="alert alert-success">${ico('check','ico')}<div><strong>Laporan sudah dikirim</strong><br><span class="text-xs">Menunggu persetujuan admin.</span></div></div>`;
     body += `<button class="btn btn-ghost btn-block mb-3" data-act="retur-karyawan">${ico('return','ico-sm')} Ajukan Retur</button>`;
@@ -399,6 +410,7 @@ function renderKaryawanBody() {
     body += renderRekapForm(d);
   }
 
+  // ============ KASBON ============
   const kb = (S.kasbon && S.kasbon.list) || [];
   const statusBadge = s => s === 'Outstanding' || s === 'Pending' ? '<span class="badge badge-warn">Menunggu</span>' : s === 'Lunas' ? '<span class="badge badge-success">Lunas</span>' : s === 'Rejected' ? '<span class="badge badge-danger">Ditolak</span>' : `<span class="badge badge-gray">${esc(s)}</span>`;
   body += `<div class="card">
@@ -407,6 +419,72 @@ function renderKaryawanBody() {
       kb.slice(0, 5).map(k => `<div class="row-between" style="padding:8px 0;border-bottom:1px solid #f8fafc"><div style="min-width:0;flex:1"><p class="text-sm">${esc(k.keterangan || k.tipe)}</p><p class="text-xs text-gray">${esc(k.tanggal)}</p>${statusBadge(k.status)}</div><div class="text-right" style="flex-shrink:0;margin-left:8px"><p class="text-sm font-semibold ${k.tipe === 'Kasbon' ? 'text-red' : 'text-green'}">${k.tipe === 'Kasbon' ? '-' : '+'}${fmtRp(k.nominal)}</p></div></div>`).join('')}
   </div>`;
   return body;
+}
+
+// ============================================
+//  TITIPAN SUPPLIER SECTION (v6.5)
+// ============================================
+function renderTitipanSection() {
+  const tk = S.titipanKaryawan || {};
+  const pending = tk.pending || [];
+  const sudahBayar = tk.sudahBayar || [];
+  if (!pending.length && !sudahBayar.length) return '';
+
+  const totalPending = pending.reduce((s, x) => s + (x.total || 0), 0);
+  const totalSudahBayar = sudahBayar.reduce((s, x) => s + (x.total || 0), 0);
+
+  let html = `<div class="card" data-titipan-section="1" style="border:1.5px solid var(--amber);background:var(--amber-50)">
+    <div class="row-between mb-3">
+      <strong class="text-sm" style="color:var(--amber-600)">${ico('truck','ico-sm')} Titipan Supplier</strong>
+      ${totalPending > 0 ? `<span class="badge badge-warn">${fmtRp(totalPending)}</span>` : '<span class="badge badge-success">✓ Lunas</span>'}
+    </div>`;
+
+  if (totalPending > 0) {
+    html += `<p class="text-xs text-gray mb-3">Klik <strong>Bayar</strong> untuk melunasi utang ke supplier. Bisa bayar sebagian atau penuh, kapan saja.</p>`;
+    html += pending.map(s => `
+      <div style="padding:10px 0;border-bottom:1px solid rgba(245,158,11,.2)">
+        <div class="row-between mb-2">
+          <div style="min-width:0;flex:1">
+            <div class="text-sm font-semibold">${esc(s.supplierNama)}</div>
+            <div class="text-xs text-gray">${s.count} transaksi pending</div>
+          </div>
+          <div class="text-right" style="flex-shrink:0;margin-left:8px">
+            <div class="text-sm font-bold text-red">${fmtRp(s.total)}</div>
+          </div>
+        </div>
+        <button class="btn btn-success btn-block btn-sm" data-act="bayar-titipan" data-id="${esc(s.supplierId)}">
+          ${ico('money','ico-sm')} Bayar ke ${esc(s.supplierNama)}
+        </button>
+      </div>
+    `).join('');
+  }
+
+  if (totalSudahBayar > 0) {
+    html += `<div class="mt-3" style="padding:10px;background:var(--green-bg);border-radius:8px">
+      <div class="row-between mb-2">
+        <span class="text-xs font-semibold text-green">✓ Sudah Dibayar Hari Ini</span>
+        <strong class="text-sm text-green">${fmtRp(totalSudahBayar)}</strong>
+      </div>`;
+    html += sudahBayar.map(b => `
+      <div style="padding:8px 0;border-bottom:1px solid rgba(5,150,105,.15)">
+        <div class="row-between text-sm">
+          <div style="min-width:0;flex:1">
+            <div style="font-weight:600">${esc(b.supplierNama)}</div>
+            <div class="text-xs text-gray">${esc(b.metode)}${b.noNota ? ' · Nota ' + esc(b.noNota) : ''}${b.createdAt ? ' · ' + esc(b.createdAt) : ''}</div>
+          </div>
+          <div class="text-right" style="flex-shrink:0">
+            <div class="text-sm font-bold text-green">${fmtRp(b.total)}</div>
+            ${b.canCancel ? `<button class="btn btn-ghost btn-sm mt-1" data-act="batal-bayar-titipan" data-id="${esc(b.id)}" style="padding:4px 8px;font-size:11px">Batalkan</button>` : '<span class="text-xs text-gray">🔒</span>'}
+          </div>
+        </div>
+      </div>
+    `).join('');
+    html += `<p class="text-xs text-gray mt-2">${ico('info','ico-sm')} Jumlah ini otomatis masuk ke Pengeluaran saat kirim rekap.</p>
+    </div>`;
+  }
+
+  html += `</div>`;
+  return html;
 }
 
 // ============================================
@@ -445,7 +523,7 @@ function vLogin() {
       <div data-login-error class="hide" style="margin-bottom:12px"></div>
       <button class="btn btn-primary btn-block btn-lg mt-2" type="submit" data-login-btn><span data-login-btn-text>Masuk</span></button>
     </form>
-    <p class="text-center text-xs text-gray mt-3">v6.3 · Kue As-Syifa</p>
+    <p class="text-center text-xs text-gray mt-3">v6.5 · Kue As-Syifa</p>
   </div>`;
 }
 
@@ -491,6 +569,9 @@ function summaryHTML() {
   (d.distribusi || []).forEach(it => { total += (it.qtyDrop - (S.rekap[it.katalogId] || 0)) * it.hargaJual; });
   let pengeluaran = 0;
   $$('[data-peng-row]').forEach(r => { const el = r.querySelector('[data-peng-nom]'); if (el) pengeluaran += parseInt(el.value, 10) || 0; });
+  const tk = S.titipanKaryawan || {};
+  const totalTitipan = (tk.sudahBayar || []).reduce((s, x) => s + (x.total || 0), 0);
+  pengeluaran += totalTitipan;
   const tunaiEl = $('input[name="tunai"]'), qrisEl = $('input[name="qris"]');
   const tunai = tunaiEl ? (parseInt(tunaiEl.value, 10) || 0) : 0;
   const qris = qrisEl ? (parseInt(qrisEl.value, 10) || 0) : 0;
@@ -499,6 +580,7 @@ function summaryHTML() {
   return `<div style="flex:1">
     <div class="row-between text-xs"><span>Penjualan</span><strong>${fmtRp(total)}</strong></div>
     <div class="row-between text-xs text-red"><span>Pengeluaran</span><span>- ${fmtRp(pengeluaran)}</span></div>
+    ${totalTitipan > 0 ? `<div class="row-between text-xs text-gray" style="padding-left:12px"><span>↳ termasuk titipan supplier</span><span>${fmtRp(totalTitipan)}</span></div>` : ''}
     <div class="row-between text-xs text-green font-bold mt-2"><span>Harus Disetor</span><span>${fmtRp(Math.max(0, expected))}</span></div>
     <div class="divider" style="margin:10px 0"></div>
     <div class="row-between text-xs"><span>Tunai + QRIS</span><span>${fmtRp(tunai + qris)}</span></div>
@@ -670,7 +752,7 @@ function analisisControlBar(range, groupBy, selectedEntities, allEntities) {
 }
 
 // ============================================
-//  TAB: KATALOG (dengan Warning Supplier Kosong)
+//  TAB: KATALOG
 // ============================================
 function tabKatalog() {
   const isAdmin = S.user.role === 'admin';
@@ -1164,6 +1246,13 @@ function handleClick(e) {
   if (a === 'retur-karyawan') return formReturKaryawan();
   if (a === 'absen-masuk') return doAbsenMasuk();
   if (a === 'absen-keluar') return doAbsenKeluar();
+  if (a === 'bayar-titipan') return formBayarTitipan(id);
+  if (a === 'batal-bayar-titipan') return batalBayarTitipan(id);
+  if (a === 'scroll-to-titipan') {
+    const el = $('[data-titipan-section]');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
 
   if (a === 'apply-setoran-filter') return applySetoranFilter();
   if (a === 'approve') return doApprove(id);
@@ -1394,9 +1483,10 @@ async function initKaryawan() {
       api('getKaryawanDashboard', { token: S.token }),
       api('getKasbon', { token: S.token, filter: {} }),
       api('absensiHariIni', { token: S.token }).catch(() => ({ status: 'belum' })),
-      api('getReturList', { token: S.token, filter: {} }).catch(() => [])
+      api('getReturList', { token: S.token, filter: {} }).catch(() => []),
+      api('getTitipanKaryawan', { token: S.token }).catch(() => ({ pending: [], sudahBayar: [] }))
     ]);
-    S.karyawan = results[0]; S.kasbon = results[1]; S.absensiHariIni = results[2]; S.retur = results[3];
+    S.karyawan = results[0]; S.kasbon = results[1]; S.absensiHariIni = results[2]; S.retur = results[3]; S.titipanKaryawan = results[4];
     if (S.karyawan.distribusi) S.karyawan.distribusi.forEach(x => { if (S.rekap[x.katalogId] === undefined) S.rekap[x.katalogId] = 0; });
     S.view = 'karyawan'; S.tab = 'home';
   } catch (e) { console.error(e); toast('Gagal memuat data karyawan: ' + e.message, 'error'); S.view = 'login'; }
@@ -1493,9 +1583,10 @@ async function karyawanAction(action) {
 async function reloadKaryawan() {
   const results = await Promise.all([
     api('getKaryawanDashboard', { token: S.token }),
-    api('absensiHariIni', { token: S.token }).catch(() => ({ status: 'belum' }))
+    api('absensiHariIni', { token: S.token }).catch(() => ({ status: 'belum' })),
+    api('getTitipanKaryawan', { token: S.token }).catch(() => ({ pending: [], sudahBayar: [] }))
   ]);
-  S.karyawan = results[0]; S.absensiHariIni = results[1];
+  S.karyawan = results[0]; S.absensiHariIni = results[1]; S.titipanKaryawan = results[2];
   if (S.karyawan.distribusi) S.karyawan.distribusi.forEach(x => { if (S.rekap[x.katalogId] === undefined) S.rekap[x.katalogId] = 0; });
 }
 
@@ -1573,6 +1664,167 @@ async function doAbsenKeluar() {
   showLoader();
   try { const r = await api('absenKeluar', { token: S.token }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) await reloadKaryawan(); }
   catch (e) { toast(e.message, 'error'); }
+  finally { hideLoader(); render(); }
+}
+
+// ============================================
+//  TITIPAN SUPPLIER (KARYAWAN) — v6.5
+// ============================================
+function formBayarTitipan(supplierId) {
+  const tk = S.titipanKaryawan || {};
+  const pending = (tk.pending || []).find(x => String(x.supplierId) === String(supplierId));
+  if (!pending) return toast('Data titipan tidak ditemukan.', 'error');
+  if (!pending.items || !pending.items.length) return toast('Tidak ada transaksi pending.', 'error');
+
+  const state = {
+    selected: {},
+    noNota: '',
+    catatan: '',
+    metode: 'Tunai'
+  };
+  pending.items.forEach(it => { state.selected[it.id] = true; });
+
+  const computeTotal = () => pending.items.reduce((sum, it) => sum + (state.selected[it.id] ? (Number(it.utang) || 0) : 0), 0);
+  const selectedCount = () => pending.items.filter(it => state.selected[it.id]).length;
+
+  const renderItems = () => pending.items.map(it => `
+    <label class="item-selector ${state.selected[it.id] ? 'selected' : ''}" style="margin-bottom:6px">
+      <input type="checkbox" ${state.selected[it.id] ? 'checked' : ''} data-cb="${esc(it.id)}">
+      <div class="item-selector-info">
+        <div class="item-selector-name">${esc(it.nama)}</div>
+        <div class="item-selector-price">${esc(it.tanggal)} · ${it.qtyLaku} × ${fmtRp(it.hargaTitip)}</div>
+      </div>
+      <strong style="color:var(--red);font-size:13px;flex-shrink:0">${fmtRp(it.utang)}</strong>
+    </label>
+  `).join('');
+
+  const renderBody = () => `
+    <div class="card-flat" style="padding:12px;margin-bottom:12px;background:var(--amber-50);border:1px solid rgba(245,158,11,.3)">
+      <div class="row-between mb-2">
+        <span class="text-xs text-gray">Total Dipilih (<span data-count>${selectedCount()}</span>/${pending.items.length})</span>
+        <strong style="font-size:20px;color:var(--amber-600)" data-total>${fmtRp(computeTotal())}</strong>
+      </div>
+      <div class="text-xs text-gray">${esc(pending.supplierNama)}</div>
+    </div>
+
+    <div class="row-between mb-2">
+      <strong class="text-xs text-gray">PILIH TRANSAKSI</strong>
+      <div class="row" style="gap:6px">
+        <button type="button" class="btn btn-ghost btn-sm" data-act-all="1">Semua</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-act-all="0">Kosong</button>
+      </div>
+    </div>
+    <div style="max-height:240px;overflow-y:auto;margin-bottom:12px">
+      ${renderItems()}
+    </div>
+
+    <div class="form-grid" style="margin-bottom:8px">
+      <div class="field" style="margin-bottom:0">
+        <label>No. Nota</label>
+        <input type="text" class="input" data-f="noNota" placeholder="Opsional" value="${esc(state.noNota)}">
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label>Metode</label>
+        <select class="select" data-f="metode">
+          <option value="Tunai" ${state.metode === 'Tunai' ? 'selected' : ''}>Tunai</option>
+          <option value="Transfer" ${state.metode === 'Transfer' ? 'selected' : ''}>Transfer</option>
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <label>Catatan (opsional)</label>
+      <textarea class="textarea" data-f="catatan" placeholder="Misal: diantar supir, dsb." style="min-height:60px">${esc(state.catatan)}</textarea>
+    </div>
+
+    <div class="alert alert-warn" style="margin-bottom:0">${ico('info','ico-sm')}<span>Setoran hari ini otomatis berkurang. Jika setoran sudah dikirim, jumlah ini akan masuk ke rekap setoran berikutnya.</span></div>
+  `;
+
+  modal({
+    title: 'Bayar ' + esc(pending.supplierNama),
+    body: '<div id="form-bayar-body">' + renderBody() + '</div>',
+    actions: [
+      { label: 'Batal', onClick: c => c() },
+      { label: 'Bayar', className: 'btn-success', onClick: async (c, w) => {
+        const ids = pending.items.filter(it => state.selected[it.id]).map(it => it.id);
+        if (!ids.length) return toast('Pilih minimal 1 transaksi.', 'error');
+        if (S.submitting) return;
+        S.submitting = true;
+        c(); showLoader();
+        try {
+          const r = await api('bayarTitipanKaryawan', {
+            token: S.token,
+            payload: {
+              supplierId: pending.supplierId,
+              konsinyasiIds: ids,
+              noNota: state.noNota,
+              catatan: state.catatan,
+              metode: state.metode
+            }
+          });
+          toast(r.message || 'Pembayaran berhasil!', r.success === false ? 'error' : 'success');
+          if (r.success) await reloadKaryawan();
+        } catch (e) { toast(e.message, 'error'); }
+        finally { hideLoader(); S.submitting = false; render(); }
+      } }
+    ],
+    onMount: (w) => {
+      const container = w.querySelector('#form-bayar-body');
+
+      const updateTotals = () => {
+        const t = container.querySelector('[data-total]');
+        const cEl = container.querySelector('[data-count]');
+        if (t) t.textContent = fmtRp(computeTotal());
+        if (cEl) cEl.textContent = selectedCount();
+      };
+
+      container.addEventListener('change', e => {
+        const cb = e.target.closest('[data-cb]');
+        if (cb) {
+          state.selected[cb.dataset.cb] = cb.checked;
+          const label = cb.closest('.item-selector');
+          if (label) label.classList.toggle('selected', cb.checked);
+          updateTotals();
+          return;
+        }
+        const sel = e.target.closest('[data-f="metode"]');
+        if (sel) { state.metode = sel.value; return; }
+      });
+
+      container.addEventListener('input', e => {
+        const noNota = e.target.closest('[data-f="noNota"]');
+        if (noNota) { state.noNota = noNota.value; return; }
+        const catatan = e.target.closest('[data-f="catatan"]');
+        if (catatan) { state.catatan = catatan.value; return; }
+      });
+
+      container.addEventListener('click', e => {
+        const allBtn = e.target.closest('[data-act-all]');
+        if (allBtn) {
+          const val = allBtn.dataset.actAll === '1';
+          pending.items.forEach(it => { state.selected[it.id] = val; });
+          container.querySelectorAll('[data-cb]').forEach(cb => {
+            cb.checked = val;
+            const label = cb.closest('.item-selector');
+            if (label) label.classList.toggle('selected', val);
+          });
+          updateTotals();
+          return;
+        }
+      });
+    }
+  });
+}
+
+async function batalBayarTitipan(bayarId) {
+  if (!bayarId) return;
+  const ok = await confirmDlg('Batalkan Pembayaran?', 'Transaksi akan kembali ke status Pending. Hanya bisa dilakukan sebelum masuk rekap setoran.', 'Batalkan');
+  if (!ok) return;
+  showLoader();
+  try {
+    const r = await api('batalBayarTitipan', { token: S.token, bayarId });
+    toast(r.message || 'Dibatalkan.', r.success === false ? 'error' : 'success');
+    if (r.success) await reloadKaryawan();
+  } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
 
@@ -1930,7 +2182,7 @@ function formKas() {
 }
 
 // ============================================
-//  MASTER CRUD — Katalog (dengan validasi supplier)
+//  MASTER CRUD — Katalog
 // ============================================
 function formKatalog(id) {
   const item = id ? S.katalog.find(k => k.id === id) : null;
