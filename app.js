@@ -119,13 +119,21 @@ function paginationFooter(state, actionName) {
 // ============================================
 async function api(action, payload = {}, opts = {}) {
   if (!API || API.indexOf('PASTE_') !== -1) throw new Error('API_URL belum diset di config.js');
-  const res = await fetch(API, {
+  const requestOptions = {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({ action, payload }),
     redirect: 'follow',
     signal: opts.signal
-  });
+  };
+  let res = await fetch(API, requestOptions);
+  const retryableDropSave = action === 'karyawanInputDrop' || action === 'editDropStok';
+  if (retryableDropSave && res.status === 404 && res.url) {
+    const failedUrl = new URL(res.url);
+    if (failedUrl.hostname === 'script.googleusercontent.com' && failedUrl.pathname === '/macros/echo') {
+      res = await fetch(API, requestOptions);
+    }
+  }
   if (!res.ok) throw new Error('Network ' + res.status);
   const body = await res.json();
   if (!body.ok) {
@@ -1756,10 +1764,22 @@ async function karyawanSaveDrop() {
   const items = [];
   $$('[data-drop-item]').forEach(inp => { const qty = parseInt(inp.value, 10) || 0; if (qty > 0) items.push({ katalogId: inp.dataset.dropItem, qtyDrop: qty }); });
   if (!items.length) return toast('Isi minimal 1 qty.', 'error');
-  showLoader();
-  try { const r = await api('karyawanInputDrop', { token: S.token, items }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) await reloadKaryawan(); }
+  const button = $('[data-act="save-drop"]');
+  if (button && button.disabled) return;
+  if (button) { button.disabled = true; button.textContent = 'Menyimpan...'; }
+  try {
+    const r = await api('karyawanInputDrop', { token: S.token, items });
+    if (!r.success) return toast(r.message, 'error');
+    const katalog = new Map((S.karyawan.katalogFull || []).map(k => [String(k.id), k]));
+    S.karyawan.distribusi = items.map(x => {
+      const k = katalog.get(String(x.katalogId)) || {};
+      return { id:'', katalogId:x.katalogId, nama:k.nama || x.katalogId, supplierId:k.supplierId || '', supplierNama:k.supplierNama || '', tipeTransaksi:k.tipeTransaksi || 'BeliPutus', hargaJual:Number(k.hargaJual) || 0, qtyDrop:x.qtyDrop };
+    });
+    toast(r.message || 'Stok tersimpan.', 'success');
+    render();
+  }
   catch (e) { toast(e.message, 'error'); }
-  finally { hideLoader(); render(); }
+  finally { if (button && button.isConnected) { button.disabled = false; button.textContent = 'Simpan Stok Diterima'; } }
 }
 async function karyawanEditDrop() {
   const items = [];
@@ -1767,18 +1787,23 @@ async function karyawanEditDrop() {
     items.push({ katalogId: inp.dataset.dropItem, qtyDrop: parseInt(inp.value, 10) || 0 });
   });
   if (!items.length) return toast('Tidak ada item stok.', 'error');
-  showLoader();
+  const button = $('[data-act="save-drop-edit"]');
+  if (button && button.disabled) return;
+  if (button) { button.disabled = true; button.textContent = 'Menyimpan...'; }
   try {
     const r = await api('editDropStok', { token: S.token, items });
-    toast(r.message, r.success ? 'success' : 'error');
-    if (r.success) {
-      await reloadKaryawan();
-      S.karyawan.distribusi.forEach(it => {
-        S.rekap[it.katalogId] = Math.min(S.rekap[it.katalogId] || 0, it.qtyDrop);
-      });
-    }
+    if (!r.success) return toast(r.message, 'error');
+    const katalog = new Map((S.karyawan.katalogFull || []).map(k => [String(k.id), k]));
+    S.karyawan.distribusi = items.map(x => {
+      const k = katalog.get(String(x.katalogId)) || {};
+      S.rekap[x.katalogId] = Math.min(S.rekap[x.katalogId] || 0, x.qtyDrop);
+      return { id:'', katalogId:x.katalogId, nama:k.nama || x.katalogId, supplierId:k.supplierId || '', supplierNama:k.supplierNama || '', tipeTransaksi:k.tipeTransaksi || 'BeliPutus', hargaJual:Number(k.hargaJual) || 0, qtyDrop:x.qtyDrop };
+    });
+    S.karyawan.editingDrop = false;
+    toast(r.message, 'success');
+    render();
   } catch (e) { toast(e.message, 'error'); }
-  finally { hideLoader(); render(); }
+  finally { if (button && button.isConnected) { button.disabled = false; button.textContent = 'Simpan Perubahan'; } }
 }
 
 async function doSubmitRekap() {
