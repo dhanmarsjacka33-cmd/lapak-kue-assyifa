@@ -1782,11 +1782,15 @@ async function karyawanSaveDrop() {
   finally { if (button && button.isConnected) { button.disabled = false; button.textContent = 'Simpan Stok Diterima'; } }
 }
 async function karyawanEditDrop() {
+  const original = new Map((S.karyawan.distribusi || []).map(it => [String(it.katalogId), it]));
   const items = [];
   $$('[data-drop-item]').forEach(inp => {
-    items.push({ katalogId: inp.dataset.dropItem, qtyDrop: parseInt(inp.value, 10) || 0 });
+    const katalogId = String(inp.dataset.dropItem);
+    const qtyDrop = parseInt(inp.value, 10) || 0;
+    const qtyLama = Number((original.get(katalogId) || {}).qtyDrop) || 0;
+    if (qtyDrop !== qtyLama) items.push({ katalogId, qtyDrop });
   });
-  if (!items.length) return toast('Tidak ada item stok.', 'error');
+  if (!items.length) return toast('Tidak ada perubahan stok.', 'info');
   const button = $('[data-act="save-drop-edit"]');
   if (button && button.disabled) return;
   if (button) { button.disabled = true; button.textContent = 'Menyimpan...'; }
@@ -1794,10 +1798,18 @@ async function karyawanEditDrop() {
     const r = await api('editDropStok', { token: S.token, items });
     if (!r.success) return toast(r.message, 'error');
     const katalog = new Map((S.karyawan.katalogFull || []).map(k => [String(k.id), k]));
-    S.karyawan.distribusi = items.map(x => {
+    const changedIds = new Set(items.map(x => String(x.katalogId)));
+    S.karyawan.distribusi = (S.karyawan.distribusi || []).map(it => {
+      if (!changedIds.has(String(it.katalogId))) return it;
+      const update = items.find(x => String(x.katalogId) === String(it.katalogId));
+      S.rekap[it.katalogId] = Math.min(S.rekap[it.katalogId] || 0, update.qtyDrop);
+      return { ...it, qtyDrop:update.qtyDrop };
+    });
+    items.forEach(x => {
+      if (original.has(String(x.katalogId)) || x.qtyDrop <= 0) return;
       const k = katalog.get(String(x.katalogId)) || {};
       S.rekap[x.katalogId] = Math.min(S.rekap[x.katalogId] || 0, x.qtyDrop);
-      return { id:'', katalogId:x.katalogId, nama:k.nama || x.katalogId, supplierId:k.supplierId || '', supplierNama:k.supplierNama || '', tipeTransaksi:k.tipeTransaksi || 'BeliPutus', hargaJual:Number(k.hargaJual) || 0, qtyDrop:x.qtyDrop };
+      S.karyawan.distribusi.push({ id:'', katalogId:x.katalogId, nama:k.nama || x.katalogId, supplierId:k.supplierId || '', supplierNama:k.supplierNama || '', tipeTransaksi:k.tipeTransaksi || 'BeliPutus', hargaJual:Number(k.hargaJual) || 0, qtyDrop:x.qtyDrop });
     });
     S.karyawan.editingDrop = false;
     toast(r.message, 'success');
