@@ -270,6 +270,7 @@ function updateAdminTopbar() {
   const themeIcon = S.darkMode ? 'sun' : 'moon';
   el.innerHTML = `<div class="topbar-title"><h2>${esc(S.user.name)}</h2><p>Admin Panel</p></div>
     <div class="row" style="gap:4px">
+      <button class="icon-btn" data-act="refresh" title="Refresh data">${ico('refresh')}</button>
       <button class="theme-toggle" data-act="toggle-theme">${ico(themeIcon)}</button>
       <button class="icon-btn icon-btn-relative" data-act="open-notif">${ico('bell')}${unread > 0 ? `<span class="badge-dot">${unread > 9 ? '9+' : unread}</span>` : ''}</button>
       <button class="icon-btn" data-act="logout">${ico('out')}</button>
@@ -350,6 +351,7 @@ function updateKaryawanTopbar() {
   const themeIcon = S.darkMode ? 'sun' : 'moon';
   el.innerHTML = `<div class="topbar-title"><h2>${esc(S.user.name)}</h2><p>${esc((S.karyawan && S.karyawan.lapakNama) || '')}</p></div>
     <div class="row" style="gap:4px">
+      <button class="icon-btn" data-act="refresh" title="Refresh data">${ico('refresh')}</button>
       <button class="theme-toggle" data-act="toggle-theme">${ico(themeIcon)}</button>
       <button class="icon-btn" data-act="ganti-lapak">${ico('store')}</button>
       <button class="icon-btn" data-act="logout">${ico('out')}</button>
@@ -680,7 +682,7 @@ function tabHome() {
     </div>`;
   if (d.utangKonsinyasi > 0) html += `<div class="alert alert-warn">${ico('truck','ico')}<div style="flex:1"><strong>Utang Titipan: ${fmtRp(d.utangKonsinyasi)}</strong><br><button class="btn btn-primary btn-sm mt-2" data-act="tab" data-tab="konsinyasi">Bayar</button></div></div>`;
   if (d.pendingCount > 0) html += `<div class="alert alert-warn">${ico('inbox','ico')}<div style="flex:1"><strong>${d.pendingCount} setoran pending</strong><br><button class="btn btn-primary btn-sm mt-2" data-act="tab" data-tab="setoran">Lihat</button></div></div>`;
-  html += `<div class="row" style="gap:8px;margin-bottom:16px"><button class="btn btn-ghost btn-block" data-act="tab" data-tab="analisis-performa">${ico('pie-chart','ico-sm')} Analisis</button><button class="btn btn-ghost btn-block" data-act="refresh">${ico('refresh','ico-sm')} Refresh</button></div>
+  html += `<div class="row" style="gap:8px;margin-bottom:16px"><button class="btn btn-ghost btn-block" data-act="tab" data-tab="analisis-performa">${ico('pie-chart','ico-sm')} Analisis</button></div>
     <h3 class="card-title">${ico('wallet')} Kas Terbaru</h3>`;
   if (!d.recentKas || !d.recentKas.length) html += '<div class="empty">' + ico('inbox','ico') + '<p>Belum ada transaksi</p></div>';
   else html += d.recentKas.map(k => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(k.keterangan)}</div><div class="list-item-sub">${esc(k.tanggal)}</div></div><div class="text-right"><div class="text-sm font-bold ${k.tipe === 'Masuk' ? 'text-green' : 'text-red'}">${k.tipe === 'Masuk' ? '+' : '-'} ${fmtRp(k.nominal)}</div><div class="text-xs text-gray">${fmtRp(k.saldo)}</div></div></div>`).join('');
@@ -1717,8 +1719,8 @@ async function bootstrap() {
 async function preloadCommon() {
   if (!S.token || S.user.role !== 'admin') return;
   const tasks = [];
-  if (!S.belanja.length) tasks.push(apiCached('getBelanja', { token: S.token, filter: {} }, 'belanja', 60000).then(d => S.belanja = d).catch(() => {}));
-  if (!S.jadwal.length) tasks.push(apiCached('getJadwal', { token: S.token, days: 30 }, 'jadwal', 120000).then(d => S.jadwal = d).catch(() => {}));
+  if (!S.belanja.length) tasks.push(apiCached('getBelanja', { token: S.token, filter: {} }, 'belanja', 24 * 60 * 60 * 1000, { persist: true }).then(d => S.belanja = d).catch(() => {}));
+  if (!S.jadwal.length) tasks.push(apiCached('getJadwal', { token: S.token, days: 30 }, 'jadwal', 24 * 60 * 60 * 1000, { persist: true }).then(d => S.jadwal = d).catch(() => {}));
   await Promise.all(tasks);
 }
 
@@ -2022,56 +2024,65 @@ async function switchTab(tab) {
 async function loadTabData(tab) {
   if (!S.token) return;
   const signal = getAbort(tab);
+  const cacheTtl = 24 * 60 * 60 * 1000;
+  const cached = (action, payload, key) => apiCached(action, payload, key, cacheTtl, { signal, persist: true });
   showLoader();
   try {
     const tasks = [];
     const sf = {
-      'setoran': () => apiCached('getSetoranList', { token: S.token, filter: S._setoranFilter || {} }, 'setoran_' + JSON.stringify(S._setoranFilter || {}), 30000).then(d => S.setoran = d),
-      'belanja': () => apiCached('getBelanja', { token: S.token, filter: {} }, 'belanja', 60000).then(d => S.belanja = d),
-      'jadwal': () => apiCached('getJadwal', { token: S.token, days: 30 }, 'jadwal', 120000).then(d => S.jadwal = d),
-      'kasbon': () => api('getKasbon', { token: S.token, filter: {} }, { signal }).then(d => S.kasbon = d),
-      'gaji': () => api('getGaji', { token: S.token, filter: {} }, { signal }).then(d => S.gaji = d),
-      'setting-gaji': () => api('getSettingGaji', { token: S.token }, { signal }).then(d => S.settingGaji = d),
-      'pesanan': () => api('getPesanan', { token: S.token, filter: {} }, { signal }).then(d => S.pesanan = d),
-      'laporan': () => Promise.all([apiCached('getLaporan', { token: S.token, filter: {} }, 'laporan_default', 60000), api('getSaldoSupplier', { token: S.token }, { signal })]).then(([laporan, saldo]) => { S.laporan = laporan; S.saldoSupplier = saldo; }),
-      'retur': () => api('getReturList', { token: S.token, filter: {} }, { signal }).then(d => S.retur = d),
-      'harga-tingkat': () => api('getHargaTingkat', { token: S.token }, { signal }).then(d => S.hargaTingkat = d),
-      'tutup-buku': () => api('getTutupBukuList', { token: S.token }, { signal }).then(d => S.tutupBuku = d),
-      'notifikasi': () => api('getNotifikasi', { token: S.token, filter: {} }, { signal }).then(d => S.notifikasi = d),
-      'riwayat-bayar-supplier': () => api('getRiwayatBayarSupplier', { token: S.token, filter: {} }, { signal }).then(d => S.riwayatBayarSupplier = d),
-      'pesanan-pelanggan': () => api('getPesananPelanggan', { token: S.token, filter: S._pesananFilter || {} }, { signal }).then(d => S.pesananPelanggan = d),
-      'absensi-hari-ini': () => api('getAbsensiKaryawan', { token: S.token, filter: { bulan: monthISO() } }, { signal }).then(d => S.absensiList = d),
-      'payroll': () => api('getPayrollHistory', { token: S.token, filter: {} }, { signal }).then(d => S.payrollHistory = d)
+      'setoran': () => cached('getSetoranList', { token: S.token, filter: S._setoranFilter || {} }, 'setoran_' + JSON.stringify(S._setoranFilter || {})).then(d => S.setoran = d),
+      'belanja': () => cached('getBelanja', { token: S.token, filter: {} }, 'belanja').then(d => S.belanja = d),
+      'jadwal': () => cached('getJadwal', { token: S.token, days: 30 }, 'jadwal').then(d => S.jadwal = d),
+      'kasbon': () => cached('getKasbon', { token: S.token, filter: {} }, 'kasbon').then(d => S.kasbon = d),
+      'gaji': () => cached('getGaji', { token: S.token, filter: {} }, 'gaji').then(d => S.gaji = d),
+      'setting-gaji': () => cached('getSettingGaji', { token: S.token }, 'settingGaji').then(d => S.settingGaji = d),
+      'pesanan': () => cached('getPesanan', { token: S.token, filter: {} }, 'pesanan').then(d => S.pesanan = d),
+      'laporan': () => Promise.all([cached('getLaporan', { token: S.token, filter: {} }, 'laporan_default'), cached('getSaldoSupplier', { token: S.token }, 'saldoSupplier')]).then(([laporan, saldo]) => { S.laporan = laporan; S.saldoSupplier = saldo; }),
+      'retur': () => cached('getReturList', { token: S.token, filter: {} }, 'retur').then(d => S.retur = d),
+      'harga-tingkat': () => cached('getHargaTingkat', { token: S.token }, 'hargaTingkat').then(d => S.hargaTingkat = d),
+      'tutup-buku': () => cached('getTutupBukuList', { token: S.token }, 'tutupBuku').then(d => S.tutupBuku = d),
+      'notifikasi': () => cached('getNotifikasi', { token: S.token, filter: {} }, 'notifikasi').then(d => S.notifikasi = d),
+      'riwayat-bayar-supplier': () => cached('getRiwayatBayarSupplier', { token: S.token, filter: {} }, 'riwayatBayarSupplier').then(d => S.riwayatBayarSupplier = d),
+      'pesanan-pelanggan': () => cached('getPesananPelanggan', { token: S.token, filter: S._pesananFilter || {} }, 'pesananPelanggan_' + JSON.stringify(S._pesananFilter || {})).then(d => S.pesananPelanggan = d),
+      'absensi-hari-ini': () => cached('getAbsensiKaryawan', { token: S.token, filter: { bulan: monthISO() } }, 'absensi_' + monthISO()).then(d => S.absensiList = d),
+      'payroll': () => {
+        const bulan = S.payrollBulan || monthISO();
+        S.payrollBulan = bulan;
+        return Promise.all([
+          cached('rekapPayroll', { token: S.token, bulan }, 'payroll_' + bulan),
+          cached('getPayrollHistory', { token: S.token, filter: {} }, 'payrollHistory')
+        ]).then(([data, history]) => { S.payrollData = data; S.payrollHistory = history; });
+      }
     };
     if (sf[tab]) tasks.push(sf[tab]());
-    if (tab === 'template-box' && !S.templateBox) tasks.push(api('getTemplateBox', { token: S.token }, { signal }).then(d => S.templateBox = d));
-    if (tab === 'kalender-pesanan' && !S.kalenderData) { const bulan = S.kalenderBulan || monthISO(); tasks.push(api('getPesananKalender', { token: S.token, bulan }, { signal }).then(d => S.kalenderData = d)); }
-    if (tab === 'setting-payroll') tasks.push(Promise.all([api('getSettingPayroll', { token: S.token }, { signal }).then(d => S.settingPayroll = d), api('getHariEfektif', { token: S.token, bulan: monthISO() }, { signal }).then(d => S.hariEfektif = d)]));
-    if (tab === 'kartu-stok') tasks.push(Promise.all([api('getKartuStok', { token: S.token, filter: {} }, { signal }).then(d => S.kartuStok = d), api('getStokSaldo', { token: S.token }, { signal }).then(d => S.stokSaldo = d), api('getStokAudit', { token: S.token }, { signal }).then(d => S.stokAudit = d)]));
+    if (tab === 'template-box' && !S.templateBox) tasks.push(cached('getTemplateBox', { token: S.token }, 'templateBox').then(d => S.templateBox = d));
+    if (tab === 'kalender-pesanan' && !S.kalenderData) { const bulan = S.kalenderBulan || monthISO(); tasks.push(cached('getPesananKalender', { token: S.token, bulan }, 'kalender_' + bulan).then(d => S.kalenderData = d)); }
+    if (tab === 'setting-payroll') tasks.push(Promise.all([cached('getSettingPayroll', { token: S.token }, 'settingPayroll').then(d => S.settingPayroll = d), cached('getHariEfektif', { token: S.token, bulan: monthISO() }, 'hariEfektif_' + monthISO()).then(d => S.hariEfektif = d)]));
+    if (tab === 'kartu-stok') tasks.push(Promise.all([cached('getKartuStok', { token: S.token, filter: {} }, 'kartuStok').then(d => S.kartuStok = d), cached('getStokSaldo', { token: S.token }, 'stokSaldo').then(d => S.stokSaldo = d), cached('getStokAudit', { token: S.token }, 'stokAudit').then(d => S.stokAudit = d)]));
     if (tab === 'konsinyasi') {
       const supEl = $('[data-kons-supplier]'), statEl = $('[data-kons-status]');
       const supplierId = supEl ? supEl.value : '', status = statEl ? statEl.value : '';
       S.konsinyasiFilter = { supplierId, status };
-      tasks.push(Promise.all([api('getKonsinyasi', { token: S.token, filter: { supplierId, status } }, { signal }).then(d => S.konsinyasi = d), api('getSaldoSupplier', { token: S.token }, { signal }).then(d => S.saldoSupplier = d)]));
+      tasks.push(Promise.all([cached('getKonsinyasi', { token: S.token, filter: { supplierId, status } }, 'konsinyasi_' + JSON.stringify({ supplierId, status })).then(d => S.konsinyasi = d), cached('getSaldoSupplier', { token: S.token }, 'saldoSupplier').then(d => S.saldoSupplier = d)]));
     }
-    if (tab === 'analytics') { const range = S.analyticsRange || 30; tasks.push(api('getAnalytics', { token: S.token, range }, { signal }).then(d => S.analytics = d)); }
-    if (tab === 'analisis-performa') { const range = S.analisisRange || 30, groupBy = S.analisisGroupBy || 'item', ids = S.analisisSelectedIds || []; tasks.push(api('getAnalisisPerforma', { token: S.token, range, groupBy, ids }, { signal }).then(d => { S.analisisPerforma = d; if (!ids.length && d.selectedIds) S.analisisSelectedIds = d.selectedIds; })); }
+    if (tab === 'analytics') { const range = S.analyticsRange || 30; tasks.push(cached('getAnalytics', { token: S.token, range }, 'analytics_' + range).then(d => S.analytics = d)); }
+    if (tab === 'analisis-performa') { const range = S.analisisRange || 30, groupBy = S.analisisGroupBy || 'item', ids = S.analisisSelectedIds || []; tasks.push(cached('getAnalisisPerforma', { token: S.token, range, groupBy, ids }, 'analisis_' + JSON.stringify({ range, groupBy, ids })).then(d => { S.analisisPerforma = d; if (!ids.length && d.selectedIds) S.analisisSelectedIds = d.selectedIds; })); }
     if (tab === 'absensi') {
       const bulanEl = $('[data-abs-bulan]'), lapakEl = $('[data-abs-lapak]');
       const bulan = bulanEl ? bulanEl.value : monthISO(), lapakId = lapakEl ? lapakEl.value : '';
       S.absensiFilter = { bulan, lapakId };
-      tasks.push(api('getAbsensiKaryawan', { token: S.token, filter: { bulan, lapakId } }, { signal }).then(d => S.absensiList = d));
+      tasks.push(cached('getAbsensiKaryawan', { token: S.token, filter: { bulan, lapakId } }, 'absensi_' + JSON.stringify({ bulan, lapakId })).then(d => S.absensiList = d));
     }
     if (tab === 'bonus-antar') {
       const f = S.bonusFilter || {}; const bulan = f.bulan || monthISO(); const userId = f.userId || '';
       S.bonusFilter = { bulan, userId };
-      tasks.push(api('getBonusAntar', { token: S.token, filter: { bulan, userId } }, { signal }).then(d => S.bonusAntar = d));
+      tasks.push(cached('getBonusAntar', { token: S.token, filter: { bulan, userId } }, 'bonusAntar_' + JSON.stringify({ bulan, userId })).then(d => S.bonusAntar = d));
     }
     if (tab === 'dashboard-profit') {
       const range = S.profitRange || 30;
       const end = todayISO();
       const start = new Date(Date.now() - (range - 1) * 86400000).toISOString().slice(0, 10);
-      tasks.push(Promise.all([api('getLaporan', { token: S.token, filter: { dari: start, sampai: end } }, { signal }), api('getSetoranList', { token: S.token, filter: { dari: start, sampai: end } }, { signal })]).then(function(results) {
+      tasks.push(Promise.all([cached('getLaporan', { token: S.token, filter: { dari: start, sampai: end } }, 'laporan_' + start + '_' + end), cached('getSetoranList', { token: S.token, filter: { dari: start, sampai: end } }, 'setoran_' + JSON.stringify({ dari: start, sampai: end }))]).then(function(results) {
         const laporan = results[0], setoran = results[1];
         const dateMap = {};
         setoran.forEach(s => { if (s.status !== 'approved' && s.status !== 'pending') return; if (!dateMap[s.tanggal]) dateMap[s.tanggal] = { tanggal: s.tanggal, omzet: 0, pengeluaran: 0 }; dateMap[s.tanggal].omzet += s.totalSistem || 0; dateMap[s.tanggal].pengeluaran += s.pengeluaran || 0; });
@@ -2099,11 +2110,22 @@ async function loadTabData(tab) {
 async function loadKartuStok() { await loadTabData('kartu-stok'); render(); }
 async function loadAbsensi() { await loadTabData('absensi'); render(); }
 async function loadBonusAntar() { await loadTabData('bonus-antar'); render(); }
-async function loadHariEfektif() { const el = $('[data-he-bulan]'); const bulan = el ? el.value : monthISO(); S.hariEfektif = await api('getHariEfektif', { token: S.token, bulan }); render(); }
+async function loadHariEfektif() {
+  const el = $('[data-he-bulan]'); const bulan = el ? el.value : monthISO();
+  S.hariEfektif = await apiCached('getHariEfektif', { token: S.token, bulan }, 'hariEfektif_' + bulan, 24 * 60 * 60 * 1000, { persist: true });
+  render();
+}
 async function loadPayroll() {
-  const el = $('[data-payroll-bulan]'); const bulan = el ? el.value : monthISO();
+  const el = $('[data-payroll-bulan]'); const bulan = el ? el.value : (S.payrollBulan || monthISO());
   showLoader();
-  try { S.payrollBulan = bulan; const res = await Promise.all([api('rekapPayroll', { token: S.token, bulan }), api('getPayrollHistory', { token: S.token, filter: {} })]); S.payrollData = res[0]; S.payrollHistory = res[1]; }
+  try {
+    S.payrollBulan = bulan;
+    const res = await Promise.all([
+      apiCached('rekapPayroll', { token: S.token, bulan }, 'payroll_' + bulan, 24 * 60 * 60 * 1000, { persist: true }),
+      apiCached('getPayrollHistory', { token: S.token, filter: {} }, 'payrollHistory', 24 * 60 * 60 * 1000, { persist: true })
+    ]);
+    S.payrollData = res[0]; S.payrollHistory = res[1];
+  }
   catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
@@ -2115,7 +2137,8 @@ async function loadAnalisisPerforma() {
   showLoader();
   try {
     const ids = S.analisisSelectedIds || [];
-    S.analisisPerforma = await api('getAnalisisPerforma', { token: S.token, range: S.analisisRange, groupBy: S.analisisGroupBy, ids });
+    const payload = { range: S.analisisRange, groupBy: S.analisisGroupBy, ids };
+    S.analisisPerforma = await apiCached('getAnalisisPerforma', { token: S.token, ...payload }, 'analisis_' + JSON.stringify(payload), 24 * 60 * 60 * 1000, { persist: true });
     if (!ids.length && S.analisisPerforma.selectedIds) S.analisisSelectedIds = S.analisisPerforma.selectedIds;
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); setTimeout(renderAnalisisCharts, 80); }
@@ -2247,8 +2270,21 @@ function showMoreMenu() {
 }
 
 async function doRefresh() {
+  const view = S.view, tab = S.tab;
   showLoader();
-  try { MEM.clear(); await bootstrap(); toast('Data dimuat ulang', 'success'); }
+  try {
+    MEM.clear();
+    if (view === 'admin' && (tab === 'home' || tab === 'kas')) {
+      await bootstrap();
+      S.tab = tab;
+    }
+    else if (view === 'admin' && tab === 'distribusi') await loadDistribusi();
+    else if (view === 'admin' && tab === 'laporan') await loadLaporan();
+    else if (view === 'admin' && tab === 'payroll') await loadPayroll();
+    else if (view === 'admin') await loadTabData(tab);
+    else if (view === 'karyawan') await reloadKaryawan();
+    toast('Data dimuat ulang', 'success');
+  }
   catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
@@ -2261,7 +2297,7 @@ async function applySetoranFilter() {
   localStorage.setItem('setoranFilter', JSON.stringify(S._setoranFilter));
   S._pageSetoran = 1;
   showLoader();
-  try { S.setoran = await api('getSetoranList', { token: S.token, filter: S._setoranFilter }); MEM.clear('setoran'); toast('Filter diterapkan', 'success'); }
+  try { S.setoran = await apiCached('getSetoranList', { token: S.token, filter: S._setoranFilter }, 'setoran_' + JSON.stringify(S._setoranFilter), 24 * 60 * 60 * 1000, { persist: true }); toast('Filter diterapkan', 'success'); }
   catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
@@ -2796,8 +2832,8 @@ async function loadLaporan() {
   showLoader();
   try {
     const [laporan, saldo] = await Promise.all([
-      api('getLaporan', { token: S.token, filter: { dari, sampai } }),
-      api('getSaldoSupplier', { token: S.token })
+      apiCached('getLaporan', { token: S.token, filter: { dari, sampai } }, 'laporan_' + (dari || 'default') + '_' + (sampai || 'default'), 24 * 60 * 60 * 1000, { persist: true }),
+      apiCached('getSaldoSupplier', { token: S.token }, 'saldoSupplier', 24 * 60 * 60 * 1000, { persist: true })
     ]);
     S.laporan = laporan; S.saldoSupplier = saldo;
   } catch (e) { toast(e.message, 'error'); }
