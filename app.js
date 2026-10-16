@@ -3650,7 +3650,10 @@ async function saveDistribusi() {
   finally { hideLoader(); render(); }
 }
 function formBelanja(id) {
-  const item = id ? S.belanja.find(b => b.id === id) : null;
+  const matches = id ? S.belanja.filter(b => String(b.id) === String(id)) : [];
+  if (id && matches.length > 1) return toast('ID item belanja duplikat. Jalankan fixDuplicateBelanjaIds() di backend.', 'error');
+  if (id && !matches.length) return toast('Item belanja tidak ditemukan. Muat ulang daftar lalu coba lagi.', 'error');
+  const item = matches[0] || null;
   formModal({
     title: item ? 'Edit Belanja' : 'Tambah Belanja',
     fields: [

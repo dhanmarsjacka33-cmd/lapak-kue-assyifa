@@ -2334,11 +2334,67 @@ function apiSaveBelanja(token, item) {
   requireRole(token, ['admin']);
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Belanja');
   const data = sheet.getDataRange().getValues(); const iId = data[0].indexOf('id');
+  const headers = data[0].map(h => String(h).trim());
   const nama = String(item.item || '').trim();
   if (!nama) return { success: false, message: 'Nama item wajib.' };
-  const row = [item.id || ('B' + Utilities.getUuid().slice(0,6).toUpperCase()), item.tanggal ? new Date(item.tanggal) : new Date(), nama, item.supplierId || '', toPosNum(item.qty) || 1, toPosNum(item.estimasiHarga), toPosNum(item.hargaAktual), item.checked === true, item.checked ? new Date() : '', item.kasId || '', String(item.keterangan || '')];
-  if (item.id) { for (let i=1;i<data.length;i++) if (String(data[i][iId])===String(item.id)) { sheet.getRange(i+1,1,1,row.length).setValues([row]); _clearSheetCache(); return { success:true, message:'Belanja diperbarui.' }; } return { success:false, message:'Item tidak ditemukan.' }; }
-  sheet.appendRow(row); _clearSheetCache(); return { success:true, message:'Belanja ditambahkan.' };
+  const rowId = String(item.id || '').trim();
+  const matchingRows = [];
+  if (rowId) {
+    for (let i = 1; i < data.length; i++) if (String(data[i][iId]).trim() === rowId) matchingRows.push(i + 1);
+    if (matchingRows.length > 1) return { success:false, message:'ID item belanja duplikat. Jalankan fixDuplicateBelanjaIds() terlebih dahulu.' };
+    if (!matchingRows.length) return { success:false, message:'Item tidak ditemukan.' };
+  }
+
+  const values = {
+    id: rowId,
+    tanggal: item.tanggal ? new Date(item.tanggal) : new Date(),
+    item: nama,
+    supplierId: item.supplierId || '',
+    qty: toPosNum(item.qty) || 1,
+    estimasiHarga: toPosNum(item.estimasiHarga),
+    hargaAktual: toPosNum(item.hargaAktual),
+    checked: item.checked === true,
+    checkedAt: item.checked ? new Date() : '',
+    kasId: item.kasId || '',
+    keterangan: String(item.keterangan || '')
+  };
+  if (rowId) {
+    const row = matchingRows[0];
+    ['item', 'supplierId', 'qty', 'estimasiHarga'].forEach(key => {
+      const column = headers.indexOf(key);
+      if (column >= 0) sheet.getRange(row, column + 1).setValue(values[key]);
+    });
+    _clearSheetCache();
+    return { success:true, message:'Belanja diperbarui.' };
+  }
+
+  do { values.id = 'B' + Utilities.getUuid().replace(/-/g, '').toUpperCase(); }
+  while (data.slice(1).some(row => String(row[iId]).trim() === values.id));
+  sheet.appendRow(headers.map(header => values[header] === undefined ? '' : values[header]));
+  _clearSheetCache();
+  return { success:true, message:'Belanja ditambahkan.' };
+}
+function fixDuplicateBelanjaIds() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Belanja');
+  if (!sheet) return 'Sheet Belanja tidak ditemukan.';
+  const data = sheet.getDataRange().getValues();
+  if (!data.length) return 'Sheet Belanja kosong.';
+  const iId = data[0].map(h => String(h).trim()).indexOf('id');
+  if (iId < 0) return 'Kolom id tidak ditemukan.';
+  const used = {};
+  let fixed = 0;
+  for (let i = 1; i < data.length; i++) {
+    const id = String(data[i][iId] || '').trim();
+    if (id && !used[id]) { used[id] = true; continue; }
+    let newId;
+    do { newId = 'B' + Utilities.getUuid().replace(/-/g, '').toUpperCase(); }
+    while (used[newId]);
+    sheet.getRange(i + 1, iId + 1).setValue(newId);
+    used[newId] = true;
+    fixed++;
+  }
+  _clearSheetCache();
+  return fixed + ' ID item belanja diperbaiki.';
 }
 function apiCheckBelanja(token, id, checked, hargaAktual) {
   requireRole(token, ['admin']);
