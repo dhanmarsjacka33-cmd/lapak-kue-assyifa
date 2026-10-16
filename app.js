@@ -748,12 +748,22 @@ function tabLaporan() {
     </div>
     <div class="card">
       <div class="card-title">Performa Supplier</div>
-      ${!L.perSupplier.length ? '<p class="text-xs text-gray">Belum ada data.</p>' :
-        L.perSupplier.map(s => `
+      ${!S.suppliers.length ? '<p class="text-xs text-gray">Belum ada data.</p>' :
+        S.suppliers.map(s => {
+          const report = L.perSupplier.find(x => String(x.supplierId) === String(s.id));
+          const payment = (S.saldoSupplier || []).find(x => String(x.supplierId) === String(s.id));
+          const hasBeenPaid = Number(payment && payment.countDibayar) > 0;
+          const canSend = hasBeenPaid && !!s.email;
+          const tooltip = !hasBeenPaid ? 'Bayar supplier dulu' : !s.email ? 'Isi email supplier dulu' : '';
+          return `
           <div style="padding:10px 0;border-bottom:1px solid #f8fafc">
-            <div class="row-between text-sm mb-2"><strong>${esc(s.nama)}</strong><span class="text-gray">${s.margin.toFixed(1)}% margin</span></div>
-            <div class="row-between text-xs text-gray"><span>${s.qtyLaku} pcs · ${s.itemCount} item</span><span class="text-green font-semibold">${fmtRp(s.omzet)}</span></div>
-          </div>`).join('')}
+            <div class="row-between text-sm mb-2"><strong>${esc(s.nama)}</strong><span class="text-gray">${report ? report.margin.toFixed(1) : '0.0'}% margin</span></div>
+            <div class="row-between text-xs text-gray"><span>${report ? report.qtyLaku : 0} pcs · ${report ? report.itemCount : 0} item</span><span class="text-green font-semibold">${fmtRp(report ? report.omzet : 0)}</span></div>
+            <span title="${esc(tooltip)}" style="display:block;margin-top:8px">
+              <button class="btn btn-primary btn-sm btn-block" data-act="send-supplier-report" data-id="${esc(s.id)}" ${canSend ? '' : 'disabled'}>Kirim Laporan ke Supplier</button>
+            </span>
+          </div>`;
+        }).join('')}
     </div>
     <div class="card">
       <div class="card-title">Performa Lapak</div>
@@ -2622,6 +2632,7 @@ function handleClick(e) {
 
   // Laporan
   if (a === 'load-laporan') return loadLaporan();
+  if (a === 'send-supplier-report') return sendSupplierReport(id);
   if (a === 'export-csv') return doExportCSV();
 
   // Retur / Harga / Tutup buku
@@ -3012,7 +3023,13 @@ async function loadTabData(tab) {
     if (tab === 'gaji') S.gaji = await api('getGaji', { token: S.token, filter: {} });
     if (tab === 'setting-gaji') S.settingGaji = await api('getSettingGaji', { token: S.token });
     if (tab === 'pesanan') S.pesanan = await api('getPesanan', { token: S.token, filter: {} });
-    if (tab === 'laporan') S.laporan = await apiCached('getLaporan', { token: S.token, filter: {} }, 'laporan_default', 60000);
+    if (tab === 'laporan') {
+      const [laporan, saldo] = await Promise.all([
+        apiCached('getLaporan', { token: S.token, filter: {} }, 'laporan_default', 60000),
+        api('getSaldoSupplier', { token: S.token })
+      ]);
+      S.laporan = laporan; S.saldoSupplier = saldo;
+    }
     if (tab === 'analytics') await loadAnalytics();
     if (tab === 'kartu-stok') await loadKartuStokData();
     if (tab === 'retur') S.retur = await api('getReturList', { token: S.token, filter: {} });
@@ -3445,6 +3462,7 @@ function formSupplier(id) {
     fields: [
       { key:'nama', label:'Nama', value: item ? item.nama : '' },
       { key:'kontak', label:'Kontak', value: item ? item.kontak : '' },
+      { key:'email', label:'Email', type:'email', value: item ? item.email : '' },
       { key:'tipeTransaksi', label:'Tipe Transaksi', type:'radio',
         options: [
           { v:'BeliPutus', l:'Beli Putus', selected: item && item.tipeTransaksi === 'BeliPutus' },
@@ -4000,9 +4018,28 @@ async function loadLaporan() {
   const sampai = ($('[data-lap-sampai]') || {}).value;
   showLoader();
   try {
-    S.laporan = await api('getLaporan', { token: S.token, filter: { dari, sampai } });
+    const [laporan, saldo] = await Promise.all([
+      api('getLaporan', { token: S.token, filter: { dari, sampai } }),
+      api('getSaldoSupplier', { token: S.token })
+    ]);
+    S.laporan = laporan; S.saldoSupplier = saldo;
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
+}
+async function sendSupplierReport(supplierId) {
+  const supplier = S.suppliers.find(s => String(s.id) === String(supplierId));
+  const payment = (S.saldoSupplier || []).find(s => String(s.supplierId) === String(supplierId));
+  if (!supplier || !Number(payment && payment.countDibayar)) return toast('Bayar supplier dulu', 'error');
+  if (!supplier.email) return toast('Email supplier belum diisi', 'error');
+  const dari = ($('[data-lap-dari]') || {}).value || '';
+  const sampai = ($('[data-lap-sampai]') || {}).value || '';
+  if (!(await confirmDlg('Kirim laporan ke supplier?', `Laporan ${supplier.nama} akan dikirim ke ${supplier.email}.`, 'Kirim'))) return;
+  showLoader();
+  try {
+    const r = await api('sendSupplierReport', { token: S.token, payload: { supplierId, dari, sampai } });
+    toast(r.message, r.success ? 'success' : 'error');
+  } catch (e) { toast(e.message, 'error'); }
+  finally { hideLoader(); }
 }
 async function doExportCSV() {
   showLoader();

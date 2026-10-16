@@ -110,6 +110,7 @@ const ROUTES = {
   deletePesanan: p => apiDeletePesanan(p.token, p.id),
   rekapPesanan: p => apiRekapPesanan(p.token, p.filter),
   getLaporan: p => apiGetLaporan(p.token, p.filter),
+  sendSupplierReport: p => apiSendSupplierReport(p.token, p.payload),
   exportSetoranCSV: p => apiExportSetoranCSV(p.token, p.dari, p.sampai),
   getKartuStok: p => apiGetKartuStok(p.token, p.filter),
   getStokSaldo: p => apiGetStokSaldo(p.token),
@@ -332,6 +333,7 @@ function upgradeDatabase_v55() {
     }
   });
   addColumnIfMissing('Users', 'email', '');
+  addColumnIfMissing('Suppliers', 'email', '');
   addColumnIfMissing('PesananPelanggan', 'pelangganEmail', '');
   addColumnIfMissing('Notifikasi', 'channel', '');
   _clearSheetCache();
@@ -816,7 +818,7 @@ function apiAdminResetPassword(token, userId) {
 function buildBootstrapData(user) {
   const result = { role: user.role };
   result.lapak = getMasterCached('lapak', () => getSheetData('Lapak').map(l => ({ id:l.id, nama:l.nama, alamat:l.alamat, aktif: String(l.aktif) !== 'false' && l.aktif !== false })));
-  result.suppliers = getMasterCached('suppliers', () => getSheetData('Suppliers').map(s => ({ id:s.id, nama:s.nama, kontak:s.kontak, jadwalPesan:s.jadwalPesan, catatan:s.catatan, tipeTransaksi: s.tipeTransaksi || 'BeliPutus', aktif: String(s.aktif) !== 'false' && s.aktif !== false })));
+  result.suppliers = getMasterCached('suppliers', () => getSheetData('Suppliers').map(s => ({ id:s.id, nama:s.nama, kontak:s.kontak, email:s.email || '', jadwalPesan:s.jadwalPesan, catatan:s.catatan, tipeTransaksi: s.tipeTransaksi || 'BeliPutus', aktif: String(s.aktif) !== 'false' && s.aktif !== false })));
   result.katalog = getMasterCached('katalog', () => {
     const supMap = {}; getSheetData('Suppliers').forEach(s => supMap[s.id] = s.nama);
     const isAdmin = user.role === 'admin';
@@ -1048,7 +1050,7 @@ function apiDeleteLapak(token, id) {
 
 function apiGetSuppliers(token) {
   requireRole(token, ['admin','karyawan']);
-  return getSheetData('Suppliers').map(s => ({ id:s.id, nama:s.nama, kontak:s.kontak, jadwalPesan:s.jadwalPesan, catatan:s.catatan, tipeTransaksi: s.tipeTransaksi || 'BeliPutus', aktif: String(s.aktif) !== 'false' && s.aktif !== false }));
+  return getSheetData('Suppliers').map(s => ({ id:s.id, nama:s.nama, kontak:s.kontak, email:s.email || '', jadwalPesan:s.jadwalPesan, catatan:s.catatan, tipeTransaksi: s.tipeTransaksi || 'BeliPutus', aktif: String(s.aktif) !== 'false' && s.aktif !== false }));
 }
 function apiSaveSupplier(token, item) {
   requireRole(token, ['admin']);
@@ -1057,9 +1059,12 @@ function apiSaveSupplier(token, item) {
   const h = data[0]; const iId = h.indexOf('id'); const iTipe = h.indexOf('tipeTransaksi');
   const nama = String(item.nama || '').trim();
   if (!nama) return { success:false, message:'Nama wajib.' };
+  const email = String(item.email || '').trim();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { success:false, message:'Format email supplier tidak valid.' };
   const tipe = ['BeliPutus','TitipJual'].indexOf(item.tipeTransaksi) !== -1 ? item.tipeTransaksi : 'BeliPutus';
   const row = [item.id || ('SP' + Utilities.getUuid().slice(0,6).toUpperCase()), nama, String(item.kontak||''), String(item.jadwalPesan||''), String(item.catatan||''), item.aktif !== false];
   if (iTipe !== -1) row.splice(5, 0, tipe);
+  row.push(email);
   if (item.id) {
     for (let i=1;i<data.length;i++) if (String(data[i][iId])===String(item.id)) {
       if (iTipe !== -1) {
@@ -1069,6 +1074,7 @@ function apiSaveSupplier(token, item) {
         sheet.getRange(i+1, h.indexOf('catatan')+1).setValue(String(item.catatan||''));
         sheet.getRange(i+1, iTipe+1).setValue(tipe);
         sheet.getRange(i+1, h.indexOf('aktif')+1).setValue(item.aktif !== false);
+        if (h.indexOf('email') !== -1) sheet.getRange(i+1, h.indexOf('email')+1).setValue(email);
       } else sheet.getRange(i+1,1,1,6).setValues([row]);
       _clearSheetCache(); invalidateMasterCache(); return { success:true, message:'Supplier diperbarui.' };
     }
@@ -2617,6 +2623,49 @@ function apiGetLaporan(token, filter) {
   const dari = filter.dari ? new Date(filter.dari) : new Date(Date.now() - 30 * 86400000);
   const sampai = filter.sampai ? new Date(new Date(filter.sampai).getTime() + 86400000) : new Date();
   return buildLaporanForRange(dari, sampai, filter.lapakId || null);
+}
+function apiSendSupplierReport(token, payload) {
+  requireRole(token, ['admin']);
+  payload = payload || {};
+  const supplierId = String(payload.supplierId || '');
+  const supplier = getSheetData('Suppliers').find(s => String(s.id) === supplierId);
+  if (!supplier) return { success: false, message: 'Supplier tidak ditemukan.' };
+  const email = String(supplier.email || '').trim();
+  if (!email) return { success: false, message: 'Email supplier belum diisi.' };
+
+  const konsinyasi = getSheetData('Konsinyasi');
+  if (!konsinyasi.some(k => String(k.supplierId) === supplierId && k.status === 'Bayar')) {
+    return { success: false, message: 'Bayar supplier dulu.' };
+  }
+
+  const dari = String(payload.dari || '');
+  const sampai = String(payload.sampai || '');
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (!datePattern.test(dari) || !datePattern.test(sampai) || dari > sampai) {
+    return { success: false, message: 'Rentang tanggal laporan tidak valid.' };
+  }
+  const report = apiGetLaporan(token, { dari, sampai });
+  const katalog = {};
+  getSheetData('Katalog').forEach(k => { katalog[String(k.id)] = k; });
+  const items = report.perItem.filter(i => String((katalog[String(i.katalogId)] || {}).supplierId) === supplierId);
+  const paidItems = konsinyasi.filter(k => {
+    if (String(k.supplierId) !== supplierId || k.status !== 'Bayar') return false;
+    const paidDate = k.bayarAt instanceof Date ? formatDate(k.bayarAt) : String(k.bayarAt || '').slice(0, 10);
+    return paidDate >= dari && paidDate <= sampai;
+  });
+  const escapeHtml = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+  const rupiah = value => 'Rp ' + (Number(value) || 0).toLocaleString('id-ID');
+  const itemRows = items.length ? items.map(i => `<tr><td>${escapeHtml(i.nama)}</td><td style="text-align:right">${Number(i.qtyLaku) || 0} pcs</td><td style="text-align:right">${rupiah(i.omzet)}</td></tr>`).join('') : '<tr><td colspan="3">Tidak ada penjualan pada periode ini.</td></tr>';
+  const paymentRows = paidItems.length ? paidItems.map(k => {
+    const item = katalog[String(k.katalogId)] || {};
+    return `<tr><td>${escapeHtml(formatDate(k.tanggal))}</td><td>${escapeHtml(item.nama || k.katalogId)}</td><td style="text-align:right">${Number(k.qtyLaku) || 0} pcs</td><td style="text-align:right">${rupiah(k.utang)}</td></tr>`;
+  }).join('') : '<tr><td colspan="4">Tidak ada pembayaran pada periode ini.</td></tr>';
+  const totalQty = items.reduce((sum, i) => sum + (Number(i.qtyLaku) || 0), 0);
+  const totalOmzet = items.reduce((sum, i) => sum + (Number(i.omzet) || 0), 0);
+  const content = `<p>Halo ${escapeHtml(supplier.nama)}, berikut laporan periode ${escapeHtml(dari)} sampai ${escapeHtml(sampai)}.</p><h3>Rekap Penjualan</h3><table style="width:100%;border-collapse:collapse"><tr><th>Item</th><th>Qty</th><th>Omzet</th></tr>${itemRows}<tr><th>Total</th><th style="text-align:right">${totalQty} pcs</th><th style="text-align:right">${rupiah(totalOmzet)}</th></tr></table><h3>Rincian Pembayaran</h3><table style="width:100%;border-collapse:collapse"><tr><th>Tanggal</th><th>Item</th><th>Qty</th><th>Nominal</th></tr>${paymentRows}</table>`;
+  const subject = `Laporan Supplier ${supplier.nama} (${dari} - ${sampai})`;
+  const sent = kirimEmail(email, subject, emailWrapper('Laporan Supplier', content));
+  return { success: sent, message: sent ? 'Laporan berhasil dikirim ke ' + email : 'Gagal mengirim laporan.' };
 }
 function apiExportSetoranCSV(token, dari, sampai) {
   requireRole(token, ['admin']);
