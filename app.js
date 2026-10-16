@@ -1661,6 +1661,7 @@ function tabKonsinyasi() {
       <div class="text-right">
         <div class="text-sm font-bold ${k.status === 'Pending' ? 'text-red' : 'text-green'}">${fmtRp(k.utang)}</div>
         <span class="badge ${k.status === 'Pending' ? 'badge-warn' : 'badge-success'}" style="margin-top:4px">${esc(k.status)}</span>
+          ${k.status === 'Pending' ? `<button class="btn btn-ghost btn-sm mt-2" data-act="edit-konsinyasi" data-id="${esc(k.id)}">Edit</button>` : ''}
       </div>
     </div>`).join('');
   return html;
@@ -2698,6 +2699,7 @@ function handleClick(e) {
   // Konsinyasi
   if (a === 'load-konsinyasi') return loadKonsinyasi();
   if (a === 'bayar-supplier') return formBayarSupplier(id);
+  if (a === 'edit-konsinyasi') return formEditKonsinyasi(id);
   if (a === 'detail-konsinyasi') return showDetailKonsinyasi(id);
 
   // Analytics
@@ -4481,6 +4483,32 @@ async function formBayarSupplier(supplierId) {
       ]
     });
   } catch (e) { hideLoader(); toast(e.message, 'error'); }
+}
+function formEditKonsinyasi(id) {
+  const item = (S.konsinyasi || []).find(k => String(k.id) === String(id));
+  if (!item) return toast('Data titipan tidak ditemukan.', 'error');
+  if (item.status !== 'Pending') return toast('Titipan yang sudah dibayar terkunci.', 'error');
+  const suppliers = S.suppliers.filter(s => s.aktif !== false || String(s.id) === String(item.supplierId));
+  formModal({
+    title: 'Edit Titipan',
+    fields: [
+      { key:'supplierId', label:'Nama Penitip', type:'select', options: suppliers.map(s => ({ v:s.id, l:s.nama, selected:String(item.supplierId) === String(s.id) })) },
+      { key:'qtyLaku', label:'Qty Terjual', type:'number', value:item.qtyLaku },
+      { key:'hargaTitip', label:'Harga Titip per Item', type:'number', value:item.hargaTitip }
+    ],
+    onSubmit: async (data, close) => {
+      close(); showLoader();
+      try {
+        const r = await api('editKonsinyasi', { token:S.token, id, updates:data });
+        toast(r.message, r.success ? 'success' : 'error');
+        if (r.success) {
+          await loadKonsinyasi();
+          S.dash = await api('getAdminDashboard', { token:S.token });
+        }
+      } catch (e) { toast(e.message, 'error'); }
+      finally { hideLoader(); render(); }
+    }
+  });
 }
 async function showDetailKonsinyasi(supplierId) {
   showLoader();

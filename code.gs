@@ -153,6 +153,7 @@ const ROUTES = {
   bayarPayrollBulk: p => apiBayarPayrollBulk(p.token, p.bulan, p.userIds),
   getPayrollHistory: p => apiGetPayrollHistory(p.token, p.filter),
   getKonsinyasi: p => apiGetKonsinyasi(p.token, p.filter),
+  editKonsinyasi: p => apiEditKonsinyasi(p.token, p.id, p.updates),
   getSaldoSupplier: p => apiGetSaldoSupplier(p.token),
   bayarSupplier: p => apiBayarSupplier(p.token, p.payload),
   getRiwayatBayarSupplier: p => apiGetRiwayatBayarSupplier(p.token, p.filter),
@@ -3160,6 +3161,127 @@ function apiGetKonsinyasi(token, filter) {
   if (filter.dari) list = list.filter(x => x.tanggal >= filter.dari);
   if (filter.sampai) list = list.filter(x => x.tanggal <= filter.sampai);
   return list.reverse();
+}
+function apiEditKonsinyasi(token, id, updates) {
+  const sess = requireRole(token, ['admin']);
+  updates = updates || {};
+  const supplierId = String(updates.supplierId || '');
+  const qtyLaku = Number(updates.qtyLaku);
+  const hargaTitip = Number(updates.hargaTitip);
+  if (!id || !supplierId) return { success: false, message: 'Titipan dan nama penitip wajib diisi.' };
+  if (!Number.isInteger(qtyLaku) || qtyLaku <= 0) return { success: false, message: 'Qty terjual harus bilangan bulat lebih dari 0.' };
+  if (!isFinite(hargaTitip) || hargaTitip < 0) return { success: false, message: 'Harga titip tidak valid.' };
+
+  const supplier = getSheetData('Suppliers').find(s => String(s.id) === supplierId);
+  if (!supplier) return { success: false, message: 'Nama penitip tidak ditemukan.' };
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success: false, message: 'Sistem sibuk. Coba lagi.' };
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const konsinyasiSheet = ss.getSheetByName('Konsinyasi');
+    const konsinyasiData = konsinyasiSheet.getDataRange().getValues();
+    const kh = konsinyasiData[0].map(x => String(x).trim());
+    const kId = kh.indexOf('id'), kStatus = kh.indexOf('status');
+    const kSupplier = kh.indexOf('supplierId'), kQty = kh.indexOf('qtyLaku');
+    const kHarga = kh.indexOf('hargaTitip'), kUtang = kh.indexOf('utang');
+    const kSetoran = kh.indexOf('setoranId'), kLapak = kh.indexOf('lapakId');
+    const kKatalog = kh.indexOf('katalogId');
+    let konsinyasiRow = -1;
+    for (let i = 1; i < konsinyasiData.length; i++) {
+      if (String(konsinyasiData[i][kId]) === String(id)) { konsinyasiRow = i + 1; break; }
+    }
+    if (konsinyasiRow < 0) return { success: false, message: 'Data titipan tidak ditemukan.' };
+    const oldRow = konsinyasiData[konsinyasiRow - 1];
+    if (oldRow[kStatus] !== 'Pending') return { success: false, message: 'Titipan yang sudah dibayar terkunci.' };
+
+    const setoranId = String(oldRow[kSetoran] || '');
+    const katalogId = String(oldRow[kKatalog] || '');
+    const lapakId = String(oldRow[kLapak] || '');
+    if (!setoranId || !katalogId) return { success: false, message: 'Titipan tidak memiliki referensi setoran yang valid.' };
+
+    const detailSheet = ss.getSheetByName('SetoranDetail');
+    const detailData = detailSheet.getDataRange().getValues();
+    const dh = detailData[0].map(x => String(x).trim());
+    const dSetoran = dh.indexOf('setoranId'), dKatalog = dh.indexOf('katalogId');
+    const dQtyLaku = dh.indexOf('qtyLaku'), dQtySisa = dh.indexOf('qtySisa');
+    const dHargaBeli = dh.indexOf('hargaBeli'), dHargaJual = dh.indexOf('hargaJual');
+    const dSubtotal = dh.indexOf('subtotal');
+    let detailRow = -1;
+    for (let i = 1; i < detailData.length; i++) {
+      if (String(detailData[i][dSetoran]) === setoranId && String(detailData[i][dKatalog]) === katalogId) {
+        if (detailRow >= 0) return { success: false, message: 'Detail setoran duplikat; edit dibatalkan.' };
+        detailRow = i + 1;
+      }
+    }
+    if (detailRow < 0) return { success: false, message: 'Detail setoran terkait tidak ditemukan.' };
+    const oldDetail = detailData[detailRow - 1];
+    const qtyDrop = Number(oldDetail[dh.indexOf('qtyDrop')]) || 0;
+    if (qtyLaku > qtyDrop) return { success: false, message: 'Qty terjual tidak boleh melebihi qty drop (' + qtyDrop + ').' };
+    const hargaJual = Number(oldDetail[dHargaJual]) || 0;
+    const subtotalBaru = qtyLaku * hargaJual;
+
+    const setoranSheet = ss.getSheetByName('Setoran');
+    const setoranData = setoranSheet.getDataRange().getValues();
+    const sh = setoranData[0].map(x => String(x).trim());
+    const sId = sh.indexOf('id'), sStatus = sh.indexOf('status');
+    const sTotal = sh.indexOf('totalSistem'), sPengeluaran = sh.indexOf('pengeluaran');
+    const sExpected = sh.indexOf('expectedSetoran'), sTunai = sh.indexOf('totalTunai');
+    const sQris = sh.indexOf('totalQris'), sSelisih = sh.indexOf('selisih');
+    let setoranRow = -1;
+    for (let i = 1; i < setoranData.length; i++) {
+      if (String(setoranData[i][sId]) === setoranId) { setoranRow = i + 1; break; }
+    }
+    if (setoranRow < 0) return { success: false, message: 'Setoran terkait tidak ditemukan.' };
+
+    const stokSheet = ss.getSheetByName('KartuStok');
+    const stokData = stokSheet.getDataRange().getValues();
+    const khStok = stokData[0].map(x => String(x).trim());
+    const stKatalog = khStok.indexOf('katalogId'), stLapak = khStok.indexOf('lapakId');
+    const stTipe = khStok.indexOf('tipe'), stKeluar = khStok.indexOf('keluar');
+    const stMasuk = khStok.indexOf('masuk'), stRef = khStok.indexOf('refId');
+    const stSaldo = khStok.indexOf('saldo');
+    let stokRow = -1;
+    for (let i = 1; i < stokData.length; i++) {
+      if (String(stokData[i][stRef]) === setoranId && String(stokData[i][stKatalog]) === katalogId && String(stokData[i][stLapak]) === lapakId && stokData[i][stTipe] === 'Terjual') {
+        if (stokRow >= 0) return { success: false, message: 'Ledger stok duplikat; edit dibatalkan.' };
+        stokRow = i + 1;
+      }
+    }
+    if (stokRow < 0) return { success: false, message: 'Ledger stok terkait tidak ditemukan.' };
+
+    const oldQty = Number(oldRow[kQty]) || 0;
+    const oldHarga = Number(oldRow[kHarga]) || 0;
+    const utangBaru = qtyLaku * hargaTitip;
+    const totalSistemBaru = detailData.slice(1).reduce((sum, row, index) => sum + (index + 1 === detailRow ? subtotalBaru : (Number(row[dSubtotal]) || 0)), 0);
+    const setoranValues = setoranData[setoranRow - 1];
+    const expectedBaru = totalSistemBaru - (Number(setoranValues[sPengeluaran]) || 0);
+    const selisihBaru = totalSistemBaru - (Number(setoranValues[sTunai]) || 0) - (Number(setoranValues[sQris]) || 0);
+
+    konsinyasiSheet.getRange(konsinyasiRow, kSupplier + 1).setValue(supplierId);
+    konsinyasiSheet.getRange(konsinyasiRow, kQty + 1).setValue(qtyLaku);
+    konsinyasiSheet.getRange(konsinyasiRow, kHarga + 1).setValue(hargaTitip);
+    konsinyasiSheet.getRange(konsinyasiRow, kUtang + 1).setValue(utangBaru);
+    detailSheet.getRange(detailRow, dQtyLaku + 1).setValue(qtyLaku);
+    detailSheet.getRange(detailRow, dQtySisa + 1).setValue(qtyDrop - qtyLaku);
+    detailSheet.getRange(detailRow, dHargaBeli + 1).setValue(hargaTitip);
+    detailSheet.getRange(detailRow, dSubtotal + 1).setValue(subtotalBaru);
+    setoranSheet.getRange(setoranRow, sTotal + 1).setValue(totalSistemBaru);
+    setoranSheet.getRange(setoranRow, sExpected + 1).setValue(expectedBaru);
+    setoranSheet.getRange(setoranRow, sSelisih + 1).setValue(selisihBaru);
+    stokSheet.getRange(stokRow, stKeluar + 1).setValue(qtyLaku);
+    stokData[stokRow - 1][stKeluar] = qtyLaku;
+
+    let saldo = 0;
+    for (let i = 1; i < stokData.length; i++) {
+      if (String(stokData[i][stKatalog]) !== katalogId) continue;
+      saldo += (Number(stokData[i][stMasuk]) || 0) - (Number(stokData[i][stKeluar]) || 0);
+      stokSheet.getRange(i + 1, stSaldo + 1).setValue(saldo);
+    }
+
+    logAction(sess.username, 'EDIT_KONSINYASI', { id, setoranId, supplierId: { from: oldRow[kSupplier], to: supplierId }, qtyLaku: { from: oldQty, to: qtyLaku }, hargaTitip: { from: oldHarga, to: hargaTitip }, utang: { from: Number(oldRow[kUtang]) || 0, to: utangBaru } });
+    _clearSheetCache();
+    return { success: true, message: 'Titipan diperbarui; detail setoran dan saldo stok ikut disinkronkan.' };
+  } finally { lock.releaseLock(); }
 }
 function apiGetSaldoSupplier(token) {
   requireRole(token, ['admin']);
