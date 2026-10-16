@@ -1748,7 +1748,6 @@ function apiEditDropStok(token, items) {
     const tgl = todayStr();
     if (nowHour() >= CONFIG.TIME_LOCK_HOUR) return { success: false, message: 'Input terkunci setelah jam ' + CONFIG.TIME_LOCK_HOUR + ':00.' };
     if (isPeriodeLocked(tgl)) return { success: false, message: 'Periode ini terkunci.' };
-    if (!apiGetAbsensiHariIni(token, lapakId, tgl).isOpen) return { success: false, message: 'Buka lapak dulu untuk edit stok.' };
     if (getSheetData('Setoran').some(s => formatDate(s.tanggal) === tgl && String(s.lapakId) === lapakId)) {
       return { success: false, message: 'Stok tidak bisa diedit setelah laporan dikirim.' };
     }

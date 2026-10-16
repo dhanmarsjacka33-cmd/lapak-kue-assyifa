@@ -1381,7 +1381,7 @@ function handleClick(e) {
   if (a === 'buka') return karyawanAction('bukaLapak');
   if (a === 'tutup') return karyawanAction('tutupLapak');
   if (a === 'save-drop') return karyawanSaveDrop();
-  if (a === 'edit-drop-before-open') { if (S.karyawan) S.karyawan.distribusi = []; return render(); }
+  if (a === 'edit-drop-before-open') { if (S.karyawan) S.karyawan.editingDrop = true; return render(); }
   if (a === 'edit-drop-open') { if (S.karyawan) S.karyawan.editingDrop = true; return render(); }
   if (a === 'cancel-drop-edit') { if (S.karyawan) S.karyawan.editingDrop = false; return render(); }
   if (a === 'save-drop-edit') return karyawanEditDrop();
