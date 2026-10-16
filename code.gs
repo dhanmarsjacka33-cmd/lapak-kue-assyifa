@@ -76,6 +76,7 @@ const ROUTES = {
   tutupLapak: p => apiTutupLapak(p.token),
   getKaryawanDashboard: p => apiGetKaryawanDashboard(p.token),
   karyawanInputDrop: p => apiKaryawanInputDrop(p.token, p.items),
+  editDropStok: p => apiEditDropStok(p.token, p.items),
   submitRekap: p => apiSubmitRekap(p.token, p.payload),
   getAdminDashboard: p => apiGetAdminDashboard(p.token),
   getSetoranList: p => apiGetSetoranList(p.token, p.filter),
@@ -114,6 +115,7 @@ const ROUTES = {
   exportSetoranCSV: p => apiExportSetoranCSV(p.token, p.dari, p.sampai),
   getKartuStok: p => apiGetKartuStok(p.token, p.filter),
   getStokSaldo: p => apiGetStokSaldo(p.token),
+  getStokAudit: p => apiGetStokAudit(p.token),
   getReturList: p => apiGetReturList(p.token, p.filter),
   submitRetur: p => apiSubmitRetur(p.token, p.payload),
   approveRetur: p => apiApproveRetur(p.token, p.id, p.tujuanLapakId),
@@ -201,6 +203,7 @@ function setupDatabase() {
     { name: 'Pesanan',         headers: ['id','tanggal','supplierId','item','qty','hargaSatuan','subtotal','status','keterangan','dibuatOleh','updatedAt'] },
     { name: 'Sessions',        headers: ['token','userId','username','role','name','lapakId','lapakIds','expiresAt'] },
     { name: 'KartuStok',       headers: ['id','tanggal','katalogId','lapakId','tipe','masuk','keluar','saldo','refId','keterangan'] },
+    { name: 'StokAudit',       headers: ['id','waktu','katalogId','namaItem','lapakId','stokLama','stokBaru','userId','user','role'] },
     { name: 'Retur',           headers: ['id','tanggal','dariLapakId','katalogId','qty','kondisi','tujuanLapakId','setoranId','status','approvedBy','approvedAt','keterangan'] },
     { name: 'HargaTingkat',    headers: ['id','katalogId','tipePelanggan','minimalQty','hargaJual','aktif'] },
     { name: 'TutupBuku',       headers: ['id','periode','tanggalMulai','tanggalAkhir','status','ditutupBy','ditutupAt','catatan'] },
@@ -456,6 +459,20 @@ function upgradeDatabase_v510() {
   }
   _clearSheetCache();
   return 'Upgrade v5.10 selesai. Kolom BayarTitipanKaryawan: catatan, noNota, metode, status.';
+}
+
+function upgradeDatabase_v511() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('StokAudit');
+  if (!sheet) {
+    sheet = ss.insertSheet('StokAudit');
+    const headers = ['id','waktu','katalogId','namaItem','lapakId','stokLama','stokBaru','userId','user','role'];
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.setFrozenRows(1);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#fef3c7');
+  }
+  _clearSheetCache();
+  return 'Upgrade v5.11 selesai. Sheet StokAudit tersedia.';
 }
 
 // ============================================================
@@ -1274,6 +1291,25 @@ function apiGetStokSaldo(token, internal) {
   });
   return Object.values(saldoMap).sort((a, b) => a.nama.localeCompare(b.nama));
 }
+function catatAuditStok(katalogId, namaItem, lapakId, stokLama, stokBaru, sess) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('StokAudit');
+  if (!sheet) throw new Error('Sheet StokAudit belum tersedia. Jalankan upgradeDatabase_v511().');
+  sheet.appendRow(['SA' + Utilities.getUuid().slice(0, 8).toUpperCase(), new Date(), katalogId, namaItem, lapakId, stokLama, stokBaru, sess.id, sess.name || sess.username, sess.role]);
+}
+function apiGetStokAudit(token) {
+  requireRole(token, ['admin']);
+  const lapakMap = {};
+  getSheetData('Lapak').forEach(l => { lapakMap[String(l.id)] = l.nama; });
+  return getSheetData('StokAudit').map(a => ({
+    id: a.id,
+    waktu: formatDateTime(a.waktu),
+    namaItem: a.namaItem || a.katalogId,
+    lapakNama: lapakMap[String(a.lapakId)] || a.lapakId || '',
+    stokLama: Number(a.stokLama) || 0,
+    stokBaru: Number(a.stokBaru) || 0,
+    user: a.user || a.userId || ''
+  })).reverse().slice(0, 100);
+}
 
 // ============================================================
 //  RETUR
@@ -1670,6 +1706,8 @@ function apiKaryawanInputDrop(token, items) {
     const data = sheet.getDataRange().getValues();
     const h = data[0];
     const iLapak = h.indexOf('lapakId'), iKat = h.indexOf('katalogId'), iTgl = h.indexOf('tanggal'), iQty = h.indexOf('qtyDrop');
+    const katalogMap = {};
+    getSheetData('Katalog').forEach(k => { katalogMap[String(k.id)] = k; });
     const newRows = [];
     (items || []).forEach(it => {
       const qty = toPosNum(it.qtyDrop);
@@ -1682,6 +1720,9 @@ function apiKaryawanInputDrop(token, items) {
           sheet.getRange(i + 1, iQty + 1).setValue(qty);
           if (diff > 0) catatKartuStok(it.katalogId, lapakId, 'Drop-Adjust', diff, 0, '', 'Penyesuaian');
           else if (diff < 0) catatKartuStok(it.katalogId, lapakId, 'Drop-Adjust', 0, -diff, '', 'Penyesuaian');
+          if (diff !== 0 && katalogMap[String(it.katalogId)]) {
+            catatAuditStok(it.katalogId, katalogMap[String(it.katalogId)].nama, lapakId, oldQty, qty, sess);
+          }
           found = true; break;
         }
       }
@@ -1693,6 +1734,76 @@ function apiKaryawanInputDrop(token, items) {
     if (newRows.length) sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
     _clearSheetCache();
     return { success: true, message: 'Stok tersimpan.' };
+  } finally { lock.releaseLock(); }
+}
+function apiEditDropStok(token, items) {
+  const sess = requireRole(token, ['karyawan']);
+  const lapakId = String(sess.lapakId || '');
+  if (!lapakId) return { success: false, message: 'Akun belum terhubung ke lapak.' };
+  if (!Array.isArray(items) || !items.length) return { success: false, message: 'Item stok wajib diisi.' };
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success: false, message: 'Sistem sibuk. Coba lagi.' };
+  try {
+    const tgl = todayStr();
+    if (nowHour() >= CONFIG.TIME_LOCK_HOUR) return { success: false, message: 'Input terkunci setelah jam ' + CONFIG.TIME_LOCK_HOUR + ':00.' };
+    if (isPeriodeLocked(tgl)) return { success: false, message: 'Periode ini terkunci.' };
+    if (!apiGetAbsensiHariIni(token, lapakId, tgl).isOpen) return { success: false, message: 'Buka lapak dulu untuk edit stok.' };
+    if (getSheetData('Setoran').some(s => formatDate(s.tanggal) === tgl && String(s.lapakId) === lapakId)) {
+      return { success: false, message: 'Stok tidak bisa diedit setelah laporan dikirim.' };
+    }
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const distribusiSheet = ss.getSheetByName('Distribusi');
+    const data = distribusiSheet.getDataRange().getValues();
+    const h = data[0].map(x => String(x).trim());
+    const iId = h.indexOf('id'), iTgl = h.indexOf('tanggal'), iLapak = h.indexOf('lapakId');
+    const iKat = h.indexOf('katalogId'), iQty = h.indexOf('qtyDrop');
+    const iBy = h.indexOf('droppedBy'), iAt = h.indexOf('droppedAt');
+    const katalog = {};
+    getSheetData('Katalog').forEach(k => { katalog[String(k.id)] = k; });
+    const seen = {};
+    const updates = items.map(item => {
+      const katalogId = String(item.katalogId || '');
+      const qtyBaru = Number(item.qtyDrop);
+      if (!katalogId || !katalog[katalogId]) throw new Error('Item stok tidak valid.');
+      if (seen[katalogId]) throw new Error('Item stok duplikat.');
+      seen[katalogId] = true;
+      if (!isFinite(qtyBaru) || qtyBaru < 0 || Math.floor(qtyBaru) !== qtyBaru) {
+        throw new Error('Jumlah stok harus bilangan bulat minimal 0.');
+      }
+      return { katalogId, qtyBaru, namaItem: katalog[katalogId].nama };
+    });
+    let edited = 0;
+
+    for (const update of updates) {
+      const { katalogId, qtyBaru, namaItem } = update;
+      let rowIndex = -1;
+      for (let i = 1; i < data.length; i++) {
+        if (formatDate(data[i][iTgl]) === tgl && String(data[i][iLapak]) === lapakId && String(data[i][iKat]) === katalogId) {
+          rowIndex = i + 1;
+          break;
+        }
+      }
+      const stokLama = rowIndex > 0 ? Number(distribusiSheet.getRange(rowIndex, iQty + 1).getValue()) || 0 : 0;
+      if (stokLama === qtyBaru) continue;
+
+      if (rowIndex > 0) {
+        distribusiSheet.getRange(rowIndex, iQty + 1).setValue(qtyBaru);
+        if (iBy >= 0) distribusiSheet.getRange(rowIndex, iBy + 1).setValue(sess.username);
+        if (iAt >= 0) distribusiSheet.getRange(rowIndex, iAt + 1).setValue(new Date());
+      } else if (qtyBaru > 0) {
+        distribusiSheet.appendRow(['D' + Utilities.getUuid().slice(0, 8).toUpperCase(), tgl, lapakId, katalogId, qtyBaru, sess.username, new Date()]);
+      }
+
+      const delta = qtyBaru - stokLama;
+      const refId = 'SA' + Utilities.getUuid().slice(0, 8).toUpperCase();
+      if (delta > 0) catatKartuStok(katalogId, lapakId, 'Drop-Edit', delta, 0, refId, 'Edit stok ' + stokLama + ' -> ' + qtyBaru);
+      else catatKartuStok(katalogId, lapakId, 'Drop-Edit', 0, Math.abs(delta), refId, 'Edit stok ' + stokLama + ' -> ' + qtyBaru);
+      catatAuditStok(katalogId, namaItem, lapakId, stokLama, qtyBaru, sess);
+      edited++;
+    }
+    _clearSheetCache();
+    return { success: true, message: edited ? edited + ' perubahan stok tersimpan dan tercatat.' : 'Tidak ada perubahan stok.' };
   } finally { lock.releaseLock(); }
 }
 

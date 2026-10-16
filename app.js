@@ -17,7 +17,7 @@ const S = {
   lapak: [], suppliers: [], katalog: [], users: [], belanja: [], jadwal: [],
   dash: null, karyawan: null, kasbon: null, gaji: null, laporan: null,
   setoran: null, kas: null, pesanan: null, settingGaji: null, rekapGaji: null,
-  kartuStok: null, stokSaldo: null, retur: null, hargaTingkat: null,
+  kartuStok: null, stokSaldo: null, stokAudit: null, retur: null, hargaTingkat: null,
   tutupBuku: null, notifikasi: null,
   absensiList: null, absensiFilter: {},
   bonusAntar: null, bonusFilter: {},
@@ -325,11 +325,13 @@ function vKaryawan() {
   if (d.sudahSubmit) {
     body += `<div class="alert alert-success">${ico('check','ico')}<div><strong>Laporan sudah dikirim</strong><br><span class="text-xs">Menunggu persetujuan admin.</span></div></div>`;
     body += `<button class="btn btn-ghost btn-block mb-3" data-act="retur-karyawan">${ico('return','ico-sm')} Ajukan Retur</button>`;
-  } else if (!d.distribusi || !d.distribusi.length) {
+  } else if (d.editingDrop) {
+    body += renderDropForm(d);
+  } else if (!isOpen && (!d.distribusi || !d.distribusi.length)) {
     body += renderDropForm(d);
   } else if (!isOpen) {
     body += `<div class="alert alert-warn">${ico('inbox','ico')}<span>Buka lapak dulu untuk mulai rekap.</span></div>`;
-    body += `<div class="card"><div class="row-between mb-3"><strong class="text-sm">Drop Stok Hari Ini</strong><button class="btn btn-ghost btn-sm" data-act="edit-drop">Edit</button></div>`;
+    body += `<div class="card"><div class="row-between mb-3"><strong class="text-sm">Drop Stok Hari Ini</strong><button class="btn btn-ghost btn-sm" data-act="edit-drop-before-open">Edit</button></div>`;
     body += d.distribusi.map(it => `
       <div class="row-between" style="padding:8px 0;border-bottom:1px solid #f8fafc">
         <div style="min-width:0;flex:1">
@@ -381,27 +383,30 @@ function vKaryawan() {
 
 function renderDropForm(d) {
   const katalog = d.katalogFull || [];
+  const currentQty = {};
+  (d.distribusi || []).forEach(it => { currentQty[String(it.katalogId)] = Number(it.qtyDrop) || 0; });
+  const editing = !!d.editingDrop;
   if (!katalog.length) return `<div class="card empty">${ico('box','ico')}<p>Katalog kosong.</p></div>`;
   return `
     <div class="card" style="border:1.5px solid var(--amber);background:var(--amber-50)">
-      <div class="card-title" style="color:var(--amber-600)">${ico('boxes')} Input Stok Diterima</div>
-      <p class="text-xs text-gray mb-4">Masukkan jumlah kue yang Anda terima pagi ini.</p>
+      <div class="card-title" style="color:var(--amber-600)">${ico('boxes')} ${editing ? 'Edit Drop Stok' : 'Input Stok Diterima'}</div>
+      <p class="text-xs text-gray mb-4">${editing ? 'Perbarui jumlah stok yang diterima di lapak.' : 'Masukkan jumlah kue yang Anda terima pagi ini.'}</p>
       ${katalog.map(k => `
         <div class="row-between" style="padding:10px 0;border-bottom:1px solid rgba(245,158,11,.15)">
           <div style="min-width:0;flex:1;padding-right:8px">
             <p class="text-sm font-semibold">${esc(k.nama)}</p>
             <p class="text-xs text-gray">${esc(k.supplierNama)} · ${fmtRp(k.hargaJual)}</p>
           </div>
-          <input type="number" min="0" inputmode="numeric" value="0" data-drop-item="${esc(k.id)}" class="input field-sm" style="width:72px;text-align:center">
+          <input type="number" min="0" step="1" inputmode="numeric" value="${editing ? (currentQty[String(k.id)] || 0) : 0}" data-drop-item="${esc(k.id)}" class="input field-sm" style="width:72px;text-align:center">
         </div>`).join('')}
-      <button class="btn btn-primary btn-block mt-3" data-act="save-drop">Simpan Stok Diterima</button>
+      ${editing ? `<div class="row mt-3" style="gap:8px"><button class="btn btn-primary" style="flex:1" data-act="save-drop-edit">Simpan Perubahan</button><button class="btn btn-ghost" data-act="cancel-drop-edit">Batal</button></div>` : '<button class="btn btn-primary btn-block mt-3" data-act="save-drop">Simpan Stok Diterima</button>'}
     </div>`;
 }
 
 function renderRekapForm(d) {
   return `
     <div class="card">
-      <div class="card-title">${ico('bar')} Rekap Akhir Hari</div>
+      <div class="row-between mb-3"><div class="card-title" style="margin:0">${ico('bar')} Rekap Akhir Hari</div><button class="btn btn-ghost btn-sm" data-act="edit-drop-open" ${d.locked ? 'disabled title="Input stok terkunci"' : ''}>Edit Stok Drop</button></div>
       ${d.locked ? `<div class="alert alert-danger">${ico('lock','ico-sm')}<span>Input terkunci setelah jam ${d.cutoffHour}:00</span></div>` : ''}
       ${d.distribusi.map(it => `
         <div class="card card-flat" style="padding:12px;margin-bottom:8px">
@@ -1118,6 +1123,7 @@ function tabKasbon() {
 function tabKartuStok() {
   const saldo = S.stokSaldo || [];
   const list = S.kartuStok || [];
+  const audit = S.stokAudit || [];
   let html = `<div class="row-between mb-3"><h3 class="card-title" style="margin:0">${ico('boxes')} Stok</h3>
     <button class="btn btn-ghost btn-sm" data-act="refresh-stok">${ico('refresh','ico-sm')}</button></div>`;
   html += `<div class="card"><div class="card-title">Saldo</div>`;
@@ -1144,6 +1150,14 @@ function tabKartuStok() {
       </div>`).join('');
     html += `</div>`;
   }
+  html += `<div class="card"><div class="card-title">Riwayat Edit Stok</div>`;
+  if (!audit.length) html += '<p class="text-xs text-gray">Belum ada perubahan stok manual.</p>';
+  else html += audit.slice(0, 50).map(a => `
+    <div class="row-between text-xs" style="padding:8px 0;border-bottom:1px solid #f8fafc">
+      <div style="min-width:0;flex:1"><strong>${esc(a.namaItem)}</strong><div class="text-gray">${esc(a.waktu)} · ${esc(a.lapakNama || '-')} · ${esc(a.user)}</div></div>
+      <strong>${a.stokLama} → ${a.stokBaru}</strong>
+    </div>`).join('');
+  html += `</div>`;
   return html;
 }
 
@@ -2574,7 +2588,10 @@ function handleClick(e) {
   if (a === 'buka') return karyawanAction('bukaLapak');
   if (a === 'tutup') return karyawanAction('tutupLapak');
   if (a === 'save-drop') return karyawanSaveDrop();
-  if (a === 'edit-drop') { S.karyawan.distribusi = []; return render(); }
+  if (a === 'edit-drop-before-open') { if (S.karyawan) S.karyawan.distribusi = []; return render(); }
+  if (a === 'edit-drop-open') { if (S.karyawan) S.karyawan.editingDrop = true; return render(); }
+  if (a === 'cancel-drop-edit') { if (S.karyawan) S.karyawan.editingDrop = false; return render(); }
+  if (a === 'save-drop-edit') return karyawanEditDrop();
   if (a === 'submit-rekap') return doSubmitRekap();
   if (a === 'add-peng') return addPengRow();
   if (a === 'del-peng') { const r = e.target.closest('[data-peng-row]'); if (r) r.remove(); return updateSummary(); }
@@ -2839,7 +2856,7 @@ async function doLogout() {
     lapak: [], suppliers: [], katalog: [], users: [], belanja: [], jadwal: [],
     dash: null, karyawan: null, kasbon: null, gaji: null, laporan: null, setoran: null,
     kas: null, pesanan: null, settingGaji: null, rekapGaji: null,
-    kartuStok: null, stokSaldo: null, retur: null, hargaTingkat: null,
+    kartuStok: null, stokSaldo: null, stokAudit: null, retur: null, hargaTingkat: null,
     tutupBuku: null, notifikasi: null, rekap: {},
     absensiList: null, absensiFilter: {}, bonusAntar: null, bonusFilter: {},
     settingPayroll: null, hariEfektif: null,
@@ -2931,6 +2948,25 @@ async function karyawanSaveDrop() {
     const r = await api('karyawanInputDrop', { token: S.token, items });
     toast(r.message, r.success ? 'success' : 'error');
     if (r.success) await reloadKaryawan();
+  } catch (e) { toast(e.message, 'error'); }
+  finally { hideLoader(); render(); }
+}
+async function karyawanEditDrop() {
+  const items = [];
+  $$('[data-drop-item]').forEach(inp => {
+    items.push({ katalogId: inp.dataset.dropItem, qtyDrop: parseInt(inp.value, 10) || 0 });
+  });
+  if (!items.length) return toast('Tidak ada item stok.', 'error');
+  showLoader();
+  try {
+    const r = await api('editDropStok', { token: S.token, items });
+    toast(r.message, r.success ? 'success' : 'error');
+    if (r.success) {
+      await reloadKaryawan();
+      S.karyawan.distribusi.forEach(it => {
+        S.rekap[it.katalogId] = Math.min(S.rekap[it.katalogId] || 0, it.qtyDrop);
+      });
+    }
   } catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
@@ -3055,11 +3091,12 @@ async function loadTabData(tab) {
 }
 
 async function loadKartuStokData() {
-  const [stok, saldo] = await Promise.all([
+  const [stok, saldo, audit] = await Promise.all([
     api('getKartuStok', { token: S.token, filter: {} }),
-    api('getStokSaldo', { token: S.token })
+    api('getStokSaldo', { token: S.token }),
+    api('getStokAudit', { token: S.token })
   ]);
-  S.kartuStok = stok; S.stokSaldo = saldo;
+  S.kartuStok = stok; S.stokSaldo = saldo; S.stokAudit = audit;
 }
 async function loadKartuStok() { await loadKartuStokData(); render(); }
 
