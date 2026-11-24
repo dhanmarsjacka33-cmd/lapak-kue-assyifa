@@ -663,15 +663,16 @@ function summaryHTML() {
   const tunaiEl = $('input[name="tunai"]'), qrisEl = $('input[name="qris"]');
   const tunai = tunaiEl ? (parseInt(tunaiEl.value, 10) || 0) : 0;
   const qris = qrisEl ? (parseInt(qrisEl.value, 10) || 0) : 0;
-  const expected = total - pengeluaran;
+  const expected = tunai - totalTitipan - pengeluaran;
   const selisih = total - (tunai + qris);
   return `<div style="flex:1">
     <div class="row-between text-xs"><span>Penjualan</span><strong>${fmtRp(total)}</strong></div>
-    <div class="row-between text-xs text-red"><span>Pengeluaran</span><span>- ${fmtRp(pengeluaran)}</span></div>
-    ${totalTitipan > 0 ? `<div class="row-between text-xs text-gray" style="padding-left:12px"><span>Pembayaran titipan (tidak mengurangi setoran)</span><span>${fmtRp(totalTitipan)}</span></div>` : ''}
-    <div class="row-between text-xs text-green font-bold mt-2"><span>Harus Disetor</span><span>${fmtRp(Math.max(0, expected))}</span></div>
+    <div class="row-between text-xs text-red"><span>Pengeluaran operasional</span><span>- ${fmtRp(pengeluaran)}</span></div>
+    ${totalTitipan > 0 ? `<div class="row-between text-xs text-red" style="padding-left:12px"><span>Pelunasan titipan supplier (dari tunai)</span><span>- ${fmtRp(totalTitipan)}</span></div>` : ''}
+    <div class="row-between text-xs text-green font-bold mt-2"><span>Sisa tunai yang harus disetor</span><span>${fmtRp(Math.max(0, expected))}</span></div>
     <div class="divider" style="margin:10px 0"></div>
-    <div class="row-between text-xs"><span>Tunai + QRIS</span><span>${fmtRp(tunai + qris)}</span></div>
+    <div class="row-between text-xs"><span>QRIS (langsung ke owner)</span><span>${fmtRp(qris)}</span></div>
+    <div class="row-between text-xs"><span>Total penerimaan tunai + QRIS</span><span>${fmtRp(tunai + qris)}</span></div>
     <div class="row-between text-xs font-bold ${Math.abs(selisih) < 1 ? 'text-green' : 'text-red'}"><span>Selisih</span><span>${fmtRp(selisih)}</span></div>
   </div>`;
 }
@@ -1983,8 +1984,7 @@ function formBayarTitipan(supplierId) {
       <div class="field" style="margin-bottom:0">
         <label>Metode</label>
         <select class="select" data-f="metode">
-          <option value="Tunai" ${state.metode === 'Tunai' ? 'selected' : ''}>Tunai</option>
-          <option value="Transfer" ${state.metode === 'Transfer' ? 'selected' : ''}>Transfer</option>
+          <option value="Tunai" selected>Tunai — dari uang penjualan lapak</option>
         </select>
       </div>
     </div>
