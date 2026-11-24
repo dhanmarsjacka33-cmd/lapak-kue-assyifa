@@ -2044,8 +2044,8 @@ function apiSubmitRekap(token, payload) {
     (!b.setoranId || b.setoranId === '') &&
     String(b.status || 'Active') === 'Active'
   );
-  // Pembayaran titipan tetap tercatat di BayarTitipanKaryawan dan ditautkan ke setoran,
-  // tetapi bukan pengeluaran modal/operasional lapak sehingga tidak masuk pengeluaranList.
+  // Pembayaran titipan tetap bukan biaya operasional, tetapi mengurangi uang tunai
+  // yang wajib disetor karena dibayarkan dari kas penjualan yang dipegang karyawan.
 
   for (const p of pengeluaranList) {
     const nominal = Number(p && p.nominal);
