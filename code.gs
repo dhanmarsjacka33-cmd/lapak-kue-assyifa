@@ -8,7 +8,7 @@ const CONFIG = {
   SESSION_TTL: 21600, SESSION_TTL_DAYS: 30, LOCK_TIMEOUT: 15000,
   MAX_LOGIN_ATTEMPTS: 5, LOGIN_WINDOW: 300,
   BACKUP_FOLDER: 'Kue As-Syifa Backups', BACKUP_RETENTION_DAYS: 30,
-  TIME_LOCK_HOUR: 23, DEFAULT_PASSWORD: 'kue1234',
+  TIME_LOCK_HOUR: 23,
   FONNTE_TOKEN: '',
   NOTIF_EMAIL: 'loversazkia@gmail.com',
   NOTIF_EMAIL_PESANAN: '',
@@ -176,7 +176,6 @@ const ROUTES = {
   getAnalytics: p => apiGetAnalytics(p.token, p.filter),
   getAnalisisPerforma: p => apiGetAnalisisPerforma(p.token, p),
   getStrukPesanan: p => apiGetStrukPesanan(p.token, p.id),
-  testEmailNotif: p => apiTestEmailNotif(p.token),
   sendEmailManual: p => apiSendEmailManual(p.token, p.payload)
 };
 
@@ -263,20 +262,25 @@ function setupDatabase() {
   const usersSheet = ss.getSheetByName('Users');
   if (usersSheet.getLastRow() <= 1) {
     const seed = [
-      { id:'U1', username:'admin',  pwd:'123', role:'admin',    name:'Owner As-Syifa', lapakId:'',    lapakIds:'',           aktif:true },
-      { id:'U2', username:'wiwin',  pwd:'123', role:'karyawan', name:'Wiwin',          lapakId:'L01', lapakIds:'L01',        aktif:true },
-      { id:'U3', username:'siti',   pwd:'123', role:'karyawan', name:'Siti',           lapakId:'L01', lapakIds:'L01',        aktif:true },
-      { id:'U4', username:'dewi',   pwd:'123', role:'karyawan', name:'Dewi',           lapakId:'L02', lapakIds:'L02',        aktif:true },
-      { id:'U5', username:'rina',   pwd:'123', role:'karyawan', name:'Rina',           lapakId:'L03', lapakIds:'L01,L02,L03', aktif:true }
+      { id:'U1', username:'admin',  role:'admin',    name:'Owner As-Syifa', lapakId:'',    lapakIds:'',           aktif:true },
+      { id:'U2', username:'wiwin',  role:'karyawan', name:'Wiwin',          lapakId:'L01', lapakIds:'L01',        aktif:true },
+      { id:'U3', username:'siti',   role:'karyawan', name:'Siti',           lapakId:'L01', lapakIds:'L01',        aktif:true },
+      { id:'U4', username:'dewi',   role:'karyawan', name:'Dewi',           lapakId:'L02', lapakIds:'L02',        aktif:true },
+      { id:'U5', username:'rina',   role:'karyawan', name:'Rina',           lapakId:'L03', lapakIds:'L01,L02,L03', aktif:true }
     ];
+    const credentials = [];
     const rows = seed.map(u => {
       const salt = Utilities.getUuid();
-      return [u.id, u.username, hashPassword(u.pwd, salt), salt, u.role, u.name, u.lapakId, u.aktif, u.lapakIds, false, ''];
+      const pwd = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+      credentials.push(u.username + ': ' + pwd);
+      return [u.id, u.username, hashPassword(pwd, salt), salt, u.role, u.name, u.lapakId, u.aktif, u.lapakIds, false, ''];
     });
     usersSheet.getRange(2, 1, rows.length, 11).setValues(rows);
+    _clearSheetCache();
+    return 'Setup v5.10 selesai. Password awal:\\n' + credentials.join('\\n');
   }
   _clearSheetCache();
-  return 'Setup v5.10 selesai. Login: admin/123, wiwin/123, siti/123, dewi/123, rina/123';
+  return 'Setup v5.10 selesai. Sheet Users sudah berisi akun; tidak ada perubahan akun.';
 }
 
 function seedIfEmpty(name, rows) {
@@ -294,19 +298,22 @@ function resetUsersSheet() {
   sheet.setFrozenRows(1);
   sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#fef3c7');
   const seed = [
-    { id:'U1', username:'admin',  pwd:'123', role:'admin',    name:'Owner As-Syifa', lapakId:'',    lapakIds:'',           aktif:true },
-    { id:'U2', username:'wiwin',  pwd:'123', role:'karyawan', name:'Wiwin',          lapakId:'L01', lapakIds:'L01',        aktif:true },
-    { id:'U3', username:'siti',   pwd:'123', role:'karyawan', name:'Siti',           lapakId:'L01', lapakIds:'L01',        aktif:true },
-    { id:'U4', username:'dewi',   pwd:'123', role:'karyawan', name:'Dewi',           lapakId:'L02', lapakIds:'L02',        aktif:true },
-    { id:'U5', username:'rina',   pwd:'123', role:'karyawan', name:'Rina',           lapakId:'L03', lapakIds:'L01,L02,L03', aktif:true }
+    { id:'U1', username:'admin',  role:'admin',    name:'Owner As-Syifa', lapakId:'',    lapakIds:'',           aktif:true },
+    { id:'U2', username:'wiwin',  role:'karyawan', name:'Wiwin',          lapakId:'L01', lapakIds:'L01',        aktif:true },
+    { id:'U3', username:'siti',   role:'karyawan', name:'Siti',           lapakId:'L01', lapakIds:'L01',        aktif:true },
+    { id:'U4', username:'dewi',   role:'karyawan', name:'Dewi',           lapakId:'L02', lapakIds:'L02',        aktif:true },
+    { id:'U5', username:'rina',   role:'karyawan', name:'Rina',           lapakId:'L03', lapakIds:'L01,L02,L03', aktif:true }
   ];
+  const credentials = [];
   const rows = seed.map(u => {
     const salt = Utilities.getUuid();
-    return [u.id, u.username, hashPassword(u.pwd, salt), salt, u.role, u.name, u.lapakId, u.aktif, u.lapakIds, false, ''];
+    const pwd = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+    credentials.push(u.username + ': ' + pwd);
+    return [u.id, u.username, hashPassword(pwd, salt), salt, u.role, u.name, u.lapakId, u.aktif, u.lapakIds, false, ''];
   });
   sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
   _clearSheetCache();
-  return 'Users direset. Total ' + rows.length + ' user.';
+  return 'Users direset. Password awal:\\n' + credentials.join('\\n');
 }
 
 function tambahUserWiwin() {
@@ -319,9 +326,10 @@ function tambahUserWiwin() {
     if (String(data[i][iUser]).toLowerCase() === 'wiwin') return 'User Wiwin sudah ada.';
   }
   const salt = Utilities.getUuid();
-  sheet.appendRow(['U-NEW-WIWIN', 'wiwin', hashPassword('123', salt), salt, 'karyawan', 'Wiwin', 'L01', true, 'L01', false, '']);
+  const pwd = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+  sheet.appendRow(['U-NEW-WIWIN', 'wiwin', hashPassword(pwd, salt), salt, 'karyawan', 'Wiwin', 'L01', true, 'L01', false, '']);
   _clearSheetCache();
-  return 'Wiwin ditambahkan. Login: wiwin / 123';
+  return 'Wiwin ditambahkan. Password awal: ' + pwd;
 }
 
 function upgradeDatabase_v55() {
@@ -816,13 +824,13 @@ function apiAdminResetPassword(token, userId) {
   const data = sheet.getDataRange().getValues();
   const h = data[0];
   const iId = h.indexOf('id'), iHash = h.indexOf('passwordHash'), iSalt = h.indexOf('salt'), iMust = h.indexOf('mustChangePassword');
-  const newPwd = CONFIG.DEFAULT_PASSWORD;
+  const newPwd = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][iId]) === String(userId)) {
       const ns = Utilities.getUuid();
       sheet.getRange(i + 1, iHash + 1).setValue(hashPassword(newPwd, ns));
       sheet.getRange(i + 1, iSalt + 1).setValue(ns);
-      if (iMust >= 0) sheet.getRange(i + 1, iMust + 1).setValue(true);
+      if (iMust >= 0) sheet.getRange(i + 1, iMust + 1).setValue(false);
       _clearSheetCache(); invalidateMasterCache();
       return { success: true, message: 'Password direset ke: ' + newPwd, newPassword: newPwd };
     }
@@ -1035,9 +1043,8 @@ function diagnoseLogin() {
   const r = ['Diag Users:'];
   for (let i = 1; i < data.length; i++) {
     if (!data[i][iUser]) continue;
-    const okNew = safeEqual(hashPassword('123', data[i][iSalt]), data[i][iHash]);
-    const okOld = safeEqual(hashPasswordLegacy('123', data[i][iSalt]), data[i][iHash]);
-    r.push(data[i][iUser] + ' -> ' + (okNew ? 'OK(new)' : okOld ? 'OK(legacy)' : 'FAIL'));
+    const configured = Boolean(data[i][iHash] && data[i][iSalt]);
+    r.push(data[i][iUser] + ' -> ' + (configured ? 'CREDENTIALS_SET' : 'CREDENTIALS_MISSING'));
   }
   const out = r.join('\n'); console.log(out); return out;
 }
@@ -3860,10 +3867,8 @@ function diagnoseFull() {
   r.push('--- Users ---');
   const users = getSheetData('Users');
   users.forEach(u => {
-    const okNew = safeEqual(hashPassword('123', u.salt), u.passwordHash);
-    const okOld = safeEqual(hashPasswordLegacy('123', u.salt), u.passwordHash);
-    const status = okNew ? 'OK(new)' : okOld ? 'OK(legacy)' : 'FAIL';
-    r.push('  ' + u.username + ' / ' + u.name + ' / ' + u.role + ' / lapakIds=' + (u.lapakIds || '-') + ' / pwd123=' + status);
+    const status = u.passwordHash && u.salt ? 'CREDENTIALS_SET' : 'CREDENTIALS_MISSING';
+    r.push('  ' + u.username + ' / ' + u.name + ' / ' + u.role + ' / lapakIds=' + (u.lapakIds || '-') + ' / ' + status);
   });
   r.push('');
   r.push('--- Config ---');
