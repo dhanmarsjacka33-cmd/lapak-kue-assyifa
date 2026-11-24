@@ -663,16 +663,19 @@ function summaryHTML() {
   const tunaiEl = $('input[name="tunai"]'), qrisEl = $('input[name="qris"]');
   const tunai = tunaiEl ? (parseInt(tunaiEl.value, 10) || 0) : 0;
   const qris = qrisEl ? (parseInt(qrisEl.value, 10) || 0) : 0;
-  const expected = total - pengeluaran;
+  const tunaiDiserahkan = tunai - pengeluaran - totalTitipan;
+  const expected = tunaiDiserahkan + qris;
   const selisih = total - (tunai + qris);
   return `<div style="flex:1">
     <div class="row-between text-xs"><span>Penjualan</span><strong>${fmtRp(total)}</strong></div>
-    <div class="row-between text-xs text-red"><span>Pengeluaran</span><span>- ${fmtRp(pengeluaran)}</span></div>
-    ${totalTitipan > 0 ? `<div class="row-between text-xs text-gray" style="padding-left:12px"><span>Pembayaran titipan (tidak mengurangi setoran)</span><span>${fmtRp(totalTitipan)}</span></div>` : ''}
-    <div class="row-between text-xs text-green font-bold mt-2"><span>Harus Disetor</span><span>${fmtRp(Math.max(0, expected))}</span></div>
+    <div class="row-between text-xs"><span>Tunai dipegang karyawan</span><span>${fmtRp(tunai)}</span></div>
+    <div class="row-between text-xs"><span>QRIS langsung ke Owner</span><span>${fmtRp(qris)}</span></div>
+    ${totalTitipan > 0 ? `<div class="row-between text-xs text-gray"><span>Pembayaran titipan supplier (arus kas keluar)</span><span>- ${fmtRp(totalTitipan)}</span></div>` : ''}
+    <div class="row-between text-xs text-red"><span>Pengeluaran operasional</span><span>- ${fmtRp(pengeluaran)}</span></div>
+    <div class="row-between text-xs text-green font-bold mt-2"><span>Tunai yang diserahkan karyawan</span><span>${fmtRp(tunaiDiserahkan)}</span></div>
+    <div class="row-between text-xs text-green font-bold"><span>Total penerimaan Owner</span><span>${fmtRp(expected)}</span></div>
     <div class="divider" style="margin:10px 0"></div>
-    <div class="row-between text-xs"><span>Tunai + QRIS</span><span>${fmtRp(tunai + qris)}</span></div>
-    <div class="row-between text-xs font-bold ${Math.abs(selisih) < 1 ? 'text-green' : 'text-red'}"><span>Selisih</span><span>${fmtRp(selisih)}</span></div>
+    <div class="row-between text-xs font-bold ${Math.abs(selisih) < 1 ? 'text-green' : 'text-red'}"><span>Selisih penjualan vs pembayaran</span><span>${fmtRp(selisih)}</span></div>
   </div>`;
 }
 
@@ -745,9 +748,11 @@ function tabSetoran() {
         <div class="card-flat" style="padding:12px;font-size:13px">
           <div class="row-between"><span class="text-gray">Penjualan</span><strong>${fmtRp(s.totalSistem)}</strong></div>
           <div class="row-between text-gray"><span>Tunai</span><span>${fmtRp(s.totalTunai)}</span></div>
-          <div class="row-between text-gray"><span>QRIS</span><span>${fmtRp(s.totalQris)}</span></div>
-          <div class="row-between text-red"><span>Pengeluaran</span><span>- ${fmtRp(s.pengeluaran)}</span></div>
-          <div class="row-between text-green font-bold" style="border-top:1px solid #e2e8f0;padding-top:8px;margin-top:8px"><span>Setoran</span><span>${fmtRp(s.expectedSetoran)}</span></div>
+          <div class="row-between text-gray"><span>QRIS langsung ke Owner</span><span>${fmtRp(s.totalQris)}</span></div>
+          <div class="row-between text-red"><span>Pengeluaran operasional</span><span>- ${fmtRp(s.pengeluaran)}</span></div>
+          <div class="row-between text-gray"><span>Pembayaran titipan supplier</span><span>- ${fmtRp(s.totalTitipan)}</span></div>
+          <div class="row-between text-gray"><span>Tunai diserahkan karyawan</span><span>${fmtRp(s.uangDisetor)}</span></div>
+          <div class="row-between text-green font-bold" style="border-top:1px solid #e2e8f0;padding-top:8px;margin-top:8px"><span>Total penerimaan Owner</span><span>${fmtRp(s.expectedSetoran)}</span></div>
         </div>
         <div class="row mt-3" style="gap:6px;flex-wrap:wrap"><button class="btn btn-ghost btn-sm" data-act="detail-setoran" data-id="${esc(s.id)}">${ico('eye','ico-sm')}</button><button class="btn btn-ghost btn-sm" data-act="edit-setoran" data-id="${esc(s.id)}">${ico('edit','ico-sm')}</button><button class="btn btn-ghost btn-sm" data-act="cetak-struk" data-id="${esc(s.id)}">${ico('print','ico-sm')}</button><button class="btn btn-danger btn-sm" style="flex:1" data-act="reject" data-id="${esc(s.id)}">Tolak</button><button class="btn btn-success btn-sm" style="flex:1" data-act="approve" data-id="${esc(s.id)}">Terima</button></div>
       </div>`;
