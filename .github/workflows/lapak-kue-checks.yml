@@ -1,6 +1,9 @@
 name: Lapak Kue - Automated Checks
 
 on:
+  push:
+    branches:
+      - 'fix/**'
   pull_request:
     branches:
       - main
