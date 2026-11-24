@@ -51,10 +51,14 @@ console.log('PASS: syntax and static regression checks');
 
 // Accounting regression guards: supplier consignment payments are not operating expenses;
 // approval posts gross cash/QRIS inflows and a separate operating-expense outflow.
-has(backend, /Pembayaran titipan tetap tercatat di BayarTitipanKaryawan[\s\S]*bukan pengeluaran modal\/operasional lapak/, 'Supplier consignment payment must remain outside operating expenses');
-has(backend, /totalTunai = Number\(data\[i\]\[iTunai\]\) \|\| 0/, 'Approval must post gross cash receipts, not net deposit');
+has(backend, /Pembayaran titipan tetap bukan biaya operasional[\s\S]*mengurangi uang tunai/, 'Supplier payment must remain outside operating expenses but reduce cash deposit');
+has(backend, /totalTunai = Number\(data\[i\]\[iTunai\]\) \|\| 0/, 'Approval must post gross cash receipts before outflows');
+has(backend, /kategori:'Pelunasan Titipan Supplier',nominal:totalTitipanTunai/, 'Supplier settlement must be a separate cash outflow, not an operating expense');
+has(backend, /const expectedSetoran = totalTunai - totalBayarTitipanTunai - totalPengeluaran/, 'Expected cash deposit must deduct supplier cash settlements and operating expenses');
+has(backend, /metode !== 'Tunai'/, 'Supplier payments must use cash when settled from the lapak cash box');
 has(backend, /tipe:'Keluar',kategori:'Operasional Lapak',nominal:pengeluaranOperasional/, 'Approval must post operating expenses as a separate cash outflow');
-has(frontend, /Pembayaran titipan \(tidak mengurangi setoran\)/, 'Frontend must distinguish consignment payments from operating expenses');
+has(frontend, /Pelunasan titipan supplier \\(dari tunai\\)/, 'Frontend must show supplier settlements reducing the cash deposit');
+has(frontend, /const expected = tunai - totalTitipan - pengeluaran/, 'Frontend cash deposit summary must deduct cash supplier settlements');
 
 has(backend, /\['id','status','totalTunai','totalQris','pengeluaran','lapakId'/, 'Approval preflight must require gross cash and operating expense fields');
 if (/data-f="uangDisetor"/.test(frontend)) throw new Error('Admin edit form must not expose legacy net-deposit field when ledger uses gross cash and separate expenses');
