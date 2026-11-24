@@ -1966,6 +1966,26 @@ function apiSubmitRekap(token, payload) {
     const unpaidDraft = getSheetData('Konsinyasi').filter(k => String(k.lapakId)===String(sess.lapakId) && String(k.catatan||'').indexOf(draftMarker)===0 && String(k.status)==='Pending');
     if (unpaidDraft.length) return {success:false,message:'Masih ada tagihan titip jual yang belum dibayar. Lunasi terlebih dahulu sebelum mengirim laporan.'};
     if (getSheetData('Setoran').some(x => formatDate(x.tanggal)===tgl && String(x.lapakId)===String(sess.lapakId))) return {success:false,message:'Laporan hari ini sudah dikirim.'};
+
+    // Pastikan draft yang pernah disiapkan/dibatalkan/dibayar sesuai dengan angka laporan final.
+    const draftRows = getSheetData('Konsinyasi').filter(k =>
+      String(k.lapakId) === String(sess.lapakId) &&
+      String(k.catatan || '').indexOf(draftMarker) === 0
+    );
+    for (const d of details) {
+      const k = katMap[d.katalogId];
+      const supplier = k && supMap[k.supplierId];
+      if (!supplier || (supplier.tipeTransaksi || 'BeliPutus') !== 'TitipJual') continue;
+      const marker = draftMarker + d.katalogId;
+      const draft = draftRows.find(x => String(x.catatan || '').indexOf(marker) === 0);
+      if (!draft) continue; // kompatibilitas untuk item yang belum pernah disiapkan sebagai draft
+      const expectedUtang = d.qtyLaku * (Number(k.hargaBeli) || 0);
+      if (String(draft.status) !== (d.qtyLaku > 0 ? 'Bayar' : 'Cancelled') ||
+          (Number(draft.qtyLaku) || 0) !== d.qtyLaku ||
+          (Number(draft.utang) || 0) !== expectedUtang) {
+        return {success:false,message:'Jumlah sisa atau tagihan '+(k.nama || d.katalogId)+' berubah setelah tagihan disiapkan. Hitung ulang sisa dan tagihan sebelum mengirim laporan.'};
+      }
+    }
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const setoranSheet = ss.getSheetByName('Setoran');
     const detailSheet = ss.getSheetByName('SetoranDetail');
