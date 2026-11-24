@@ -2479,6 +2479,7 @@ function apiApproveSetoran(token, idSetoran) {
       if (String(data[i][iId]) === String(idSetoran)) {
         if (data[i][iStatus] === 'approved') return { success: false, message: 'Setoran sudah disetujui.' };
         if (data[i][iStatus] === 'rejected') return { success: false, message: 'Setoran sudah ditolak.' };
+        if (data[i][iStatus] !== 'pending') return { success: false, message: 'Hanya setoran berstatus pending yang dapat disetujui.' };
         totalTunai = Number(data[i][iTunai]) || 0;
         qris = Number(data[i][iQris]) || 0;
         pengeluaranOperasional = Number(data[i][iPengeluaran]) || 0;
