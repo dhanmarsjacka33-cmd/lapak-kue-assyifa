@@ -273,11 +273,11 @@ function setupDatabase() {
       const salt = Utilities.getUuid();
       const pwd = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
       credentials.push(u.username + ': ' + pwd);
-      return [u.id, u.username, hashPassword(pwd, salt), salt, u.role, u.name, u.lapakId, u.aktif, u.lapakIds, true, ''];
+      return [u.id, u.username, hashPassword(pwd, salt), salt, u.role, u.name, u.lapakId, u.aktif, u.lapakIds, false, ''];
     });
     usersSheet.getRange(2, 1, rows.length, 11).setValues(rows);
     _clearSheetCache();
-    return 'Setup v5.10 selesai. Password awal (wajib diganti):\\n' + credentials.join('\\n');
+    return 'Setup v5.10 selesai. Password awal:\\n' + credentials.join('\\n');
   }
   _clearSheetCache();
   return 'Setup v5.10 selesai. Sheet Users sudah berisi akun; tidak ada perubahan akun.';
@@ -309,11 +309,11 @@ function resetUsersSheet() {
     const salt = Utilities.getUuid();
     const pwd = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
     credentials.push(u.username + ': ' + pwd);
-    return [u.id, u.username, hashPassword(pwd, salt), salt, u.role, u.name, u.lapakId, u.aktif, u.lapakIds, true, ''];
+    return [u.id, u.username, hashPassword(pwd, salt), salt, u.role, u.name, u.lapakId, u.aktif, u.lapakIds, false, ''];
   });
   sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
   _clearSheetCache();
-  return 'Users direset. Password awal (wajib diganti):\\n' + credentials.join('\\n');
+  return 'Users direset. Password awal:\\n' + credentials.join('\\n');
 }
 
 function tambahUserWiwin() {
@@ -327,9 +327,9 @@ function tambahUserWiwin() {
   }
   const salt = Utilities.getUuid();
   const pwd = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
-  sheet.appendRow(['U-NEW-WIWIN', 'wiwin', hashPassword(pwd, salt), salt, 'karyawan', 'Wiwin', 'L01', true, 'L01', true, '']);
+  sheet.appendRow(['U-NEW-WIWIN', 'wiwin', hashPassword(pwd, salt), salt, 'karyawan', 'Wiwin', 'L01', true, 'L01', false, '']);
   _clearSheetCache();
-  return 'Wiwin ditambahkan. Password awal (wajib diganti): ' + pwd;
+  return 'Wiwin ditambahkan. Password awal: ' + pwd;
 }
 
 function upgradeDatabase_v55() {
