@@ -830,7 +830,7 @@ function apiAdminResetPassword(token, userId) {
       const ns = Utilities.getUuid();
       sheet.getRange(i + 1, iHash + 1).setValue(hashPassword(newPwd, ns));
       sheet.getRange(i + 1, iSalt + 1).setValue(ns);
-      if (iMust >= 0) sheet.getRange(i + 1, iMust + 1).setValue(true);
+      if (iMust >= 0) sheet.getRange(i + 1, iMust + 1).setValue(false);
       _clearSheetCache(); invalidateMasterCache();
       return { success: true, message: 'Password direset ke: ' + newPwd, newPassword: newPwd };
     }
