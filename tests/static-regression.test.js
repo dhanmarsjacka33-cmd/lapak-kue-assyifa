@@ -22,8 +22,8 @@ has(config, /API_URL\s*:/, 'Frontend API URL must be configurable');
 has(backend, /function beginWriteJournal\s*\(/, 'Write journal helper must exist');
 has(backend, /function rollbackWriteJournal\s*\(/, 'Rollback helper must exist');
 has(backend, /const journal = beginWriteJournal\(\['Konsinyasi'\]\)/, 'Draft writes must use rollback journal');
-has(backend, /appendObjectsByHeaders\(pengSheet, pRows\)/, 'Expense rows must be written by header name');
-has(backend, /appendObjectsByHeaders\(konsinyasiSheet, kRows\)/, 'Consignment rows must be written by header name');
+has(backend, /appendObjectsByHeaders\(pengSheet,\\s*pRows\)/, 'Expense rows must be written by header name');
+has(backend, /appendObjectsByHeaders\(konsinyasiSheet,\\s*kRows\)/, 'Consignment rows must be written by header name');
 has(backend, /Notifikasi setoran gagal, transaksi tetap tersimpan/, 'Submit notification failure must not mask a saved transaction');
 
 const requiredSheets = [
