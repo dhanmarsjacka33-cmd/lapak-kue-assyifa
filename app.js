@@ -2579,7 +2579,7 @@ async function delUser(id) {
 async function resetUserPwd(id) {
   const u = S.users.find(x => x.id === id);
   if (!u) return;
-  const ok = await confirmDlg('Reset Password?', 'Password ' + u.name + ' direset ke "kue1234".', 'Reset');
+  const ok = await confirmDlg('Reset Password?', 'Password baru untuk ' + u.name + ' akan dibuat secara acak dan ditampilkan setelah reset.', 'Reset');
   if (!ok) return;
   showLoader();
   try { const r = await api('adminResetPassword', { token: S.token, userId: id }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) { S.users = await api('getUsers', { token: S.token }); MEM.set('users', S.users, 3600000, true); } }
