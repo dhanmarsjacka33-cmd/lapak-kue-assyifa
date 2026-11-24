@@ -613,7 +613,7 @@ function renderRekapForm(d) {
           <div class="row-between mb-3">
             <div style="min-width:0;flex:1;padding-right:8px">
               <p class="text-sm font-semibold">${esc(it.nama)} ${it.tipeTransaksi === 'TitipJual' ? '<span class="badge badge-warn" style="font-size:9px">TITIP</span>' : ''}</p>
-              <p class="text-xs text-gray">${fmtRp(it.hargaJual)}/pcs · Drop: <strong>${it.qtyDrop}</strong></p>
+              <p class="text-xs text-gray">${it.tipeTransaksi === 'TitipJual' && it.supplierNama ? esc(it.supplierNama) + ' · ' : ''}${fmtRp(it.hargaJual)}/pcs · Drop: <strong>${it.qtyDrop}</strong></p>
             </div>
             <div style="text-align:right;flex-shrink:0">
               <label class="text-xs text-gray">Sisa</label>
