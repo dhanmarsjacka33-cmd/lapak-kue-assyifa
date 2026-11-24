@@ -1863,8 +1863,9 @@ function apiSaveRekapDraft(token, payload) {
         const row=data[old.row-1];
         if(laku<=0) {
           if(old.status==='Pending') updates.push({row:old.row,col:ix('status')+1,value:'Cancelled'});
-        } else if(old.status==='Pending') {
+        } else if(old.status==='Pending' || old.status==='Cancelled') {
           updates.push({row:old.row,col:ix('qtyLaku')+1,value:laku},{row:old.row,col:ix('hargaTitip')+1,value:harga},{row:old.row,col:ix('utang')+1,value:utang});
+          if(old.status==='Cancelled') updates.push({row:old.row,col:ix('status')+1,value:'Pending'});
         }
       } else if(laku>0) {
         const obj={}; h.forEach((name,j)=>obj[name]='');
