@@ -16,7 +16,7 @@
     window.alert('URL tidak valid. Muat ulang halaman untuk mencoba lagi.');
     return;
   }
-  const valid = parsed.protocol === 'https:' && parsed.hostname === 'script.google.com' && /^\\/macros\\/s\\/[^/]+\\/exec$/.test(parsed.pathname);
+  const valid = parsed.protocol === 'https:' && parsed.hostname === 'script.google.com' && /^\/macros\/s\/[^/]+\/exec$/.test(parsed.pathname);
   if (!valid) {
     window.APP_CONFIG = { API_URL: '' };
     window.alert('URL ditolak. Gunakan URL Web App TESTING dari script.google.com yang berakhiran /exec.');
