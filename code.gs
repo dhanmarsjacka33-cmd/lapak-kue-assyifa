@@ -1979,10 +1979,31 @@ function apiSubmitRekap(token, payload) {
     const setoranSheet = ss.getSheetByName('Setoran');
     const detailSheet = ss.getSheetByName('SetoranDetail');
     const pengSheet = ss.getSheetByName('PengeluaranLapak');
+    const requiredSetoran = ['id','tanggal','lapakId','userId','totalTunai','totalQris','totalSistem','pengeluaran','expectedSetoran','uangDisetor','selisih','status'];
+    if (!hasHeaders(setoranSheet, requiredSetoran)) {
+      return { success:false, message:'Struktur Setoran masih menggunakan format lama. Submit ditahan agar data historis tidak tertimpa. Tambahkan kolom versi baru secara non-destruktif pada Spreadsheet testing sebelum uji submit.' };
+    }
+    const detailHeaders = detailSheet.getRange(1, 1, 1, detailSheet.getLastColumn()).getDisplayValues()[0].map(x => String(x).trim());
+    const hasQtyLaku = detailHeaders.indexOf('qtyLaku') >= 0 || detailHeaders.indexOf('terjual') >= 0;
+    const hasQtySisa = detailHeaders.indexOf('qtySisa') >= 0 || detailHeaders.indexOf('sisa') >= 0;
+    if (!hasHeaders(detailSheet, ['id','setoranId','katalogId','hargaJual','hargaBeli','subtotal']) || !hasQtyLaku || !hasQtySisa) {
+      return { success:false, message:'Struktur SetoranDetail tidak dikenali. Submit ditahan agar riwayat penjualan tetap aman.' };
+    }
     const setoranId = 'S' + Utilities.getUuid().slice(0, 8).toUpperCase() + Date.now();
-    setoranSheet.appendRow([setoranId, tgl, sess.lapakId, sess.id, totalTunai, totalQris, totalSistem, totalPengeluaran, expectedSetoran, uangDisetor, selisih, 'pending', '', '', String(payload.catatan || ''), '', false]);
-    const rows = details.map(d => ['D' + Utilities.getUuid().slice(0, 8).toUpperCase(), setoranId, d.katalogId, d.qtyDrop, d.qtySisa, d.qtyLaku, d.hargaJual, d.hargaBeli, d.subtotal, d.tipePelanggan]);
-    if (rows.length) detailSheet.getRange(detailSheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+    appendObjectsByHeaders(setoranSheet, [{
+      id:setoranId, tanggal:tgl, lapakId:sess.lapakId, userId:sess.id,
+      totalTunai, totalQris, totalSistem, pengeluaran:totalPengeluaran,
+      expectedSetoran, uangDisetor, selisih, status:'pending',
+      approvedAt:'', approvedBy:'', catatan:String(payload.catatan || ''),
+      editHistory:'', locked:false, lapak:sess.lapakId, totalCash:totalTunai
+    }]);
+    const rows = details.map(d => ({
+      id:'D' + Utilities.getUuid().slice(0, 8).toUpperCase(), setoranId, katalogId:d.katalogId,
+      qtyDrop:d.qtyDrop, qtySisa:d.qtySisa, qtyLaku:d.qtyLaku,
+      sisa:d.qtySisa, terjual:d.qtyLaku, hargaJual:d.hargaJual,
+      hargaBeli:d.hargaBeli, subtotal:d.subtotal, tipePelanggan:d.tipePelanggan
+    }));
+    if (rows.length) appendObjectsByHeaders(detailSheet, rows);
 
     if (bayarTitipanHariIni.length) {
       const bayarSheet = ss.getSheetByName('BayarTitipanKaryawan');
@@ -2306,6 +2327,9 @@ function apiApproveSetoran(token, idSetoran) {
     const kasSheet = ss.getSheetByName('Kas');
     const data = setoranSheet.getDataRange().getValues();
     const h = data[0];
+    if (!hasHeaders(setoranSheet, ['id','status','uangDisetor','totalQris','lapakId','userId','tanggal','approvedAt','approvedBy'])) {
+      return { success:false, message:'Struktur Setoran lama belum mendukung persetujuan versi baru. Tidak ada perubahan yang dilakukan.' };
+    }
     const iId = h.indexOf('id'), iStatus = h.indexOf('status');
     const iUang = h.indexOf('uangDisetor'), iQris = h.indexOf('totalQris');
     const iLapak = h.indexOf('lapakId'), iAt = h.indexOf('approvedAt'), iBy = h.indexOf('approvedBy');
@@ -2347,6 +2371,7 @@ function apiRejectSetoran(token, idSetoran, reason) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Setoran');
   const data = sheet.getDataRange().getValues();
   const h = data[0];
+  if (!hasHeaders(sheet, ['id','status','catatan'])) return { success:false, message:'Struktur Setoran lama belum mendukung penolakan dengan catatan. Tidak ada perubahan yang dilakukan.' };
   const iId = h.indexOf('id'), iStatus = h.indexOf('status'), iCatatan = h.indexOf('catatan');
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][iId]) === String(idSetoran)) {
@@ -2367,6 +2392,9 @@ function apiEditSetoran(token, idSetoran, updates) {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Setoran');
     const data = sheet.getDataRange().getValues();
     const h = data[0];
+    if (!hasHeaders(sheet, ['id','status','totalTunai','totalQris','totalSistem','pengeluaran','expectedSetoran','selisih'])) {
+      return { success:false, message:'Struktur Setoran lama belum mendukung edit versi baru. Tidak ada perubahan yang dilakukan.' };
+    }
     const iId = h.indexOf('id'), iStatus = h.indexOf('status'), iEdit = h.indexOf('editHistory'), iLocked = h.indexOf('locked');
     for (let i = 1; i < data.length; i++) {
       if (String(data[i][iId]) === String(idSetoran)) {
