@@ -1988,8 +1988,7 @@ function formBayarTitipan(supplierId) {
       <div class="field" style="margin-bottom:0">
         <label>Metode</label>
         <select class="select" data-f="metode">
-          <option value="Tunai" ${state.metode === 'Tunai' ? 'selected' : ''}>Tunai</option>
-          <option value="Transfer" ${state.metode === 'Transfer' ? 'selected' : ''}>Transfer</option>
+          <option value="Tunai" selected>Tunai — dari uang penjualan lapak</option>
         </select>
       </div>
     </div>
