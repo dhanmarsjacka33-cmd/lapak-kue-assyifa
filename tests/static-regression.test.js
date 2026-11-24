@@ -47,6 +47,8 @@ for (const sheet of requiredSheets) {
   assert.ok(backend.includes("name: '" + sheet + "'"), 'Missing database schema for sheet: ' + sheet);
 }
 
+has(backend, /const sampai = filter\.sampai \? new Date\(filter\.sampai\) : new Date\(\)/, 'Report end date must be passed once; buildLaporanForRange owns the inclusive end boundary');
+
 console.log('PASS: syntax and static regression checks');
 
 // Accounting regression guards: QRIS is received directly by Owner; supplier payments
