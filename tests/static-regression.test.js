@@ -26,6 +26,14 @@ has(backend, /appendObjectsByHeaders\(pengSheet,\s*pRows\)/, 'Expense rows must 
 has(backend, /appendObjectsByHeaders\(konsinyasiSheet,\s*kRows\)/, 'Consignment rows must be written by header name');
 has(backend, /Notifikasi setoran gagal, transaksi tetap tersimpan/, 'Submit notification failure must not mask a saved transaction');
 
+has(backend, /seenItems\s*=\s*\{\}/, 'Draft must reject duplicate catalog IDs');
+has(backend, /Number\.isFinite\(rawSisa\).*Math\.floor\(rawSisa\)!==rawSisa/, 'Draft must validate integer remaining quantities');
+has(backend, /Ditemukan draft ganda untuk item/, 'Duplicate existing draft records must be detected');
+has(backend, /const row=i\+1, changes=\{\}, journal=beginWriteJournal\(\['Setoran'\]\)/, 'Setoran edits must use rollback journal');
+has(backend, /appendObjectsByHeaders\(sheet, \[\{id:'KS'/, 'Stock card entries must be written by header name');
+has(backend, /Notifikasi persetujuan gagal, transaksi tetap disetujui/, 'Approval notification failure must not mask an approved transaction');
+
+
 const requiredSheets = [
   'Konsinyasi',
   'BayarTitipanKaryawan',
