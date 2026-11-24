@@ -48,3 +48,10 @@ for (const sheet of requiredSheets) {
 }
 
 console.log('PASS: syntax and static regression checks');
+
+// Accounting regression guards: supplier consignment payments are not operating expenses;
+// approval posts gross cash/QRIS inflows and a separate operating-expense outflow.
+has(backend, /Pembayaran titipan tetap tercatat di BayarTitipanKaryawan[\s\S]*bukan pengeluaran modal\/operasional lapak/, 'Supplier consignment payment must remain outside operating expenses');
+has(backend, /totalTunai = Number\(data\[i\]\[iTunai\]\) \|\| 0/, 'Approval must post gross cash receipts, not net deposit');
+has(backend, /tipe:'Keluar',kategori:'Operasional Lapak',nominal:pengeluaranOperasional/, 'Approval must post operating expenses as a separate cash outflow');
+has(frontend, /Pembayaran titipan \(tidak mengurangi setoran\)/, 'Frontend must distinguish consignment payments from operating expenses');
