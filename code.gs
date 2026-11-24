@@ -2462,7 +2462,7 @@ function apiApproveSetoran(token, idSetoran) {
     const kasSheet = ss.getSheetByName('Kas');
     const data = setoranSheet.getDataRange().getValues();
     const h = data[0];
-    if (!hasHeaders(setoranSheet, ['id','status','uangDisetor','totalQris','lapakId','userId','tanggal','approvedAt','approvedBy'])) {
+    if (!hasHeaders(setoranSheet, ['id','status','totalTunai','totalQris','pengeluaran','lapakId','userId','tanggal','approvedAt','approvedBy'])) {
       return { success:false, message:'Struktur Setoran lama belum mendukung persetujuan versi baru. Tidak ada perubahan yang dilakukan.' };
     }
     const iId = h.indexOf('id'), iStatus = h.indexOf('status');
@@ -2553,7 +2553,7 @@ function apiEditSetoran(token, idSetoran, updates) {
       if(iLocked>=0&&(String(data[i][iLocked])==='true'||data[i][iLocked]===true)) return {success:false,message:'Setoran ini terkunci.'};
       const row=i+1, changes={}, journal=beginWriteJournal(['Setoran']);
       try {
-        ['totalTunai','totalQris','pengeluaran','uangDisetor','catatan'].forEach(field=>{
+        ['totalTunai','totalQris','pengeluaran','catatan'].forEach(field=>{
           if(updates[field]!==undefined){const idx=h.indexOf(field);if(idx>=0){const before=data[i][idx];journalSetValue(journal,sheet,row,idx+1,field==='catatan'?String(updates[field]):toPosNum(updates[field]));changes[field]={from:before,to:updates[field]};}}
         });
         const it=h.indexOf('totalTunai'), iq=h.indexOf('totalQris'), is=h.indexOf('totalSistem'), ip=h.indexOf('pengeluaran'), ie=h.indexOf('expectedSetoran'), il=h.indexOf('selisih');
