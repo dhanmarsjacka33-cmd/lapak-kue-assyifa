@@ -505,7 +505,7 @@ function renderTitipanSection() {
   if (totalSudahBayar > 0) {
     html += `<div class="mt-3" style="padding:10px;background:var(--green-bg);border-radius:8px">
       <div class="row-between mb-2">
-        <span class="text-xs font-semibold text-green">✓ Sudah Dibayar Hari Ini</span>
+        <span class="text-xs font-semibold text-green">✓ Riwayat Pembayaran Supplier</span>
         <strong class="text-sm text-green">${fmtRp(totalSudahBayar)}</strong>
       </div>`;
     html += sudahBayar.map(b => `
@@ -513,7 +513,8 @@ function renderTitipanSection() {
         <div class="row-between text-sm">
           <div style="min-width:0;flex:1">
             <div style="font-weight:600">${esc(b.supplierNama)}</div>
-            <div class="text-xs text-gray">${esc(b.metode)}${b.noNota ? ' · Nota ' + esc(b.noNota) : ''}${b.createdAt ? ' · ' + esc(b.createdAt) : ''}</div>
+            <div class="text-xs text-gray">${esc(b.tanggal || '')} · ${esc(b.metode)}${b.noNota ? ' · Nota ' + esc(b.noNota) : ''}${b.createdAt ? ' · ' + esc(b.createdAt) : ''}</div>
+            <div class="text-xs ${b.setoranId ? 'text-gray' : 'text-amber'}">${b.setoranId ? 'Sudah masuk setoran' : 'Belum masuk setoran — dipotong pada rekap berikutnya'}</div>
           </div>
           <div class="text-right" style="flex-shrink:0">
             <div class="text-sm font-bold text-green">${fmtRp(b.total)}</div>
@@ -522,7 +523,7 @@ function renderTitipanSection() {
         </div>
       </div>
     `).join('');
-    html += `<p class="text-xs text-gray mt-2">${ico('info','ico-sm')} Jumlah ini otomatis masuk ke Pengeluaran saat kirim rekap.</p>
+    html += `<p class="text-xs text-gray mt-2">${ico('info','ico-sm')} Pembayaran yang belum masuk setoran akan dipotong pada rekap berikutnya. Pembayaran yang sudah tertaut tidak dihitung ulang.</p>
     </div>`;
   }
 
@@ -659,7 +660,7 @@ function summaryHTML() {
   let pengeluaran = 0;
   $$('[data-peng-row]').forEach(r => { const el = r.querySelector('[data-peng-nom]'); if (el) pengeluaran += parseInt(el.value, 10) || 0; });
   const tk = S.titipanKaryawan || {};
-  const totalTitipan = (tk.sudahBayar || []).reduce((s, x) => s + (x.total || 0), 0);
+  const totalTitipan = (tk.sudahBayar || []).filter(x => !x.setoranId).reduce((s, x) => s + (x.total || 0), 0);
   const tunaiEl = $('input[name="tunai"]'), qrisEl = $('input[name="qris"]');
   const tunai = tunaiEl ? (parseInt(tunaiEl.value, 10) || 0) : 0;
   const qris = qrisEl ? (parseInt(qrisEl.value, 10) || 0) : 0;
