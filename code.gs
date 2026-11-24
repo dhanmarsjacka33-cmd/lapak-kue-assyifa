@@ -2881,7 +2881,7 @@ function apiRekapGaji(token, filter) {
   filter = filter || {};
   const tipe = ['Harian','Mingguan','Bulanan'].indexOf(filter.tipe) !== -1 ? filter.tipe : 'Bulanan';
   const dari = filter.dari ? new Date(filter.dari) : new Date(Date.now() - 30 * 86400000);
-  const sampai = filter.sampai ? new Date(new Date(filter.sampai).getTime() + 86400000) : new Date();
+  const sampai = filter.sampai ? new Date(filter.sampai) : new Date();
   const fromMs = dari.getTime(), toMs = sampai.getTime();
   const users = getSheetData('Users').filter(u => u.role === 'karyawan' && String(u.aktif) !== 'false' && u.aktif !== false);
   const settings = getSheetData('SettingGaji').filter(s => String(s.aktif) !== 'false' && s.aktif !== false && s.tipe === tipe);
