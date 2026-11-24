@@ -1338,7 +1338,7 @@ function catatKartuStok(katalogId, lapakId, tipe, masuk, keluar, refId, keterang
     if (String(data[i][iKat]) === String(katalogId)) saldo += (Number(data[i][iMasuk]) || 0) - (Number(data[i][iKeluar]) || 0);
   }
   saldo += masuk - keluar;
-  sheet.appendRow(['KS' + Utilities.getUuid().slice(0, 8).toUpperCase(), new Date(), katalogId, lapakId || '', tipe, masuk || 0, keluar || 0, saldo, refId || '', String(keterangan || '')]);
+  appendObjectsByHeaders(sheet, [{id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),katalogId,lapakId:lapakId||'',tipe,masuk:masuk||0,keluar:keluar||0,saldo,refId:refId||'',keterangan:String(keterangan||'')}]);
 }
 function apiGetKartuStok(token, filter) {
   requireRole(token, ['admin']);
@@ -1938,8 +1938,19 @@ function apiSaveRekapDraft(token, payload) {
         additions.push(h.map(name=>obj[name]));
       }
     }
-    updates.forEach(u=>ks.getRange(u.row,u.col).setValue(u.value));
-    if(additions.length) ks.getRange(ks.getLastRow()+1,1,additions.length,h.length).setValues(additions);
+    const journal = beginWriteJournal(['Konsinyasi']);
+    try {
+      updates.forEach(u => journalSetValue(journal, ks, u.row, u.col, u.value));
+      if (additions.length) {
+        const additionObjects = additions.map(row => { const obj = {}; h.forEach((name, index) => { if (name) obj[name] = row[index]; }); return obj; });
+        appendObjectsByHeaders(ks, additionObjects);
+      }
+    } catch (writeError) {
+      try { rollbackWriteJournal(journal); }
+      catch (rollbackError) { console.error('Gagal rollback draft rekap:', rollbackError.message); return { success:false, message:'Penyimpanan draft gagal dan pemulihan otomatis tidak sepenuhnya berhasil. Hentikan proses lanjutan dan minta pemeriksaan admin. Detail: ' + writeError.message + ' | ' + rollbackError.message }; }
+      _clearSheetCache();
+      return { success:false, message:'Penyimpanan draft gagal. Perubahan telah dibatalkan: ' + writeError.message };
+    }
     _clearSheetCache();
     return {success:true,message:'Tagihan titip jual berhasil disiapkan. Periksa dan bayar setiap supplier sebelum mengirim laporan.',created:additions.length,updated:updates.length};
   } finally { lock.releaseLock(); }
@@ -2094,8 +2105,8 @@ function apiSubmitRekap(token, payload) {
 
     details.forEach(d => { if (d.qtyLaku > 0) catatKartuStok(d.katalogId, sess.lapakId, 'Terjual', 0, d.qtyLaku, setoranId, 'Laku'); });
     if (pengeluaranList.length) {
-      const pRows = pengeluaranList.map(p => ['P' + Utilities.getUuid().slice(0, 8).toUpperCase(), setoranId, String(p.keterangan || ''), String(p.kategori || 'Lain'), toPosNum(p.nominal)]);
-      pengSheet.getRange(pengSheet.getLastRow() + 1, 1, pRows.length, pRows[0].length).setValues(pRows);
+      const pRows = pengeluaranList.map(p => ({id:'P' + Utilities.getUuid().slice(0,8).toUpperCase(),setoranId,keterangan:String(p.keterangan||''),kategori:String(p.kategori||'Lain'),nominal:toPosNum(p.nominal)}));
+      appendObjectsByHeaders(pengSheet,pRows);
     }
     const konsinyasiSheet = ss.getSheetByName('Konsinyasi');
     if (konsinyasiSheet) {
@@ -2116,9 +2127,9 @@ function apiSubmitRekap(token, payload) {
         }
         const hargaTitip = Number(k.hargaBeli) || 0;
         const utang = d.qtyLaku * hargaTitip;
-        kRows.push(['KN' + Utilities.getUuid().slice(0, 8).toUpperCase(), new Date(), k.supplierId, sess.lapakId, d.katalogId, d.qtyLaku, hargaTitip, utang, 'Pending', '', '', '', setoranId, '']);
+        kRows.push({id:'KN'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),supplierId:k.supplierId,lapakId:sess.lapakId,katalogId:d.katalogId,qtyLaku:d.qtyLaku,hargaTitip,utang,status:'Pending',kasId:'',bayarAt:'',bayarBy:'',setoranId,catatan:''});
       });
-      if (kRows.length) konsinyasiSheet.getRange(konsinyasiSheet.getLastRow() + 1, 1, kRows.length, kRows[0].length).setValues(kRows);
+      if (kRows.length) appendObjectsByHeaders(konsinyasiSheet,kRows);
     }
     } catch (writeError) {
       try {
@@ -2132,7 +2143,7 @@ function apiSubmitRekap(token, payload) {
     }
     _clearSheetCache();
     const lapak = getSheetData('Lapak').find(l => String(l.id) === String(sess.lapakId)) || {};
-    notifySetoranMasuk({ id: setoranId, expectedSetoran, totalSistem, pengeluaran: totalPengeluaran }, lapak.nama || sess.lapakId);
+    try { notifySetoranMasuk({ id: setoranId, expectedSetoran, totalSistem, pengeluaran: totalPengeluaran }, lapak.nama || sess.lapakId); } catch (notifyError) { console.error('Notifikasi setoran gagal, transaksi tetap tersimpan:', notifyError.message); }
     return { success: true, id: setoranId, selisih };
   } finally { lock.releaseLock(); }
 }
@@ -2463,7 +2474,7 @@ function apiApproveSetoran(token, idSetoran) {
     const user = getSheetData('Users').find(u => String(u.id) === String(userId));
     if (user && (user.email || user.username)) {
       const lapak = getSheetData('Lapak').find(l => String(l.id) === String(lapakId)) || {};
-      notifySetoranApproved({ id: idSetoran, tanggal, expectedSetoran: uangDisetor + qris }, lapak.nama || lapakId, user.email || '', user.username || '');
+      try { notifySetoranApproved({ id: idSetoran, tanggal, expectedSetoran: uangDisetor + qris }, lapak.nama || lapakId, user.email || '', user.username || ''); } catch (notifyError) { console.error('Notifikasi persetujuan gagal, transaksi tetap disetujui:', notifyError.message); }
     }
     return { success: true, message: 'Setoran disetujui.' };
   } finally { lock.releaseLock(); }
@@ -2492,46 +2503,29 @@ function apiEditSetoran(token, idSetoran, updates) {
   if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success: false, message: 'Sistem sibuk. Coba lagi.' };
   try {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Setoran');
-    const data = sheet.getDataRange().getValues();
-    const h = data[0];
-    if (!hasHeaders(sheet, ['id','status','totalTunai','totalQris','totalSistem','pengeluaran','expectedSetoran','selisih'])) {
-      return { success:false, message:'Struktur Setoran lama belum mendukung edit versi baru. Tidak ada perubahan yang dilakukan.' };
-    }
-    const iId = h.indexOf('id'), iStatus = h.indexOf('status'), iEdit = h.indexOf('editHistory'), iLocked = h.indexOf('locked');
-    for (let i = 1; i < data.length; i++) {
-      if (String(data[i][iId]) === String(idSetoran)) {
-        if (data[i][iStatus] === 'approved') return { success: false, message: 'Setoran yang sudah disetujui tidak bisa diedit.' };
-        if (iLocked >= 0 && (String(data[i][iLocked]) === 'true' || data[i][iLocked] === true)) return { success: false, message: 'Setoran ini terkunci.' };
-        const changes = {};
-        ['totalTunai','totalQris','pengeluaran','uangDisetor','catatan'].forEach(field => {
-          if (updates[field] !== undefined) {
-            const idx = h.indexOf(field);
-            if (idx >= 0) {
-              const before = data[i][idx];
-              sheet.getRange(i + 1, idx + 1).setValue(field === 'catatan' ? String(updates[field]) : toPosNum(updates[field]));
-              changes[field] = { from: before, to: updates[field] };
-            }
-          }
+    const data = sheet.getDataRange().getValues(), h = data[0];
+    if (!hasHeaders(sheet, ['id','status','totalTunai','totalQris','totalSistem','pengeluaran','expectedSetoran','selisih'])) return { success:false, message:'Struktur Setoran lama belum mendukung edit versi baru. Tidak ada perubahan yang dilakukan.' };
+    const iId=h.indexOf('id'), iStatus=h.indexOf('status'), iEdit=h.indexOf('editHistory'), iLocked=h.indexOf('locked');
+    for(let i=1;i<data.length;i++) if(String(data[i][iId])===String(idSetoran)) {
+      if(data[i][iStatus]==='approved') return {success:false,message:'Setoran yang sudah disetujui tidak bisa diedit.'};
+      if(iLocked>=0&&(String(data[i][iLocked])==='true'||data[i][iLocked]===true)) return {success:false,message:'Setoran ini terkunci.'};
+      const row=i+1, changes={}, journal=beginWriteJournal(['Setoran']);
+      try {
+        ['totalTunai','totalQris','pengeluaran','uangDisetor','catatan'].forEach(field=>{
+          if(updates[field]!==undefined){const idx=h.indexOf(field);if(idx>=0){const before=data[i][idx];journalSetValue(journal,sheet,row,idx+1,field==='catatan'?String(updates[field]):toPosNum(updates[field]));changes[field]={from:before,to:updates[field]};}}
         });
-        const iTunai = h.indexOf('totalTunai'), iQris = h.indexOf('totalQris');
-        const iSistem = h.indexOf('totalSistem'), iPeng = h.indexOf('pengeluaran');
-        const iExp = h.indexOf('expectedSetoran'), iSelisih = h.indexOf('selisih');
-        const nt = Number(sheet.getRange(i+1, iTunai+1).getValue()) || 0;
-        const nq = Number(sheet.getRange(i+1, iQris+1).getValue()) || 0;
-        const ns = Number(sheet.getRange(i+1, iSistem+1).getValue()) || 0;
-        const np = Number(sheet.getRange(i+1, iPeng+1).getValue()) || 0;
-        sheet.getRange(i + 1, iExp + 1).setValue(ns - np);
-        sheet.getRange(i + 1, iSelisih + 1).setValue(ns - (nt + nq));
-        if (iEdit >= 0) {
-          const prev = sheet.getRange(i + 1, iEdit + 1).getValue();
-          const logEntry = formatDateTime(new Date()) + ' by ' + sess.username + ': ' + JSON.stringify(changes);
-          sheet.getRange(i + 1, iEdit + 1).setValue((prev ? prev + ' || ' : '') + logEntry);
-        }
-        _clearSheetCache();
-        return { success: true, message: 'Setoran diperbarui.' };
+        const it=h.indexOf('totalTunai'), iq=h.indexOf('totalQris'), is=h.indexOf('totalSistem'), ip=h.indexOf('pengeluaran'), ie=h.indexOf('expectedSetoran'), il=h.indexOf('selisih');
+        const nt=Number(sheet.getRange(row,it+1).getValue())||0, nq=Number(sheet.getRange(row,iq+1).getValue())||0, ns=Number(sheet.getRange(row,is+1).getValue())||0, np=Number(sheet.getRange(row,ip+1).getValue())||0;
+        journalSetValue(journal,sheet,row,ie+1,ns-np);
+        journalSetValue(journal,sheet,row,il+1,ns-(nt+nq));
+        if(iEdit>=0){const prev=sheet.getRange(row,iEdit+1).getValue(), entry=formatDateTime(new Date())+' by '+sess.username+': '+JSON.stringify(changes);journalSetValue(journal,sheet,row,iEdit+1,(prev?prev+' || ':'')+entry);}
+      } catch(writeError) {
+        try{rollbackWriteJournal(journal);}catch(rollbackError){console.error('Gagal rollback edit setoran:',rollbackError.message);return{success:false,message:'Edit setoran gagal dan pemulihan otomatis tidak sepenuhnya berhasil. Hentikan proses lanjutan dan minta pemeriksaan admin. Detail: '+writeError.message+' | '+rollbackError.message};}
+        _clearSheetCache();return{success:false,message:'Edit setoran gagal. Perubahan telah dibatalkan: '+writeError.message};
       }
+      _clearSheetCache();return{success:true,message:'Setoran diperbarui.'};
     }
-    return { success: false, message: 'Setoran tidak ditemukan.' };
+    return {success:false,message:'Setoran tidak ditemukan.'};
   } finally { lock.releaseLock(); }
 }
 
