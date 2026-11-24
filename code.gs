@@ -525,15 +525,15 @@ function getSheetData(name) {
     const o = {};
     headers.forEach((h, i) => { if (h) o[h] = r[i]; });
     if (name === 'Setoran') {
-      if (o.lapakId === undefined && o.lapak !== undefined) o.lapakId = o.lapak;
-      if (o.totalTunai === undefined && o.totalCash !== undefined) o.totalTunai = o.totalCash;
-      if (o.totalQris === undefined) o.totalQris = 0;
-      if (o.totalSistem === undefined && o.expectedSetoran !== undefined) o.totalSistem = (Number(o.expectedSetoran) || 0) + (Number(o.pengeluaran) || 0);
+      if ((o.lapakId === undefined || o.lapakId === '') && o.lapak !== undefined) o.lapakId = o.lapak;
+      if ((o.totalTunai === undefined || o.totalTunai === '') && o.totalCash !== undefined) o.totalTunai = o.totalCash;
+      if (o.totalQris === undefined || o.totalQris === '') o.totalQris = 0;
+      if ((o.totalSistem === undefined || o.totalSistem === '') && o.expectedSetoran !== undefined) o.totalSistem = (Number(o.expectedSetoran) || 0) + (Number(o.pengeluaran) || 0);
     }
     if (name === 'SetoranDetail') {
-      if (o.qtyLaku === undefined && o.terjual !== undefined) o.qtyLaku = o.terjual;
-      if (o.qtySisa === undefined && o.sisa !== undefined) o.qtySisa = o.sisa;
-      if (o.qtyDrop === undefined) o.qtyDrop = (Number(o.qtyLaku) || 0) + (Number(o.qtySisa) || 0);
+      if ((o.qtyLaku === undefined || o.qtyLaku === '') && o.terjual !== undefined) o.qtyLaku = o.terjual;
+      if ((o.qtySisa === undefined || o.qtySisa === '') && o.sisa !== undefined) o.qtySisa = o.sisa;
+      if (o.qtyDrop === undefined || o.qtyDrop === '') o.qtyDrop = (Number(o.qtyLaku) || 0) + (Number(o.qtySisa) || 0);
     }
     return o;
   });
@@ -1087,7 +1087,7 @@ function apiSaveLapak(token, item) {
   const nama = String(item.nama || '').trim(); if (!nama) return { success: false, message: 'Nama wajib.' };
   const row = [item.id || ('L' + Utilities.getUuid().slice(0,6).toUpperCase()), nama, String(item.alamat||''), item.aktif !== false];
   if (item.id) { for (let i=1;i<data.length;i++) if (String(data[i][iId])===String(item.id)) { sheet.getRange(i+1,1,1,4).setValues([row]); _clearSheetCache(); invalidateMasterCache(); return { success:true, message:'Lapak diperbarui.' }; } return { success:false, message:'Lapak tidak ditemukan.' }; }
-  appendObjectsByHeaders(sheet, [row]); _clearSheetCache(); invalidateMasterCache(); return { success:true, message:'Lapak ditambahkan.' };
+  appendObjectsByHeaders(sheet, [{id:row[0], nama:row[1], alamat:row[2], aktif:row[3]}]); _clearSheetCache(); invalidateMasterCache(); return { success:true, message:'Lapak ditambahkan.' };
 }
 function apiDeleteLapak(token, id) {
   requireRole(token, ['admin']);
@@ -1122,7 +1122,13 @@ function apiSaveSupplier(token, item) {
         sheet.getRange(i+1, iTipe+1).setValue(tipe);
         sheet.getRange(i+1, h.indexOf('aktif')+1).setValue(item.aktif !== false);
         if (h.indexOf('email') !== -1) sheet.getRange(i+1, h.indexOf('email')+1).setValue(email);
-      } else appendObjectsByHeaders(sheet, [row]);
+      } else {
+        const updates = {id:row.id, nama:row.nama, kontak:row.kontak, jadwalPesan:row.jadwalPesan, catatan:row.catatan, tipeTransaksi:row.tipeTransaksi, aktif:row.aktif, email:row.email};
+        Object.keys(updates).forEach(key => {
+          const col = h.indexOf(key);
+          if (col >= 0) sheet.getRange(i+1, col+1).setValue(updates[key]);
+        });
+      }
       _clearSheetCache(); invalidateMasterCache(); return { success:true, message:'Supplier diperbarui.' };
     }
     return { success:false, message:'Supplier tidak ditemukan.' };
