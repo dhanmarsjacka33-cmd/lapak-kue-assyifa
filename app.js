@@ -630,6 +630,11 @@ function renderRekapForm(d) {
             <span class="text-green font-bold" data-sub="${esc(it.katalogId)}">${fmtRp((it.qtyDrop - (S.rekap[it.katalogId] || 0)) * it.hargaJual)}</span>
           </div>
         </div>`).join('')}
+      <div class="card-flat" style="padding:12px;margin-top:12px;background:var(--amber-50);border:1px solid rgba(245,158,11,.3)">
+        <p class="text-sm font-semibold mb-1">Titipan Supplier</p>
+        <p class="text-xs text-gray mb-2">Simpan perhitungan sisa terlebih dahulu agar tagihan supplier muncul di menu Titipan. Anda dapat membayar per supplier sebelum mengirim laporan.</p>
+        <button class="btn btn-warning btn-block btn-sm" data-act="prepare-rekap-draft">Hitung Sisa & Siapkan Tagihan</button>
+      </div>
       <div style="border-top:1px solid #f1f5f9;padding-top:14px;margin-top:10px">
         <p class="text-xs font-semibold mb-2">Pengeluaran Lapak (opsional)</p>
         <div data-peng-list></div>
@@ -1391,6 +1396,7 @@ function handleClick(e) {
   if (a === 'cancel-drop-edit') { if (S.karyawan) S.karyawan.editingDrop = false; return render(); }
   if (a === 'save-drop-edit') return karyawanEditDrop();
   if (a === 'submit-rekap') return doSubmitRekap();
+  if (a === 'prepare-rekap-draft') return prepareRekapDraft();
   if (a === 'add-peng') return addPengRow();
   if (a === 'del-peng') { const r = e.target.closest('[data-peng-row]'); if (r) r.remove(); return updateSummary(); }
   if (a === 'ajukan-kasbon') return formKasbon(false);
@@ -1828,6 +1834,28 @@ async function karyawanEditDrop() {
     render();
   } catch (e) { toast(e.message, 'error'); }
   finally { if (button && button.isConnected) { button.disabled = false; button.textContent = 'Simpan Perubahan'; } }
+}
+
+async function prepareRekapDraft() {
+  if (S.submitting) return;
+  const d = S.karyawan;
+  if (!d || !Array.isArray(d.distribusi) || !d.distribusi.length) return toast('Data drop belum tersedia.', 'error');
+  const items = d.distribusi.map(x => ({ katalogId:x.katalogId, qtySisa:Math.max(0, Math.min(Number(S.rekap[x.katalogId])||0, Number(x.qtyDrop)||0)) }));
+  S.submitting = true; showLoader();
+  try {
+    const r = await api('saveRekapDraft', {token:S.token, payload:{tanggal:d.tanggal,items}});
+    toast(r.message || 'Tagihan disiapkan.', r.success ? 'success' : 'error');
+    if (r.success) {
+      const [titipan] = await Promise.all([
+        api('getTitipanKaryawan',{token:S.token}),
+        reloadKaryawan()
+      ]);
+      S.titipanKaryawan = titipan || {pending:[],sudahBayar:[]};
+      if (S.tab === 'titipan') updateKaryawanBody();
+      else render();
+    }
+  } catch(e) { toast(e.message,'error'); }
+  finally { hideLoader(); S.submitting = false; }
 }
 
 async function doSubmitRekap() {
