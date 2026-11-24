@@ -2203,7 +2203,13 @@ function apiKaryawanBayarSupplier(token, payload) {
 
     // Feature A: TIDAK ada guard sudahSubmit — karyawan bisa bayar kapan saja
 
-    const ks = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Konsinyasi');
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ks = ss.getSheetByName('Konsinyasi');
+    const bayarSheet = ss.getSheetByName('BayarTitipanKaryawan');
+    if (!hasHeaders(ks, ['id','supplierId','lapakId','status','utang','bayarAt','bayarBy','catatan']) ||
+        !hasHeaders(bayarSheet, ['id','tanggal','lapakId','supplierId','userName','totalBayar','konsinyasiIds','setoranId','createdAt','catatan','noNota','metode','status'])) {
+      return { success:false, message:'Struktur sheet pembayaran titipan belum lengkap. Tidak ada perubahan yang dilakukan.' };
+    }
     const data = ks.getDataRange().getValues();
     const h = data[0];
     const iId = h.indexOf('id'), iSupplier = h.indexOf('supplierId');
@@ -2235,30 +2241,8 @@ function apiKaryawanBayarSupplier(token, payload) {
     const catatanText = String(payload.catatan || '').trim();
     const metode = ['Tunai','Transfer'].indexOf(payload.metode) !== -1 ? payload.metode : 'Tunai';
 
-    rowsToUpdate.forEach(r => {
-      ks.getRange(r, iStatus + 1).setValue('Bayar');
-      if (iBayarAt >= 0) ks.getRange(r, iBayarAt + 1).setValue(new Date());
-      if (iBayarBy >= 0) ks.getRange(r, iBayarBy + 1).setValue(sess.username);
-      if (iCatatan >= 0) {
-        const prev = String(ks.getRange(r, iCatatan + 1).getValue() || '');
-        let note = 'Bayar langsung oleh ' + sess.name;
-        if (noNota) note += ' (Nota: ' + noNota + ')';
-        note += ' [' + metode + ']';
-        if (catatanText) note += ' — ' + catatanText;
-        ks.getRange(r, iCatatan + 1).setValue((prev ? prev + ' | ' : '') + note);
-      }
-    });
-
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let bayarSheet = ss.getSheetByName('BayarTitipanKaryawan');
-    if (!bayarSheet) {
-      bayarSheet = ss.insertSheet('BayarTitipanKaryawan');
-      bayarSheet.getRange(1, 1, 1, 13).setValues([['id','tanggal','lapakId','supplierId','userName','totalBayar','konsinyasiIds','setoranId','createdAt','catatan','noNota','metode','status']]);
-      bayarSheet.setFrozenRows(1);
-    }
     const sup = getSheetData('Suppliers').find(s => String(s.id) === supplierId) || {};
     const bayarId = 'BT' + Utilities.getUuid().slice(0, 8).toUpperCase();
-
     const bh = bayarSheet.getRange(1, 1, 1, bayarSheet.getLastColumn()).getValues()[0];
     const newRow = bh.map(col => {
       switch (String(col).trim()) {
@@ -2278,7 +2262,31 @@ function apiKaryawanBayarSupplier(token, payload) {
         default: return '';
       }
     });
-    bayarSheet.appendRow(newRow);
+    const journal = beginWriteJournal(['Konsinyasi','BayarTitipanKaryawan']);
+    try {
+      rowsToUpdate.forEach(r => {
+        journalSetValue(journal, ks, r, iStatus + 1, 'Bayar');
+        if (iBayarAt >= 0) journalSetValue(journal, ks, r, iBayarAt + 1, new Date());
+        if (iBayarBy >= 0) journalSetValue(journal, ks, r, iBayarBy + 1, sess.username);
+        if (iCatatan >= 0) {
+          const prev = String(ks.getRange(r, iCatatan + 1).getValue() || '');
+          let note = 'Bayar langsung oleh ' + sess.name;
+          if (noNota) note += ' (Nota: ' + noNota + ')';
+          note += ' [' + metode + ']';
+          if (catatanText) note += ' — ' + catatanText;
+          journalSetValue(journal, ks, r, iCatatan + 1, (prev ? prev + ' | ' : '') + note);
+        }
+      });
+      bayarSheet.appendRow(newRow);
+    } catch (writeError) {
+      try { rollbackWriteJournal(journal); }
+      catch (rollbackError) {
+        console.error('Gagal rollback pembayaran titipan:', rollbackError.message);
+        return { success:false, message:'Pembayaran gagal dan pemulihan otomatis tidak sepenuhnya berhasil. Hentikan transaksi lanjutan dan minta pemeriksaan admin. Detail: ' + writeError.message + ' | ' + rollbackError.message };
+      }
+      _clearSheetCache();
+      return { success:false, message:'Pembayaran gagal. Perubahan telah dibatalkan: ' + writeError.message };
+    }
 
     _clearSheetCache();
 
@@ -2413,6 +2421,9 @@ function apiApproveSetoran(token, idSetoran) {
     const iId = h.indexOf('id'), iStatus = h.indexOf('status');
     const iUang = h.indexOf('uangDisetor'), iQris = h.indexOf('totalQris');
     const iLapak = h.indexOf('lapakId'), iAt = h.indexOf('approvedAt'), iBy = h.indexOf('approvedBy');
+    if (!hasHeaders(kasSheet, ['id','tanggal','keterangan','tipe','kategori','nominal','saldo'])) {
+      return { success:false, message:'Struktur Kas belum lengkap. Setoran tidak disetujui dan tidak ada perubahan.' };
+    }
     let rowIdx = -1, uangDisetor = 0, qris = 0, lapakId = '', userId = '', tanggal = '';
     for (let i = 1; i < data.length; i++) {
       if (String(data[i][iId]) === String(idSetoran)) {
@@ -2427,16 +2438,27 @@ function apiApproveSetoran(token, idSetoran) {
       }
     }
     if (rowIdx === -1) return { success: false, message: 'Setoran tidak ditemukan.' };
-    setoranSheet.getRange(rowIdx, iStatus + 1).setValue('approved');
-    if (iAt >= 0) setoranSheet.getRange(rowIdx, iAt + 1).setValue(new Date());
-    if (iBy >= 0) setoranSheet.getRange(rowIdx, iBy + 1).setValue(sess.username);
     const kasData = kasSheet.getDataRange().getValues();
     const iSaldo = kasData[0].indexOf('saldo');
     let saldo = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
     const newRows = [];
     if (uangDisetor > 0) { saldo += uangDisetor; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Setoran Tunai '+lapakId,tipe:'Masuk',kategori:'Setoran',nominal:uangDisetor,saldo}); }
     if (qris > 0) { saldo += qris; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Setoran QRIS '+lapakId,tipe:'Masuk',kategori:'Setoran',nominal:qris,saldo}); }
-    if (newRows.length) appendObjectsByHeaders(kasSheet,newRows);
+    const journal = beginWriteJournal(['Setoran','Kas']);
+    try {
+      journalSetValue(journal, setoranSheet, rowIdx, iStatus + 1, 'approved');
+      if (iAt >= 0) journalSetValue(journal, setoranSheet, rowIdx, iAt + 1, new Date());
+      if (iBy >= 0) journalSetValue(journal, setoranSheet, rowIdx, iBy + 1, sess.username);
+      if (newRows.length) appendObjectsByHeaders(kasSheet,newRows);
+    } catch (writeError) {
+      try { rollbackWriteJournal(journal); }
+      catch (rollbackError) {
+        console.error('Gagal rollback persetujuan setoran:', rollbackError.message);
+        return { success:false, message:'Persetujuan gagal dan pemulihan otomatis tidak sepenuhnya berhasil. Hentikan proses lanjutan dan minta pemeriksaan admin. Detail: ' + writeError.message + ' | ' + rollbackError.message };
+      }
+      _clearSheetCache();
+      return { success:false, message:'Persetujuan gagal. Perubahan telah dibatalkan: ' + writeError.message };
+    }
     _clearSheetCache();
     const user = getSheetData('Users').find(u => String(u.id) === String(userId));
     if (user && (user.email || user.username)) {
