@@ -582,9 +582,12 @@ function renderDropForm(d) {
   return `
     <div class="card" style="border:1.5px solid var(--amber);background:var(--amber-50)">
       <div class="card-title" style="color:var(--amber-600)">${ico('boxes')} ${editing ? 'Edit Drop Stok' : 'Input Stok Diterima'}</div>
-      <p class="text-xs text-gray mb-4">${editing ? 'Perbarui jumlah stok yang diterima di lapak.' : 'Masukkan jumlah kue yang Anda terima pagi ini.'}</p>
+      <p class="text-xs text-gray mb-3">${editing ? 'Perbarui jumlah stok yang diterima di lapak. Jumlah lama tetap ditampilkan; ubah hanya item yang perlu.' : 'Masukkan jumlah kue yang Anda terima pagi ini.'}</p>
+      <div class="field mb-3">
+        <input type="search" class="input" data-drop-search placeholder="Cari nama kue atau supplier..." autocomplete="off">
+      </div>
       ${katalog.map(k => `
-        <div class="row-between" style="padding:10px 0;border-bottom:1px solid rgba(245,158,11,.15)">
+        <div class="row-between" data-drop-row data-name="${esc((k.nama || '') + ' ' + (k.supplierNama || ''))}" style="padding:10px 0;border-bottom:1px solid rgba(245,158,11,.15)">
           <div style="min-width:0;flex:1;padding-right:8px">
             <p class="text-sm font-semibold">${esc(k.nama)}</p>
             <p class="text-xs text-gray">${esc(k.supplierNama)} · ${fmtRp(k.hargaJual)}</p>
@@ -1515,6 +1518,13 @@ function handleClick(e) {
 
 function handleInput(e) {
   const t = e.target;
+  if (t.dataset.dropSearch !== undefined) {
+    const q = String(t.value || '').trim().toLocaleLowerCase('id-ID');
+    $('[data-drop-row]').forEach(row => {
+      row.hidden = q !== '' && !String(row.dataset.name || '').toLocaleLowerCase('id-ID').includes(q);
+    });
+    return;
+  }
   if (t.dataset.rekapItem) {
     const kat = t.dataset.rekapItem;
     const max = Number(t.dataset.max);
