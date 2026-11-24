@@ -2044,15 +2044,8 @@ function apiSubmitRekap(token, payload) {
     (!b.setoranId || b.setoranId === '') &&
     String(b.status || 'Active') === 'Active'
   );
-  bayarTitipanHariIni.forEach(b => {
-    const sup = getSheetData('Suppliers').find(s => String(s.id) === String(b.supplierId)) || {};
-    pengeluaranList.push({
-      keterangan: 'Bayar Titipan: ' + (sup.nama || b.supplierId) + (b.noNota ? ' (Nota ' + b.noNota + ')' : ''),
-      kategori: 'Bayar Titipan',
-      nominal: Number(b.totalBayar) || 0,
-      _titipanId: b.id
-    });
-  });
+  // Pembayaran titipan tetap tercatat di BayarTitipanKaryawan dan ditautkan ke setoran,
+  // tetapi bukan pengeluaran modal/operasional lapak sehingga tidak masuk pengeluaranList.
 
   for (const p of pengeluaranList) {
     const nominal = Number(p && p.nominal);
@@ -2473,18 +2466,22 @@ function apiApproveSetoran(token, idSetoran) {
       return { success:false, message:'Struktur Setoran lama belum mendukung persetujuan versi baru. Tidak ada perubahan yang dilakukan.' };
     }
     const iId = h.indexOf('id'), iStatus = h.indexOf('status');
-    const iUang = h.indexOf('uangDisetor'), iQris = h.indexOf('totalQris');
+    const iTunai = h.indexOf('totalTunai'), iQris = h.indexOf('totalQris'), iPengeluaran = h.indexOf('pengeluaran');
     const iLapak = h.indexOf('lapakId'), iAt = h.indexOf('approvedAt'), iBy = h.indexOf('approvedBy');
     if (!hasHeaders(kasSheet, ['id','tanggal','keterangan','tipe','kategori','nominal','saldo'])) {
       return { success:false, message:'Struktur Kas belum lengkap. Setoran tidak disetujui dan tidak ada perubahan.' };
     }
-    let rowIdx = -1, uangDisetor = 0, qris = 0, lapakId = '', userId = '', tanggal = '';
+    if (iTunai < 0 || iPengeluaran < 0) {
+      return { success:false, message:'Kolom totalTunai/pengeluaran belum tersedia. Setoran tidak disetujui dan tidak ada perubahan.' };
+    }
+    let rowIdx = -1, totalTunai = 0, qris = 0, pengeluaranOperasional = 0, lapakId = '', userId = '', tanggal = '';
     for (let i = 1; i < data.length; i++) {
       if (String(data[i][iId]) === String(idSetoran)) {
         if (data[i][iStatus] === 'approved') return { success: false, message: 'Setoran sudah disetujui.' };
         if (data[i][iStatus] === 'rejected') return { success: false, message: 'Setoran sudah ditolak.' };
-        uangDisetor = Number(data[i][iUang]) || 0;
+        totalTunai = Number(data[i][iTunai]) || 0;
         qris = Number(data[i][iQris]) || 0;
+        pengeluaranOperasional = Number(data[i][iPengeluaran]) || 0;
         lapakId = data[i][iLapak];
         userId = data[i][h.indexOf('userId')];
         tanggal = formatDate(data[i][h.indexOf('tanggal')]);
@@ -2496,8 +2493,10 @@ function apiApproveSetoran(token, idSetoran) {
     const iSaldo = kasData[0].indexOf('saldo');
     let saldo = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
     const newRows = [];
-    if (uangDisetor > 0) { saldo += uangDisetor; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Setoran Tunai '+lapakId,tipe:'Masuk',kategori:'Setoran',nominal:uangDisetor,saldo}); }
+    // Catat penerimaan tunai bruto; pengeluaran operasional dicatat sebagai arus keluar terpisah.
+    if (totalTunai > 0) { saldo += totalTunai; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Setoran Tunai '+lapakId,tipe:'Masuk',kategori:'Setoran',nominal:totalTunai,saldo}); }
     if (qris > 0) { saldo += qris; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Setoran QRIS '+lapakId,tipe:'Masuk',kategori:'Setoran',nominal:qris,saldo}); }
+    if (pengeluaranOperasional > 0) { saldo -= pengeluaranOperasional; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Pengeluaran operasional lapak '+lapakId,tipe:'Keluar',kategori:'Operasional Lapak',nominal:pengeluaranOperasional,saldo}); }
     const journal = beginWriteJournal(['Setoran','Kas']);
     try {
       journalSetValue(journal, setoranSheet, rowIdx, iStatus + 1, 'approved');
@@ -2517,7 +2516,7 @@ function apiApproveSetoran(token, idSetoran) {
     const user = getSheetData('Users').find(u => String(u.id) === String(userId));
     if (user && (user.email || user.username)) {
       const lapak = getSheetData('Lapak').find(l => String(l.id) === String(lapakId)) || {};
-      try { notifySetoranApproved({ id: idSetoran, tanggal, expectedSetoran: uangDisetor + qris }, lapak.nama || lapakId, user.email || '', user.username || ''); } catch (notifyError) { console.error('Notifikasi persetujuan gagal, transaksi tetap disetujui:', notifyError.message); }
+      try { notifySetoranApproved({ id: idSetoran, tanggal, expectedSetoran: totalTunai + qris - pengeluaranOperasional }, lapak.nama || lapakId, user.email || '', user.username || ''); } catch (notifyError) { console.error('Notifikasi persetujuan gagal, transaksi tetap disetujui:', notifyError.message); }
     }
     return { success: true, message: 'Setoran disetujui.' };
   } finally { lock.releaseLock(); }
