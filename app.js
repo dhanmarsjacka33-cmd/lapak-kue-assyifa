@@ -80,13 +80,15 @@ const MEM = {
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const fmtRp = n => { const v = Number(n); return isFinite(v) ? 'Rp ' + v.toLocaleString('id-ID') : 'Rp 0'; };
-const fmtDateID = d => { const dt = d instanceof Date ? d : new Date(d); return isNaN(dt) ? '' : dt.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); };
-const fmtDateShort = d => { if (!d) return ''; const dt = typeof d === 'string' ? new Date(d) : d; return isNaN(dt) ? String(d) : dt.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }); };
+const parseLocalDate = d => { if (d instanceof Date) return d; const v = String(d == null ? '' : d); const m = v.match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(d); };
+const fmtDateID = d => { const dt = parseLocalDate(d); return isNaN(dt) ? '' : dt.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); };
+const fmtDateShort = d => { if (!d) return ''; const dt = parseLocalDate(d); return isNaN(dt) ? String(d) : dt.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }); };
 const esc = s => s == null ? '' : String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 const ico = (n, c = 'ico') => `<svg class="${c}"><use href="#i-${n}"/></svg>`;
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const monthISO = () => new Date().toISOString().slice(0, 7);
-const monthStartISO = () => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); };
+const localDateISO = d => { const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const day = String(d.getDate()).padStart(2, '0'); return y + '-' + m + '-' + day; };
+const todayISO = (d = new Date()) => localDateISO(d);
+const monthISO = (d = new Date()) => localDateISO(d).slice(0, 7);
+const monthStartISO = () => { const d = new Date(); d.setDate(1); return localDateISO(d); };
 const bulanLabel = ym => { if (!ym) return ''; const [y, m] = ym.split('-'); const n = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']; return (n[parseInt(m, 10) - 1] || '') + ' ' + y; };
 const skeletonList = (n = 3) => `<div class="skeleton-list">${Array.from({ length: n }, () => '<div class="skeleton-item"></div>').join('')}</div>`;
 
@@ -2118,7 +2120,8 @@ async function loadTabData(tab) {
     if (tab === 'dashboard-profit') {
       const range = S.profitRange || 30;
       const end = todayISO();
-      const start = new Date(Date.now() - (range - 1) * 86400000).toISOString().slice(0, 10);
+      const startDate = new Date(); startDate.setDate(startDate.getDate() - (range - 1));
+      const start = todayISO(startDate);
       tasks.push(Promise.all([cached('getLaporan', { token: S.token, filter: { dari: start, sampai: end } }, 'laporan_' + start + '_' + end), cached('getSetoranList', { token: S.token, filter: { dari: start, sampai: end } }, 'setoran_' + JSON.stringify({ dari: start, sampai: end }))]).then(function(results) {
         const laporan = results[0], setoran = results[1];
         const dateMap = {};
@@ -2127,7 +2130,8 @@ async function loadTabData(tab) {
         const avgMargin = totalOmzet > 0 ? (totalProfit / totalOmzet) : 0;
         const daily = [];
         for (let i = range - 1; i >= 0; i--) {
-          const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+          const dayDate = new Date(); dayDate.setDate(dayDate.getDate() - i);
+          const d = todayISO(dayDate);
           const info = dateMap[d] || { tanggal: d, omzet: 0, pengeluaran: 0 };
           const profit = Math.round((info.omzet * avgMargin) - info.pengeluaran);
           daily.push({ tanggal: d, omzet: info.omzet, profit: profit });
@@ -3579,8 +3583,8 @@ async function loadKalender() {
   catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); }
 }
-function kalenderPrev() { const b = S.kalenderBulan || monthISO(); const p = b.split('-').map(Number); S.kalenderBulan = new Date(p[0], p[1] - 2, 1).toISOString().slice(0, 7); loadKalender(); }
-function kalenderNext() { const b = S.kalenderBulan || monthISO(); const p = b.split('-').map(Number); S.kalenderBulan = new Date(p[0], p[1], 1).toISOString().slice(0, 7); loadKalender(); }
+function kalenderPrev() { const b = S.kalenderBulan || monthISO(); const p = b.split('-').map(Number); S.kalenderBulan = monthISO(new Date(p[0], p[1] - 2, 1)); loadKalender(); }
+function kalenderNext() { const b = S.kalenderBulan || monthISO(); const p = b.split('-').map(Number); S.kalenderBulan = monthISO(new Date(p[0], p[1], 1)); loadKalender(); }
 function kalenderDay(tgl) {
   const data = (S.kalenderData || []).find(d => d.tanggal === tgl);
   if (!data || !data.pesanan.length) return toast('Tidak ada pesanan.', 'info');
