@@ -1775,6 +1775,7 @@ function apiKaryawanInputDrop(token, items) {
     if (!lapakId) return { success: false, message: 'Akun Anda tidak terkait dengan lapak mana pun.' };
     const sudahSubmit = getSheetData('Setoran').some(s => formatDate(s.tanggal) === tgl && String(s.lapakId) === String(lapakId));
     if (sudahSubmit) return { success: false, message: 'Laporan hari ini sudah dikirim.' };
+    if (hasKonsinyasiRekapDraft(tgl, lapakId)) return { success: false, message: 'Stok drop tidak bisa diubah setelah tagihan titip jual disiapkan. Koreksi jumlah sisa pada form rekap.' };
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Distribusi');
     const data = sheet.getDataRange().getValues();
     const h = data[0];
@@ -1822,6 +1823,9 @@ function apiEditDropStok(token, items) {
     if (isPeriodeLocked(tgl)) return { success: false, message: 'Periode ini terkunci.' };
     if (getSheetData('Setoran').some(s => formatDate(s.tanggal) === tgl && String(s.lapakId) === lapakId)) {
       return { success: false, message: 'Stok tidak bisa diedit setelah laporan dikirim.' };
+    }
+    if (hasKonsinyasiRekapDraft(tgl, lapakId)) {
+      return { success: false, message: 'Stok drop tidak bisa diubah setelah tagihan titip jual disiapkan. Koreksi jumlah sisa pada form rekap.' };
     }
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1882,6 +1886,14 @@ function apiEditDropStok(token, items) {
 // ============================================================
 //  DRAFT REKAP — HITUNG TAGIHAN TITIP JUAL SEBELUM LAPORAN
 // ============================================================
+function hasKonsinyasiRekapDraft(tgl, lapakId) {
+  const marker = 'DRAFT_REKAP|' + tgl + '|' + lapakId + '|';
+  return getSheetData('Konsinyasi').some(k =>
+    String(k.lapakId) === String(lapakId) &&
+    String(k.catatan || '').indexOf(marker) === 0
+  );
+}
+
 function apiSaveRekapDraft(token, payload) {
   const sess = requireRole(token, ['karyawan']);
   const tgl = (payload && payload.tanggal) || todayStr();
@@ -1927,7 +1939,10 @@ function apiSaveRekapDraft(token, payload) {
       if(old) {
         const row=data[old.row-1];
         if(laku<=0) {
-          if(old.status==='Pending') updates.push({row:old.row,col:ix('status')+1,value:'Cancelled'});
+          if(old.status==='Pending' || old.status==='Cancelled') {
+            updates.push({row:old.row,col:ix('qtyLaku')+1,value:0},{row:old.row,col:ix('utang')+1,value:0});
+            if(old.status==='Pending') updates.push({row:old.row,col:ix('status')+1,value:'Cancelled'});
+          }
         } else if(old.status==='Pending' || old.status==='Cancelled') {
           updates.push({row:old.row,col:ix('qtyLaku')+1,value:laku},{row:old.row,col:ix('hargaTitip')+1,value:harga},{row:old.row,col:ix('utang')+1,value:utang});
           if(old.status==='Cancelled') updates.push({row:old.row,col:ix('status')+1,value:'Pending'});
@@ -2034,6 +2049,26 @@ function apiSubmitRekap(token, payload) {
     const unpaidDraft = getSheetData('Konsinyasi').filter(k => String(k.lapakId)===String(sess.lapakId) && String(k.catatan||'').indexOf(draftMarker)===0 && String(k.status)==='Pending');
     if (unpaidDraft.length) return {success:false,message:'Masih ada tagihan titip jual yang belum dibayar. Lunasi terlebih dahulu sebelum mengirim laporan.'};
     if (getSheetData('Setoran').some(x => formatDate(x.tanggal)===tgl && String(x.lapakId)===String(sess.lapakId))) return {success:false,message:'Laporan hari ini sudah dikirim.'};
+
+    // Pastikan draft yang pernah disiapkan/dibatalkan/dibayar sesuai dengan angka laporan final.
+    const draftRows = getSheetData('Konsinyasi').filter(k =>
+      String(k.lapakId) === String(sess.lapakId) &&
+      String(k.catatan || '').indexOf(draftMarker) === 0
+    );
+    for (const d of details) {
+      const k = katMap[d.katalogId];
+      const supplier = k && supMap[k.supplierId];
+      if (!supplier || (supplier.tipeTransaksi || 'BeliPutus') !== 'TitipJual') continue;
+      const marker = draftMarker + d.katalogId;
+      const draft = draftRows.find(x => String(x.catatan || '').indexOf(marker) === 0);
+      if (!draft) continue; // kompatibilitas untuk item yang belum pernah disiapkan sebagai draft
+      const expectedUtang = d.qtyLaku * (Number(k.hargaBeli) || 0);
+      if (String(draft.status) !== (d.qtyLaku > 0 ? 'Bayar' : 'Cancelled') ||
+          (Number(draft.qtyLaku) || 0) !== d.qtyLaku ||
+          (Number(draft.utang) || 0) !== expectedUtang) {
+        return {success:false,message:'Jumlah sisa atau tagihan '+(k.nama || d.katalogId)+' berubah setelah tagihan disiapkan. Hitung ulang sisa dan tagihan sebelum mengirim laporan.'};
+      }
+    }
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const setoranSheet = ss.getSheetByName('Setoran');
     const detailSheet = ss.getSheetByName('SetoranDetail');
