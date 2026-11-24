@@ -2226,12 +2226,13 @@ function apiGetTitipanKaryawan(token) {
   const tgl = todayStr();
   const bayarSheet = getSheetData('BayarTitipanKaryawan') || [];
   const sudahBayar = bayarSheet
-    .filter(b => formatDate(b.tanggal) === tgl && String(b.lapakId) === String(lapakId) && String(b.status || 'Active') === 'Active')
+    .filter(b => String(b.lapakId) === String(lapakId) && String(b.status || 'Active') === 'Active' && (formatDate(b.tanggal) === tgl || !b.setoranId))
     .map(b => ({
       id: b.id,
       supplierId: b.supplierId,
       supplierNama: supMap[String(b.supplierId)] || b.supplierId,
       total: Number(b.totalBayar) || 0,
+      tanggal: formatDate(b.tanggal),
       noNota: b.noNota || '',
       metode: b.metode || 'Tunai',
       catatan: b.catatan || '',
