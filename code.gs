@@ -176,7 +176,6 @@ const ROUTES = {
   getAnalytics: p => apiGetAnalytics(p.token, p.filter),
   getAnalisisPerforma: p => apiGetAnalisisPerforma(p.token, p),
   getStrukPesanan: p => apiGetStrukPesanan(p.token, p.id),
-  testEmailNotif: p => apiTestEmailNotif(p.token),
   sendEmailManual: p => apiSendEmailManual(p.token, p.payload)
 };
 
