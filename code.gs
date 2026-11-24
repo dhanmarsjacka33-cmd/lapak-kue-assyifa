@@ -1711,6 +1711,7 @@ function apiKaryawanInputDrop(token, items) {
     if (!lapakId) return { success: false, message: 'Akun Anda tidak terkait dengan lapak mana pun.' };
     const sudahSubmit = getSheetData('Setoran').some(s => formatDate(s.tanggal) === tgl && String(s.lapakId) === String(lapakId));
     if (sudahSubmit) return { success: false, message: 'Laporan hari ini sudah dikirim.' };
+    if (hasKonsinyasiRekapDraft(tgl, lapakId)) return { success: false, message: 'Stok drop tidak bisa diubah setelah tagihan titip jual disiapkan. Koreksi jumlah sisa pada form rekap.' };
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Distribusi');
     const data = sheet.getDataRange().getValues();
     const h = data[0];
@@ -1758,6 +1759,9 @@ function apiEditDropStok(token, items) {
     if (isPeriodeLocked(tgl)) return { success: false, message: 'Periode ini terkunci.' };
     if (getSheetData('Setoran').some(s => formatDate(s.tanggal) === tgl && String(s.lapakId) === lapakId)) {
       return { success: false, message: 'Stok tidak bisa diedit setelah laporan dikirim.' };
+    }
+    if (hasKonsinyasiRekapDraft(tgl, lapakId)) {
+      return { success: false, message: 'Stok drop tidak bisa diubah setelah tagihan titip jual disiapkan. Koreksi jumlah sisa pada form rekap.' };
     }
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1818,6 +1822,14 @@ function apiEditDropStok(token, items) {
 // ============================================================
 //  DRAFT REKAP — HITUNG TAGIHAN TITIP JUAL SEBELUM LAPORAN
 // ============================================================
+function hasKonsinyasiRekapDraft(tgl, lapakId) {
+  const marker = 'DRAFT_REKAP|' + tgl + '|' + lapakId + '|';
+  return getSheetData('Konsinyasi').some(k =>
+    String(k.lapakId) === String(lapakId) &&
+    String(k.catatan || '').indexOf(marker) === 0
+  );
+}
+
 function apiSaveRekapDraft(token, payload) {
   const sess = requireRole(token, ['karyawan']);
   const tgl = (payload && payload.tanggal) || todayStr();
