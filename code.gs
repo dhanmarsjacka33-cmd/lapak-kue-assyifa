@@ -550,6 +550,12 @@ function appendObjectsByHeaders(sheet, objects) {
   sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
 }
 
+function hasHeaders(sheet, required) {
+  if (!sheet || sheet.getLastColumn() < 1) return false;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(h => String(h).trim());
+  return required.every(name => headers.indexOf(name) >= 0);
+}
+
 function getMasterCached(key, fetcher, ttl) {
   const cacheKey = 'master_' + key;
   const cached = DATA_CACHE.get(cacheKey);
@@ -1133,7 +1139,7 @@ function apiSaveSupplier(token, item) {
     }
     return { success:false, message:'Supplier tidak ditemukan.' };
   }
-  sheet.appendRow(row); _clearSheetCache(); invalidateMasterCache();
+  appendObjectsByHeaders(sheet, [row]); _clearSheetCache(); invalidateMasterCache();
   return { success:true, message:'Supplier ditambahkan.' };
 }
 function apiDeleteSupplier(token, id) {
