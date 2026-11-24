@@ -660,7 +660,6 @@ function summaryHTML() {
   $$('[data-peng-row]').forEach(r => { const el = r.querySelector('[data-peng-nom]'); if (el) pengeluaran += parseInt(el.value, 10) || 0; });
   const tk = S.titipanKaryawan || {};
   const totalTitipan = (tk.sudahBayar || []).reduce((s, x) => s + (x.total || 0), 0);
-  pengeluaran += totalTitipan;
   const tunaiEl = $('input[name="tunai"]'), qrisEl = $('input[name="qris"]');
   const tunai = tunaiEl ? (parseInt(tunaiEl.value, 10) || 0) : 0;
   const qris = qrisEl ? (parseInt(qrisEl.value, 10) || 0) : 0;
@@ -669,7 +668,7 @@ function summaryHTML() {
   return `<div style="flex:1">
     <div class="row-between text-xs"><span>Penjualan</span><strong>${fmtRp(total)}</strong></div>
     <div class="row-between text-xs text-red"><span>Pengeluaran</span><span>- ${fmtRp(pengeluaran)}</span></div>
-    ${totalTitipan > 0 ? `<div class="row-between text-xs text-gray" style="padding-left:12px"><span>↳ termasuk titipan supplier</span><span>${fmtRp(totalTitipan)}</span></div>` : ''}
+    ${totalTitipan > 0 ? `<div class="row-between text-xs text-gray" style="padding-left:12px"><span>Pembayaran titipan (tidak mengurangi setoran)</span><span>${fmtRp(totalTitipan)}</span></div>` : ''}
     <div class="row-between text-xs text-green font-bold mt-2"><span>Harus Disetor</span><span>${fmtRp(Math.max(0, expected))}</span></div>
     <div class="divider" style="margin:10px 0"></div>
     <div class="row-between text-xs"><span>Tunai + QRIS</span><span>${fmtRp(tunai + qris)}</span></div>
