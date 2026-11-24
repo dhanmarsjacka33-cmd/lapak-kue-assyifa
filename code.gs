@@ -8,7 +8,7 @@ const CONFIG = {
   SESSION_TTL: 21600, SESSION_TTL_DAYS: 30, LOCK_TIMEOUT: 15000,
   MAX_LOGIN_ATTEMPTS: 5, LOGIN_WINDOW: 300,
   BACKUP_FOLDER: 'Kue As-Syifa Backups', BACKUP_RETENTION_DAYS: 30,
-  TIME_LOCK_HOUR: 23, DEFAULT_PASSWORD: 'kue1234',
+  TIME_LOCK_HOUR: 23,
   FONNTE_TOKEN: '',
   NOTIF_EMAIL: 'loversazkia@gmail.com',
   NOTIF_EMAIL_PESANAN: '',
@@ -816,7 +816,7 @@ function apiAdminResetPassword(token, userId) {
   const data = sheet.getDataRange().getValues();
   const h = data[0];
   const iId = h.indexOf('id'), iHash = h.indexOf('passwordHash'), iSalt = h.indexOf('salt'), iMust = h.indexOf('mustChangePassword');
-  const newPwd = CONFIG.DEFAULT_PASSWORD;
+  const newPwd = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][iId]) === String(userId)) {
       const ns = Utilities.getUuid();
