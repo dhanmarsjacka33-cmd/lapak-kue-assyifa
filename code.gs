@@ -520,11 +520,34 @@ function getSheetData(name) {
   if (!sheet) { __sheetCache[name] = []; return []; }
   const data = sheet.getDataRange().getValues();
   if (data.length <= 1) { __sheetCache[name] = []; return []; }
-  const headers = data[0];
-  const result = data.slice(1).filter(r => r.some(c => c !== '' && c !== null))
-    .map(r => { const o = {}; headers.forEach((h, i) => o[h] = r[i]); return o; });
+  const headers = data[0].map(h => String(h).trim());
+  const result = data.slice(1).filter(r => r.some(c => c !== '' && c !== null)).map(r => {
+    const o = {};
+    headers.forEach((h, i) => { if (h) o[h] = r[i]; });
+    if (name === 'Setoran') {
+      if (o.lapakId === undefined && o.lapak !== undefined) o.lapakId = o.lapak;
+      if (o.totalTunai === undefined && o.totalCash !== undefined) o.totalTunai = o.totalCash;
+      if (o.totalQris === undefined) o.totalQris = 0;
+      if (o.totalSistem === undefined && o.expectedSetoran !== undefined) o.totalSistem = (Number(o.expectedSetoran) || 0) + (Number(o.pengeluaran) || 0);
+    }
+    if (name === 'SetoranDetail') {
+      if (o.qtyLaku === undefined && o.terjual !== undefined) o.qtyLaku = o.terjual;
+      if (o.qtySisa === undefined && o.sisa !== undefined) o.qtySisa = o.sisa;
+      if (o.qtyDrop === undefined) o.qtyDrop = (Number(o.qtyLaku) || 0) + (Number(o.qtySisa) || 0);
+    }
+    return o;
+  });
   __sheetCache[name] = result;
   return result;
+}
+
+function appendObjectsByHeaders(sheet, objects) {
+  if (!sheet || !objects || !objects.length) return;
+  const lastColumn = sheet.getLastColumn();
+  if (lastColumn < 1) throw new Error('Header sheet tidak ditemukan: ' + sheet.getName());
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0].map(h => String(h).trim());
+  const rows = objects.map(obj => headers.map(header => header && Object.prototype.hasOwnProperty.call(obj, header) ? obj[header] : ''));
+  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
 }
 
 function getMasterCached(key, fetcher, ttl) {
@@ -1064,7 +1087,7 @@ function apiSaveLapak(token, item) {
   const nama = String(item.nama || '').trim(); if (!nama) return { success: false, message: 'Nama wajib.' };
   const row = [item.id || ('L' + Utilities.getUuid().slice(0,6).toUpperCase()), nama, String(item.alamat||''), item.aktif !== false];
   if (item.id) { for (let i=1;i<data.length;i++) if (String(data[i][iId])===String(item.id)) { sheet.getRange(i+1,1,1,4).setValues([row]); _clearSheetCache(); invalidateMasterCache(); return { success:true, message:'Lapak diperbarui.' }; } return { success:false, message:'Lapak tidak ditemukan.' }; }
-  sheet.appendRow(row); _clearSheetCache(); invalidateMasterCache(); return { success:true, message:'Lapak ditambahkan.' };
+  appendObjectsByHeaders(sheet, [row]); _clearSheetCache(); invalidateMasterCache(); return { success:true, message:'Lapak ditambahkan.' };
 }
 function apiDeleteLapak(token, id) {
   requireRole(token, ['admin']);
@@ -1088,9 +1111,7 @@ function apiSaveSupplier(token, item) {
   const email = String(item.email || '').trim();
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { success:false, message:'Format email supplier tidak valid.' };
   const tipe = ['BeliPutus','TitipJual'].indexOf(item.tipeTransaksi) !== -1 ? item.tipeTransaksi : 'BeliPutus';
-  const row = [item.id || ('SP' + Utilities.getUuid().slice(0,6).toUpperCase()), nama, String(item.kontak||''), String(item.jadwalPesan||''), String(item.catatan||''), item.aktif !== false];
-  if (iTipe !== -1) row.splice(5, 0, tipe);
-  row.push(email);
+  const row = { id:item.id || ('SP' + Utilities.getUuid().slice(0,6).toUpperCase()), nama, kontak:String(item.kontak || ''), jadwalPesan:String(item.jadwalPesan || ''), catatan:String(item.catatan || ''), tipeTransaksi:tipe, aktif:item.aktif !== false, email };
   if (item.id) {
     for (let i=1;i<data.length;i++) if (String(data[i][iId])===String(item.id)) {
       if (iTipe !== -1) {
@@ -1101,7 +1122,7 @@ function apiSaveSupplier(token, item) {
         sheet.getRange(i+1, iTipe+1).setValue(tipe);
         sheet.getRange(i+1, h.indexOf('aktif')+1).setValue(item.aktif !== false);
         if (h.indexOf('email') !== -1) sheet.getRange(i+1, h.indexOf('email')+1).setValue(email);
-      } else sheet.getRange(i+1,1,1,6).setValues([row]);
+      } else appendObjectsByHeaders(sheet, [row]);
       _clearSheetCache(); invalidateMasterCache(); return { success:true, message:'Supplier diperbarui.' };
     }
     return { success:false, message:'Supplier tidak ditemukan.' };
@@ -2309,9 +2330,9 @@ function apiApproveSetoran(token, idSetoran) {
     const iSaldo = kasData[0].indexOf('saldo');
     let saldo = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
     const newRows = [];
-    if (uangDisetor > 0) { saldo += uangDisetor; newRows.push(['KS' + Utilities.getUuid().slice(0, 8).toUpperCase(), new Date(), 'Setoran Tunai ' + lapakId, 'Masuk', 'Setoran', uangDisetor, saldo]); }
-    if (qris > 0) { saldo += qris; newRows.push(['KS' + Utilities.getUuid().slice(0, 8).toUpperCase(), new Date(), 'Setoran QRIS ' + lapakId, 'Masuk', 'Setoran', qris, saldo]); }
-    if (newRows.length) kasSheet.getRange(kasSheet.getLastRow() + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
+    if (uangDisetor > 0) { saldo += uangDisetor; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Setoran Tunai '+lapakId,tipe:'Masuk',kategori:'Setoran',nominal:uangDisetor,saldo}); }
+    if (qris > 0) { saldo += qris; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Setoran QRIS '+lapakId,tipe:'Masuk',kategori:'Setoran',nominal:qris,saldo}); }
+    if (newRows.length) appendObjectsByHeaders(kasSheet,newRows);
     _clearSheetCache();
     const user = getSheetData('Users').find(u => String(u.id) === String(userId));
     if (user && (user.email || user.username)) {
@@ -2406,7 +2427,7 @@ function apiAddKas(token, item) {
     const iSaldo = data[0].indexOf('saldo');
     const saldoLama = data.length > 1 ? Number(data[data.length - 1][iSaldo]) || 0 : 0;
     const saldoBaru = tipe === 'Masuk' ? saldoLama + nominal : saldoLama - nominal;
-    sheet.appendRow(['KS' + Utilities.getUuid().slice(0, 8).toUpperCase(), new Date(), String(item.keterangan || ''), tipe, String(item.kategori || 'Lain'), nominal, saldoBaru]);
+    appendObjectsByHeaders(sheet, [{id:'KS' + Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:String(item.keterangan || ''),tipe,kategori:String(item.kategori || 'Lain'),nominal,saldo:saldoBaru}]);
     _clearSheetCache();
     return { success: true, message: 'Transaksi kas dicatat.' };
   } finally { lock.releaseLock(); }
@@ -2508,7 +2529,7 @@ function apiCheckBelanja(token, id, checked, hargaAktual) {
           const iSaldo = kasData[0].indexOf('saldo');
           const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
           const kasId = 'KS' + Utilities.getUuid().slice(0, 8).toUpperCase();
-          kasSheet.appendRow([kasId, new Date(), 'Belanja: ' + itemName, 'Keluar', 'Belanja', total, saldoLama - total]);
+          appendObjectsByHeaders(kasSheet,[{id:kasId,tanggal:new Date(),keterangan:'Belanja: '+itemName,tipe:'Keluar',kategori:'Belanja',nominal:total,saldo:saldoLama-total}]);
           sheet.getRange(i + 1, iChecked + 1).setValue(true);
           sheet.getRange(i + 1, iCheckedAt + 1).setValue(new Date());
           sheet.getRange(i + 1, iHA + 1).setValue(ha);
@@ -2745,7 +2766,7 @@ function apiBayarGaji(token, payload) {
     const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
     const kasId = 'KS' + Utilities.getUuid().slice(0, 8).toUpperCase();
     const uName = (getSheetData('Users').find(u => String(u.id) === String(userId)) || {}).name || userId;
-    if (gajiBersih > 0) kasSheet.appendRow([kasId, new Date(), 'Gaji ' + uName + ' (' + periode + ')', 'Keluar', 'Gaji', gajiBersih, saldoLama - gajiBersih]);
+    if (gajiBersih > 0) appendObjectsByHeaders(kasSheet,[{id:kasId,tanggal:new Date(),keterangan:'Gaji '+uName+' ('+periode+')',tipe:'Keluar',kategori:'Gaji',nominal:gajiBersih,saldo:saldoLama-gajiBersih}]);
     const gajiSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Gaji');
     const gajiId = 'G' + Utilities.getUuid().slice(0, 8).toUpperCase();
     gajiSheet.appendRow([gajiId, new Date(), userId, periode, gajiPokok, potonganKasbon, tunjangan, gajiBersih, gajiBersih > 0 ? kasId : '', String(payload.catatan || ''), sess.username]);
@@ -2788,7 +2809,7 @@ function apiBayarGajiBulk(token, payload) {
         const iSaldo = kasData[0].indexOf('saldo');
         const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
         kasId = 'KS' + Utilities.getUuid().slice(0, 8).toUpperCase();
-        kasSheet.appendRow([kasId, new Date(), 'Gaji ' + (userMap[userId] || userId) + ' (' + periode + ')', 'Keluar', 'Gaji', gajiBersih, saldoLama - gajiBersih]);
+        appendObjectsByHeaders(kasSheet,[{id:kasId,tanggal:new Date(),keterangan:'Gaji '+(userMap[userId]||userId)+' ('+periode+')',tipe:'Keluar',kategori:'Gaji',nominal:gajiBersih,saldo:saldoLama-gajiBersih}]);
       }
       const gajiId = 'G' + Utilities.getUuid().slice(0, 8).toUpperCase();
       gajiSheet.appendRow([gajiId, new Date(), userId, periode, gajiPokok, potonganKasbon, tunjangan + bonus, gajiBersih, kasId, String(it.catatan || ''), sess.username]);
@@ -3256,7 +3277,7 @@ function apiBayarPayroll(token, userId, bulan) {
     const iSaldo = kasData[0].indexOf('saldo');
     const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
     const kasId = 'KS' + Utilities.getUuid().slice(0, 8).toUpperCase();
-    if (totalBersih > 0) kasSheet.appendRow([kasId, new Date(), 'Payroll ' + user.userName + ' (' + bulan + ')', 'Keluar', 'Gaji', totalBersih, saldoLama - totalBersih]);
+    if (totalBersih > 0) appendObjectsByHeaders(kasSheet,[{id:kasId,tanggal:new Date(),keterangan:'Payroll '+user.userName+' ('+bulan+')',tipe:'Keluar',kategori:'Gaji',nominal:totalBersih,saldo:saldoLama-totalBersih}]);
     const rekapSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('RekapPayroll');
     const rekapId = 'RP' + Utilities.getUuid().slice(0, 8).toUpperCase();
     rekapSheet.appendRow([rekapId, bulan, user.userId, user.userName, JSON.stringify(user), totalBersih, totalBersih > 0 ? kasId : '', new Date(), sess.username]);
@@ -3467,7 +3488,7 @@ function apiBayarSupplier(token, payload) {
     const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
     const kasId = 'KS' + Utilities.getUuid().slice(0, 8).toUpperCase();
     const sup = getSheetData('Suppliers').find(s => String(s.id) === String(supplierId)) || {};
-    kasSheet.appendRow([kasId, new Date(), 'Bayar Supplier: ' + (sup.nama || supplierId) + ' (' + rowsToUpdate.length + ' transaksi)', 'Keluar', 'Konsinyasi', totalBayar, saldoLama - totalBayar]);
+    appendObjectsByHeaders(kasSheet,[{id:kasId,tanggal:new Date(),keterangan:'Bayar Supplier: '+(sup.nama||supplierId)+' ('+rowsToUpdate.length+' transaksi)',tipe:'Keluar',kategori:'Konsinyasi',nominal:totalBayar,saldo:saldoLama-totalBayar}]);
     rowsToUpdate.forEach(r => {
       sheet.getRange(r, iStatus + 1).setValue('Bayar');
       sheet.getRange(r, iKasId + 1).setValue(kasId);
@@ -3629,7 +3650,7 @@ function apiSavePesananPelanggan(token, payload) {
       const iSaldo = kasData[0].indexOf('saldo');
       const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
       kasIdDp = 'KS' + Utilities.getUuid().slice(0, 8).toUpperCase();
-      kasSheet.appendRow([kasIdDp, new Date(), 'DP Pesanan: ' + pelangganNama, 'Masuk', 'Pesanan-DP', dp, saldoLama + dp]);
+      appendObjectsByHeaders(kasSheet,[{id:kasIdDp,tanggal:new Date(),keterangan:'DP Pesanan: '+pelangganNama,tipe:'Masuk',kategori:'Pesanan-DP',nominal:dp,saldo:saldoLama+dp}]);
     }
     const row = [pesananId, payload.tanggal ? new Date(payload.tanggal) : new Date(), pelangganNama, String(payload.pelangganHp || ''), new Date(tanggalAmbil), jenisAmbil, metodeAmbil, String(payload.alamat || ''), String(payload.catatan || ''), totalSistem, dp, sisaBayar, metodeBayar, 'Dipesan', '', kasIdDp, '', payload.id ? payload.createdAt : new Date(), payload.id ? payload.createdBy : sess.username, new Date(), String(payload.pelangganEmail || '')];
     const data = pesananSheet.getDataRange().getValues();
@@ -3728,7 +3749,7 @@ function apiSelesaikanPesanan(token, id, payload) {
       const iSaldo = kasData[0].indexOf('saldo');
       const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
       kasIdLunas = 'KS' + Utilities.getUuid().slice(0, 8).toUpperCase();
-      kasSheet.appendRow([kasIdLunas, new Date(), 'Pelunasan Pesanan: ' + pelangganNama, 'Masuk', 'Pesanan-Lunas', sisaBayar, saldoLama + sisaBayar]);
+      appendObjectsByHeaders(kasSheet,[{id:kasIdLunas,tanggal:new Date(),keterangan:'Pelunasan Pesanan: '+pelangganNama,tipe:'Masuk',kategori:'Pesanan-Lunas',nominal:sisaBayar,saldo:saldoLama+sisaBayar}]);
     }
     let bonusId = existingBonus;
     if (metodeAmbil === 'Diantar' && payload.bonusAntar && payload.bonusAntar.userId && Number(payload.bonusAntar.nominal) > 0) {
