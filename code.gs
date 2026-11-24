@@ -1875,7 +1875,10 @@ function apiSaveRekapDraft(token, payload) {
       if(old) {
         const row=data[old.row-1];
         if(laku<=0) {
-          if(old.status==='Pending') updates.push({row:old.row,col:ix('status')+1,value:'Cancelled'});
+          if(old.status==='Pending' || old.status==='Cancelled') {
+            updates.push({row:old.row,col:ix('qtyLaku')+1,value:0},{row:old.row,col:ix('utang')+1,value:0});
+            if(old.status==='Pending') updates.push({row:old.row,col:ix('status')+1,value:'Cancelled'});
+          }
         } else if(old.status==='Pending' || old.status==='Cancelled') {
           updates.push({row:old.row,col:ix('qtyLaku')+1,value:laku},{row:old.row,col:ix('hargaTitip')+1,value:harga},{row:old.row,col:ix('utang')+1,value:utang});
           if(old.status==='Cancelled') updates.push({row:old.row,col:ix('status')+1,value:'Pending'});
