@@ -78,6 +78,7 @@ const ROUTES = {
   karyawanInputDrop: p => apiKaryawanInputDrop(p.token, p.items),
   editDropStok: p => apiEditDropStok(p.token, p.items),
   submitRekap: p => apiSubmitRekap(p.token, p.payload),
+  saveRekapDraft: p => apiSaveRekapDraft(p.token, p.payload),
   getAdminDashboard: p => apiGetAdminDashboard(p.token),
   getSetoranList: p => apiGetSetoranList(p.token, p.filter),
   getSetoranDetail: p => apiGetSetoranDetail(p.token, p.id),
@@ -1815,6 +1816,72 @@ function apiEditDropStok(token, items) {
 }
 
 // ============================================================
+//  DRAFT REKAP — HITUNG TAGIHAN TITIP JUAL SEBELUM LAPORAN
+// ============================================================
+function apiSaveRekapDraft(token, payload) {
+  const sess = requireRole(token, ['karyawan']);
+  const tgl = (payload && payload.tanggal) || todayStr();
+  if (tgl !== todayStr()) return { success:false, message:'Draft hanya bisa disiapkan untuk hari ini.' };
+  if (nowHour() >= CONFIG.TIME_LOCK_HOUR || isPeriodeLocked(tgl)) return { success:false, message:'Input sudah terkunci.' };
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  if (!items.length) return { success:false, message:'Tidak ada item rekap.' };
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success:false, message:'Sistem sibuk. Coba lagi.' };
+  try {
+    if (getSheetData('Setoran').some(x => formatDate(x.tanggal)===tgl && String(x.lapakId)===String(sess.lapakId))) return {success:false,message:'Laporan hari ini sudah dikirim.'};
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const dist = getSheetData('Distribusi').filter(x => formatDate(x.tanggal) === tgl && String(x.lapakId) === String(sess.lapakId));
+    const distMap = {}; dist.forEach(x => distMap[String(x.katalogId)] = Number(x.qtyDrop) || 0);
+    const katMap = {}; getSheetData('Katalog').forEach(x => katMap[String(x.id)] = x);
+    const supMap = {}; getSheetData('Suppliers').forEach(x => supMap[String(x.id)] = x);
+    const ks = ss.getSheetByName('Konsinyasi');
+    if (!ks || ks.getLastRow() < 1) return { success:false, message:'Sheet Konsinyasi belum tersedia.' };
+    const data = ks.getDataRange().getValues();
+    const h = data[0].map(x => String(x).trim());
+    const ix = name => h.indexOf(name);
+    const required = ['id','tanggal','supplierId','lapakId','katalogId','qtyLaku','hargaTitip','utang','status','setoranId','catatan'];
+    if (required.some(x => ix(x) < 0)) return { success:false, message:'Struktur kolom Konsinyasi tidak sesuai.' };
+    const existing = {};
+    for (let r=1;r<data.length;r++) {
+      const note=String(data[r][ix('catatan')] || '');
+      const m=note.match(/^DRAFT_REKAP\|([^|]+)\|([^|]+)\|([^|]+)/);
+      if (m && m[1]===tgl && m[2]===String(sess.lapakId)) existing[m[3]]={row:r+1,status:String(data[r][ix('status')]||''),qty:Number(data[r][ix('qtyLaku')])||0,id:String(data[r][ix('id')])};
+    }
+    const updates=[], additions=[];
+    for (const it of items) {
+      const id=String(it.katalogId||'');
+      const drop=distMap[id];
+      if (drop===undefined) return {success:false,message:'Item tidak ditemukan pada drop hari ini: '+id};
+      const sisa=toPosNum(it.qtySisa);
+      if (sisa>drop) return {success:false,message:'Sisa melebihi jumlah drop untuk item '+id};
+      const k=katMap[id]; if(!k) continue;
+      const sup=supMap[String(k.supplierId)];
+      if(!sup || String(sup.tipeTransaksi||'BeliPutus')!=='TitipJual') continue;
+      const laku=drop-sisa, harga=Number(k.hargaBeli)||0, utang=laku*harga;
+      const old=existing[id];
+      if(old && old.status==='Bayar' && old.qty!==laku) return {success:false,message:'Pembayaran untuk '+(k.nama||id)+' sudah dilakukan. Perubahan sisa harus dikoreksi oleh admin.'};
+      if(old) {
+        const row=data[old.row-1];
+        if(laku<=0) {
+          if(old.status==='Pending') updates.push({row:old.row,col:ix('status')+1,value:'Cancelled'});
+        } else if(old.status==='Pending' || old.status==='Cancelled') {
+          updates.push({row:old.row,col:ix('qtyLaku')+1,value:laku},{row:old.row,col:ix('hargaTitip')+1,value:harga},{row:old.row,col:ix('utang')+1,value:utang});
+          if(old.status==='Cancelled') updates.push({row:old.row,col:ix('status')+1,value:'Pending'});
+        }
+      } else if(laku>0) {
+        const obj={}; h.forEach((name,j)=>obj[name]='');
+        obj.id='KN'+Utilities.getUuid().slice(0,8).toUpperCase(); obj.tanggal=new Date(tgl); obj.supplierId=k.supplierId; obj.lapakId=sess.lapakId; obj.katalogId=id; obj.qtyLaku=laku; obj.hargaTitip=harga; obj.utang=utang; obj.status='Pending'; obj.catatan='DRAFT_REKAP|'+tgl+'|'+sess.lapakId+'|'+id;
+        additions.push(h.map(name=>obj[name]));
+      }
+    }
+    updates.forEach(u=>ks.getRange(u.row,u.col).setValue(u.value));
+    if(additions.length) ks.getRange(ks.getLastRow()+1,1,additions.length,h.length).setValues(additions);
+    _clearSheetCache();
+    return {success:true,message:'Tagihan titip jual berhasil disiapkan. Periksa dan bayar setiap supplier sebelum mengirim laporan.',created:additions.length,updated:updates.length};
+  } finally { lock.releaseLock(); }
+}
+
+// ============================================================
 //  SUBMIT REKAP (dengan bayar titipan + carry-over)
 // ============================================================
 function apiSubmitRekap(token, payload) {
@@ -1823,6 +1890,9 @@ function apiSubmitRekap(token, payload) {
   if (tgl !== todayStr()) return { success: false, message: 'Hanya bisa submit untuk hari ini.' };
   if (nowHour() >= CONFIG.TIME_LOCK_HOUR) return { success: false, message: 'Input terkunci setelah jam ' + CONFIG.TIME_LOCK_HOUR + ':00.' };
   if (isPeriodeLocked(tgl)) return { success: false, message: 'Periode ini terkunci.' };
+  const draftMarker = 'DRAFT_REKAP|' + tgl + '|' + sess.lapakId + '|';
+  const konsinyasiDraft = getSheetData('Konsinyasi').filter(k => String(k.lapakId)===String(sess.lapakId) && String(k.catatan||'').indexOf(draftMarker)===0 && String(k.status)==='Pending');
+  if (konsinyasiDraft.length) return {success:false,message:'Masih ada tagihan titip jual yang belum dibayar. Lunasi terlebih dahulu sebelum mengirim laporan.'};
   const items = Array.isArray(payload.items) ? payload.items : [];
   const pengeluaranList = Array.isArray(payload.pengeluaran) ? payload.pengeluaran.slice() : [];
   const totalTunai = toPosNum(payload.totalTunai);
@@ -1881,6 +1951,9 @@ function apiSubmitRekap(token, payload) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success: false, message: 'Sistem sibuk. Coba lagi.' };
   try {
+    const unpaidDraft = getSheetData('Konsinyasi').filter(k => String(k.lapakId)===String(sess.lapakId) && String(k.catatan||'').indexOf(draftMarker)===0 && String(k.status)==='Pending');
+    if (unpaidDraft.length) return {success:false,message:'Masih ada tagihan titip jual yang belum dibayar. Lunasi terlebih dahulu sebelum mengirim laporan.'};
+    if (getSheetData('Setoran').some(x => formatDate(x.tanggal)===tgl && String(x.lapakId)===String(sess.lapakId))) return {success:false,message:'Laporan hari ini sudah dikirim.'};
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const setoranSheet = ss.getSheetByName('Setoran');
     const detailSheet = ss.getSheetByName('SetoranDetail');
@@ -1920,6 +1993,15 @@ function apiSubmitRekap(token, payload) {
         const k = katMap[d.katalogId]; if (!k) return;
         const supplier = supMap[k.supplierId]; if (!supplier) return;
         if ((supplier.tipeTransaksi || 'BeliPutus') !== 'TitipJual') return;
+        const marker = 'DRAFT_REKAP|' + tgl + '|' + sess.lapakId + '|' + d.katalogId;
+        const existingDraft = getSheetData('Konsinyasi').find(x => String(x.catatan||'').indexOf(marker)===0);
+        if (existingDraft) {
+          const draftData = konsinyasiSheet.getDataRange().getValues();
+          const draftHeaders = draftData[0].map(x=>String(x).trim());
+          const iDraftId=draftHeaders.indexOf('id'), iDraftSetoran=draftHeaders.indexOf('setoranId');
+          if(iDraftSetoran>=0) for(let ri=1;ri<draftData.length;ri++) if(String(draftData[ri][iDraftId])===String(existingDraft.id)){konsinyasiSheet.getRange(ri+1,iDraftSetoran+1).setValue(setoranId);break;}
+          return;
+        }
         const hargaTitip = Number(k.hargaBeli) || 0;
         const utang = d.qtyLaku * hargaTitip;
         kRows.push(['KN' + Utilities.getUuid().slice(0, 8).toUpperCase(), new Date(), k.supplierId, sess.lapakId, d.katalogId, d.qtyLaku, hargaTitip, utang, 'Pending', '', '', '', setoranId, '']);
