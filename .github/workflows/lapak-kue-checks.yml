@@ -1,0 +1,29 @@
+name: Lapak Kue - Automated Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax-and-static-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check JavaScript syntax
+        run: |
+          cp code.gs /tmp/code.gs.js
+          node --check /tmp/code.gs.js
+          node --check app.js
+          node --check sw.js
+      - name: Run Lapak Kue static regression checks
+        run: node tests/static-regression.test.js
