@@ -2044,16 +2044,18 @@ function apiSubmitRekap(token, payload) {
     (!b.setoranId || b.setoranId === '') &&
     String(b.status || 'Active') === 'Active'
   );
-  // Pembayaran titipan tetap tercatat di BayarTitipanKaryawan dan ditautkan ke setoran,
-  // tetapi bukan pengeluaran modal/operasional lapak sehingga tidak masuk pengeluaranList.
+  // Pembayaran titipan dibayar dari uang hasil penjualan tunai yang dipegang karyawan.
+  // Catat terpisah dari biaya operasional agar mengurangi kas fisik tanpa mengurangi laba.
+  const totalTitipan = bayarTitipanHariIni.reduce((sum, b) => sum + toPosNum(b.totalBayar), 0);
 
   for (const p of pengeluaranList) {
     const nominal = Number(p && p.nominal);
     if (!Number.isFinite(nominal) || nominal < 0) return { success:false, message:'Nominal pengeluaran tidak valid. Periksa kembali daftar pengeluaran.' };
   }
   const totalPengeluaran = pengeluaranList.reduce((s, p) => s + toPosNum(p.nominal), 0);
-  const expectedSetoran = totalSistem - totalPengeluaran;
-  const uangDisetor = totalTunai;
+  // QRIS langsung diterima Owner; karyawan hanya menyerahkan sisa uang tunai.
+  const uangDisetor = totalTunai - totalTitipan - totalPengeluaran;
+  const expectedSetoran = uangDisetor + totalQris;
   const selisih = totalSistem - (totalTunai + totalQris);
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success: false, message: 'Sistem sibuk. Coba lagi.' };
@@ -2496,9 +2498,14 @@ function apiApproveSetoran(token, idSetoran) {
     const iSaldo = kasData[0].indexOf('saldo');
     let saldo = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
     const newRows = [];
-    // Catat penerimaan tunai bruto; pengeluaran operasional dicatat sebagai arus keluar terpisah.
-    if (totalTunai > 0) { saldo += totalTunai; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Setoran Tunai '+lapakId,tipe:'Masuk',kategori:'Setoran',nominal:totalTunai,saldo}); }
-    if (qris > 0) { saldo += qris; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Setoran QRIS '+lapakId,tipe:'Masuk',kategori:'Setoran',nominal:qris,saldo}); }
+    // Catat penerimaan bruto. QRIS langsung ke Owner, sedangkan tunai dipegang karyawan.
+    if (totalTunai > 0) { saldo += totalTunai; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Penjualan Tunai '+lapakId,tipe:'Masuk',kategori:'Penjualan Tunai',nominal:totalTunai,saldo}); }
+    if (qris > 0) { saldo += qris; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Penerimaan QRIS langsung Owner '+lapakId,tipe:'Masuk',kategori:'Penjualan QRIS',nominal:qris,saldo}); }
+    // Pembayaran supplier adalah arus kas keluar tersendiri, bukan biaya operasional.
+    const totalTitipan = getSheetData('BayarTitipanKaryawan')
+      .filter(b => String(b.setoranId) === String(idSetoran) && String(b.status || 'Active') === 'Active')
+      .reduce((sum, b) => sum + (Number(b.totalBayar) || 0), 0);
+    if (totalTitipan > 0) { saldo -= totalTitipan; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Pembayaran titipan supplier '+lapakId,tipe:'Keluar',kategori:'Pembayaran Titipan Supplier',nominal:totalTitipan,saldo}); }
     if (pengeluaranOperasional > 0) { saldo -= pengeluaranOperasional; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Pengeluaran operasional lapak '+lapakId,tipe:'Keluar',kategori:'Operasional Lapak',nominal:pengeluaranOperasional,saldo}); }
     const journal = beginWriteJournal(['Setoran','Kas']);
     try {
@@ -2519,7 +2526,7 @@ function apiApproveSetoran(token, idSetoran) {
     const user = getSheetData('Users').find(u => String(u.id) === String(userId));
     if (user && (user.email || user.username)) {
       const lapak = getSheetData('Lapak').find(l => String(l.id) === String(lapakId)) || {};
-      try { notifySetoranApproved({ id: idSetoran, tanggal, expectedSetoran: totalTunai + qris - pengeluaranOperasional }, lapak.nama || lapakId, user.email || '', user.username || ''); } catch (notifyError) { console.error('Notifikasi persetujuan gagal, transaksi tetap disetujui:', notifyError.message); }
+      try { notifySetoranApproved({ id: idSetoran, tanggal, expectedSetoran: totalTunai + qris - pengeluaranOperasional - totalTitipan }, lapak.nama || lapakId, user.email || '', user.username || ''); } catch (notifyError) { console.error('Notifikasi persetujuan gagal, transaksi tetap disetujui:', notifyError.message); }
     }
     return { success: true, message: 'Setoran disetujui.' };
   } finally { lock.releaseLock(); }
@@ -2559,9 +2566,12 @@ function apiEditSetoran(token, idSetoran, updates) {
         ['totalTunai','totalQris','pengeluaran','catatan'].forEach(field=>{
           if(updates[field]!==undefined){const idx=h.indexOf(field);if(idx>=0){const before=data[i][idx];journalSetValue(journal,sheet,row,idx+1,field==='catatan'?String(updates[field]):toPosNum(updates[field]));changes[field]={from:before,to:updates[field]};}}
         });
-        const it=h.indexOf('totalTunai'), iq=h.indexOf('totalQris'), is=h.indexOf('totalSistem'), ip=h.indexOf('pengeluaran'), ie=h.indexOf('expectedSetoran'), il=h.indexOf('selisih');
+        const it=h.indexOf('totalTunai'), iq=h.indexOf('totalQris'), is=h.indexOf('totalSistem'), ip=h.indexOf('pengeluaran'), ie=h.indexOf('expectedSetoran'), iu=h.indexOf('uangDisetor'), il=h.indexOf('selisih');
         const nt=Number(sheet.getRange(row,it+1).getValue())||0, nq=Number(sheet.getRange(row,iq+1).getValue())||0, ns=Number(sheet.getRange(row,is+1).getValue())||0, np=Number(sheet.getRange(row,ip+1).getValue())||0;
-        journalSetValue(journal,sheet,row,ie+1,ns-np);
+        const titipan=getSheetData('BayarTitipanKaryawan').filter(b=>String(b.setoranId)===String(idSetoran)&&String(b.status||'Active')==='Active').reduce((sum,b)=>sum+(Number(b.totalBayar)||0),0);
+        const tunaiDiserahkan=nt-np-titipan;
+        if(ie>=0) journalSetValue(journal,sheet,row,ie+1,tunaiDiserahkan+nq);
+        if(iu>=0) journalSetValue(journal,sheet,row,iu+1,tunaiDiserahkan);
         journalSetValue(journal,sheet,row,il+1,ns-(nt+nq));
         if(iEdit>=0){const prev=sheet.getRange(row,iEdit+1).getValue(), entry=formatDateTime(new Date())+' by '+sess.username+': '+JSON.stringify(changes);journalSetValue(journal,sheet,row,iEdit+1,(prev?prev+' || ':'')+entry);}
       } catch(writeError) {
