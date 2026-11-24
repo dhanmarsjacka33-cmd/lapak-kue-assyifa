@@ -1909,16 +1909,24 @@ function apiSaveRekapDraft(token, payload) {
     for (let r=1;r<data.length;r++) {
       const note=String(data[r][ix('catatan')] || '');
       const m=note.match(/^DRAFT_REKAP\|([^|]+)\|([^|]+)\|([^|]+)/);
-      if (m && m[1]===tgl && m[2]===String(sess.lapakId)) existing[m[3]]={row:r+1,status:String(data[r][ix('status')]||''),qty:Number(data[r][ix('qtyLaku')])||0,id:String(data[r][ix('id')])};
+      if (m && m[1]===tgl && m[2]===String(sess.lapakId)) {
+        if (existing[m[3]]) return {success:false,message:'Ditemukan draft ganda untuk item '+m[3]+'. Hentikan proses dan minta admin memeriksa data.'};
+        existing[m[3]]={row:r+1,status:String(data[r][ix('status')]||''),qty:Number(data[r][ix('qtyLaku')])||0,id:String(data[r][ix('id')])};
+      }
     }
-    const updates=[], additions=[];
+    const updates=[], additions=[], seenItems={};
     for (const it of items) {
-      const id=String(it.katalogId||'');
+      const id=String(it && it.katalogId || '').trim();
+      if (!id) return {success:false,message:'Ada item tanpa ID katalog. Draft tidak disimpan.'};
+      if (seenItems[id]) return {success:false,message:'Item katalog duplikat ditemukan: '+id+'. Hapus duplikat sebelum menyiapkan draft.'};
+      seenItems[id]=true;
       const drop=distMap[id];
       if (drop===undefined) return {success:false,message:'Item tidak ditemukan pada drop hari ini: '+id};
-      const sisa=toPosNum(it.qtySisa);
-      if (sisa>drop) return {success:false,message:'Sisa melebihi jumlah drop untuk item '+id};
-      const k=katMap[id]; if(!k) continue;
+      const rawSisa=Number(it.qtySisa);
+      if (!Number.isFinite(rawSisa) || rawSisa<0 || rawSisa>drop || Math.floor(rawSisa)!==rawSisa) return {success:false,message:'Jumlah sisa tidak valid untuk item '+id+'. Gunakan bilangan bulat dari 0 sampai '+drop+'.'};
+      const sisa=rawSisa;
+      const k=katMap[id];
+      if(!k) return {success:false,message:'Item tidak ditemukan di Katalog: '+id+'. Periksa data katalog sebelum menyiapkan draft.'};
       const sup=supMap[String(k.supplierId)];
       if(!sup || String(sup.tipeTransaksi||'BeliPutus')!=='TitipJual') continue;
       const laku=drop-sisa, harga=Number(k.hargaBeli)||0, utang=laku*harga;
