@@ -520,11 +520,71 @@ function getSheetData(name) {
   if (!sheet) { __sheetCache[name] = []; return []; }
   const data = sheet.getDataRange().getValues();
   if (data.length <= 1) { __sheetCache[name] = []; return []; }
-  const headers = data[0];
-  const result = data.slice(1).filter(r => r.some(c => c !== '' && c !== null))
-    .map(r => { const o = {}; headers.forEach((h, i) => o[h] = r[i]); return o; });
+  const headers = data[0].map(h => String(h).trim());
+  const result = data.slice(1).filter(r => r.some(c => c !== '' && c !== null)).map(r => {
+    const o = {};
+    headers.forEach((h, i) => { if (h) o[h] = r[i]; });
+    if (name === 'Setoran') {
+      if ((o.lapakId === undefined || o.lapakId === '') && o.lapak !== undefined) o.lapakId = o.lapak;
+      if ((o.totalTunai === undefined || o.totalTunai === '') && o.totalCash !== undefined) o.totalTunai = o.totalCash;
+      if (o.totalQris === undefined || o.totalQris === '') o.totalQris = 0;
+      if ((o.totalSistem === undefined || o.totalSistem === '') && o.expectedSetoran !== undefined) o.totalSistem = (Number(o.expectedSetoran) || 0) + (Number(o.pengeluaran) || 0);
+    }
+    if (name === 'SetoranDetail') {
+      if ((o.qtyLaku === undefined || o.qtyLaku === '') && o.terjual !== undefined) o.qtyLaku = o.terjual;
+      if ((o.qtySisa === undefined || o.qtySisa === '') && o.sisa !== undefined) o.qtySisa = o.sisa;
+      if (o.qtyDrop === undefined || o.qtyDrop === '') o.qtyDrop = (Number(o.qtyLaku) || 0) + (Number(o.qtySisa) || 0);
+    }
+    return o;
+  });
   __sheetCache[name] = result;
   return result;
+}
+
+function appendObjectsByHeaders(sheet, objects) {
+  if (!sheet || !objects || !objects.length) return;
+  const lastColumn = sheet.getLastColumn();
+  if (lastColumn < 1) throw new Error('Header sheet tidak ditemukan: ' + sheet.getName());
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0].map(h => String(h).trim());
+  const rows = objects.map(obj => headers.map(header => header && Object.prototype.hasOwnProperty.call(obj, header) ? obj[header] : ''));
+  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
+}
+
+function hasHeaders(sheet, required) {
+  if (!sheet || sheet.getLastColumn() < 1) return false;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(h => String(h).trim());
+  return required.every(name => headers.indexOf(name) >= 0);
+}
+function beginWriteJournal(sheetNames) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const journal = { sheets: [], changes: [] };
+  sheetNames.forEach(name => {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) throw new Error('Sheet tidak ditemukan: ' + name);
+    journal.sheets.push({ sheet, lastRow: sheet.getLastRow() });
+  });
+  return journal;
+}
+function journalSetValue(journal, sheet, row, col, value) {
+  const cell = sheet.getRange(row, col);
+  journal.changes.push({ sheet, row, col, oldValue: cell.getValue() });
+  cell.setValue(value);
+}
+function rollbackWriteJournal(journal) {
+  const errors = [];
+  for (let i = journal.changes.length - 1; i >= 0; i--) {
+    const c = journal.changes[i];
+    try { c.sheet.getRange(c.row, c.col).setValue(c.oldValue); }
+    catch (err) { errors.push('restore ' + c.sheet.getName() + '!R' + c.row + 'C' + c.col + ': ' + err.message); }
+  }
+  for (let i = journal.sheets.length - 1; i >= 0; i--) {
+    const entry = journal.sheets[i];
+    try {
+      const last = entry.sheet.getLastRow();
+      if (last > entry.lastRow) entry.sheet.deleteRows(entry.lastRow + 1, last - entry.lastRow);
+    } catch (err) { errors.push('delete appended rows ' + entry.sheet.getName() + ': ' + err.message); }
+  }
+  if (errors.length) throw new Error('Rollback tidak sepenuhnya berhasil: ' + errors.join('; '));
 }
 
 function getMasterCached(key, fetcher, ttl) {
@@ -1064,7 +1124,7 @@ function apiSaveLapak(token, item) {
   const nama = String(item.nama || '').trim(); if (!nama) return { success: false, message: 'Nama wajib.' };
   const row = [item.id || ('L' + Utilities.getUuid().slice(0,6).toUpperCase()), nama, String(item.alamat||''), item.aktif !== false];
   if (item.id) { for (let i=1;i<data.length;i++) if (String(data[i][iId])===String(item.id)) { sheet.getRange(i+1,1,1,4).setValues([row]); _clearSheetCache(); invalidateMasterCache(); return { success:true, message:'Lapak diperbarui.' }; } return { success:false, message:'Lapak tidak ditemukan.' }; }
-  sheet.appendRow(row); _clearSheetCache(); invalidateMasterCache(); return { success:true, message:'Lapak ditambahkan.' };
+  appendObjectsByHeaders(sheet, [{id:row[0], nama:row[1], alamat:row[2], aktif:row[3]}]); _clearSheetCache(); invalidateMasterCache(); return { success:true, message:'Lapak ditambahkan.' };
 }
 function apiDeleteLapak(token, id) {
   requireRole(token, ['admin']);
@@ -1088,9 +1148,7 @@ function apiSaveSupplier(token, item) {
   const email = String(item.email || '').trim();
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { success:false, message:'Format email supplier tidak valid.' };
   const tipe = ['BeliPutus','TitipJual'].indexOf(item.tipeTransaksi) !== -1 ? item.tipeTransaksi : 'BeliPutus';
-  const row = [item.id || ('SP' + Utilities.getUuid().slice(0,6).toUpperCase()), nama, String(item.kontak||''), String(item.jadwalPesan||''), String(item.catatan||''), item.aktif !== false];
-  if (iTipe !== -1) row.splice(5, 0, tipe);
-  row.push(email);
+  const row = { id:item.id || ('SP' + Utilities.getUuid().slice(0,6).toUpperCase()), nama, kontak:String(item.kontak || ''), jadwalPesan:String(item.jadwalPesan || ''), catatan:String(item.catatan || ''), tipeTransaksi:tipe, aktif:item.aktif !== false, email };
   if (item.id) {
     for (let i=1;i<data.length;i++) if (String(data[i][iId])===String(item.id)) {
       if (iTipe !== -1) {
@@ -1101,12 +1159,18 @@ function apiSaveSupplier(token, item) {
         sheet.getRange(i+1, iTipe+1).setValue(tipe);
         sheet.getRange(i+1, h.indexOf('aktif')+1).setValue(item.aktif !== false);
         if (h.indexOf('email') !== -1) sheet.getRange(i+1, h.indexOf('email')+1).setValue(email);
-      } else sheet.getRange(i+1,1,1,6).setValues([row]);
+      } else {
+        const updates = {id:row.id, nama:row.nama, kontak:row.kontak, jadwalPesan:row.jadwalPesan, catatan:row.catatan, tipeTransaksi:row.tipeTransaksi, aktif:row.aktif, email:row.email};
+        Object.keys(updates).forEach(key => {
+          const col = h.indexOf(key);
+          if (col >= 0) sheet.getRange(i+1, col+1).setValue(updates[key]);
+        });
+      }
       _clearSheetCache(); invalidateMasterCache(); return { success:true, message:'Supplier diperbarui.' };
     }
     return { success:false, message:'Supplier tidak ditemukan.' };
   }
-  sheet.appendRow(row); _clearSheetCache(); invalidateMasterCache();
+  appendObjectsByHeaders(sheet, [row]); _clearSheetCache(); invalidateMasterCache();
   return { success:true, message:'Supplier ditambahkan.' };
 }
 function apiDeleteSupplier(token, id) {
@@ -1898,6 +1962,13 @@ function apiSubmitRekap(token, payload) {
   const totalTunai = toPosNum(payload.totalTunai);
   const totalQris = toPosNum(payload.totalQris);
   if (!items.length) return { success: false, message: 'Tidak ada item yang dilaporkan.' };
+  const seenCatalogIds = {};
+  for (const it of items) {
+    const catalogId = String(it && it.katalogId || '').trim();
+    if (!catalogId) return { success:false, message:'Ada item tanpa ID katalog. Laporan tidak dikirim.' };
+    if (seenCatalogIds[catalogId]) return { success:false, message:'Item katalog duplikat ditemukan: ' + catalogId + '. Hapus duplikat sebelum mengirim.' };
+    seenCatalogIds[catalogId] = true;
+  }
   const distMap = {};
   getSheetData('Distribusi').filter(d => formatDate(d.tanggal) === tgl && String(d.lapakId) === String(sess.lapakId)).forEach(d => distMap[d.katalogId] = Number(d.qtyDrop) || 0);
   const katMap = {}; getSheetData('Katalog').forEach(k => katMap[k.id] = k);
@@ -1913,8 +1984,13 @@ function apiSubmitRekap(token, payload) {
   for (const it of items) {
     const qtyDrop = distMap[it.katalogId];
     if (qtyDrop === undefined) return { success: false, message: 'Item tidak ditemukan di distribusi hari ini: ' + it.katalogId };
-    const k = katMap[it.katalogId]; if (!k) continue;
-    const qtySisa = Math.min(toPosNum(it.qtySisa), qtyDrop);
+    const k = katMap[it.katalogId];
+    if (!k) return { success:false, message:'Item tidak ditemukan di Katalog: ' + it.katalogId + '. Periksa data katalog sebelum mengirim.' };
+    const rawQtySisa = Number(it.qtySisa);
+    if (!Number.isFinite(rawQtySisa) || rawQtySisa < 0 || rawQtySisa > qtyDrop || Math.floor(rawQtySisa) !== rawQtySisa) {
+      return { success:false, message:'Jumlah sisa tidak valid untuk item ' + (k.nama || it.katalogId) + '. Nilai harus bilangan bulat dari 0 sampai ' + qtyDrop + '.' };
+    }
+    const qtySisa = rawQtySisa;
     const qtyLaku = qtyDrop - qtySisa;
     const tipe = it.tipePelanggan || 'Umum';
     const key = it.katalogId + '_' + tipe;
@@ -1944,6 +2020,10 @@ function apiSubmitRekap(token, payload) {
     });
   });
 
+  for (const p of pengeluaranList) {
+    const nominal = Number(p && p.nominal);
+    if (!Number.isFinite(nominal) || nominal < 0) return { success:false, message:'Nominal pengeluaran tidak valid. Periksa kembali daftar pengeluaran.' };
+  }
   const totalPengeluaran = pengeluaranList.reduce((s, p) => s + toPosNum(p.nominal), 0);
   const expectedSetoran = totalSistem - totalPengeluaran;
   const uangDisetor = totalTunai;
@@ -1958,10 +2038,42 @@ function apiSubmitRekap(token, payload) {
     const setoranSheet = ss.getSheetByName('Setoran');
     const detailSheet = ss.getSheetByName('SetoranDetail');
     const pengSheet = ss.getSheetByName('PengeluaranLapak');
+    const requiredSetoran = ['id','tanggal','lapakId','userId','totalTunai','totalQris','totalSistem','pengeluaran','expectedSetoran','uangDisetor','selisih','status'];
+    if (!hasHeaders(setoranSheet, requiredSetoran)) {
+      return { success:false, message:'Struktur Setoran masih menggunakan format lama. Submit ditahan agar data historis tidak tertimpa. Tambahkan kolom versi baru secara non-destruktif pada Spreadsheet testing sebelum uji submit.' };
+    }
+    const detailHeaders = detailSheet.getRange(1, 1, 1, detailSheet.getLastColumn()).getDisplayValues()[0].map(x => String(x).trim());
+    const hasQtyLaku = detailHeaders.indexOf('qtyLaku') >= 0 || detailHeaders.indexOf('terjual') >= 0;
+    const hasQtySisa = detailHeaders.indexOf('qtySisa') >= 0 || detailHeaders.indexOf('sisa') >= 0;
+    if (!hasHeaders(detailSheet, ['id','setoranId','katalogId','hargaJual','hargaBeli','subtotal']) || !hasQtyLaku || !hasQtySisa) {
+      return { success:false, message:'Struktur SetoranDetail tidak dikenali. Submit ditahan agar riwayat penjualan tetap aman.' };
+    }
+    const stokSheet = ss.getSheetByName('KartuStok');
+    const konsinyasiSheet = ss.getSheetByName('Konsinyasi');
+    const bayarSheet = ss.getSheetByName('BayarTitipanKaryawan');
+    if (!hasHeaders(pengSheet, ['id','setoranId','keterangan','kategori','nominal']) ||
+        !hasHeaders(konsinyasiSheet, ['id','tanggal','supplierId','lapakId','katalogId','qtyLaku','hargaTitip','utang','status','kasId','bayarAt','bayarBy','setoranId','catatan']) ||
+        !hasHeaders(stokSheet, ['id','tanggal','katalogId','lapakId','tipe','masuk','keluar','saldo','refId','keterangan']) ||
+        !hasHeaders(bayarSheet, ['id','setoranId','lapakId','supplierId','totalBayar','konsinyasiIds','status'])) {
+      return { success:false, message:'Struktur sheet pendukung belum lengkap. Tidak ada transaksi yang ditulis.' };
+    }
     const setoranId = 'S' + Utilities.getUuid().slice(0, 8).toUpperCase() + Date.now();
-    setoranSheet.appendRow([setoranId, tgl, sess.lapakId, sess.id, totalTunai, totalQris, totalSistem, totalPengeluaran, expectedSetoran, uangDisetor, selisih, 'pending', '', '', String(payload.catatan || ''), '', false]);
-    const rows = details.map(d => ['D' + Utilities.getUuid().slice(0, 8).toUpperCase(), setoranId, d.katalogId, d.qtyDrop, d.qtySisa, d.qtyLaku, d.hargaJual, d.hargaBeli, d.subtotal, d.tipePelanggan]);
-    if (rows.length) detailSheet.getRange(detailSheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+    const journal = beginWriteJournal(['Setoran','SetoranDetail','BayarTitipanKaryawan','KartuStok','PengeluaranLapak','Konsinyasi']);
+    try {
+    appendObjectsByHeaders(setoranSheet, [{
+      id:setoranId, tanggal:tgl, lapakId:sess.lapakId, userId:sess.id,
+      totalTunai, totalQris, totalSistem, pengeluaran:totalPengeluaran,
+      expectedSetoran, uangDisetor, selisih, status:'pending',
+      approvedAt:'', approvedBy:'', catatan:String(payload.catatan || ''),
+      editHistory:'', locked:false, lapak:sess.lapakId, totalCash:totalTunai
+    }]);
+    const rows = details.map(d => ({
+      id:'D' + Utilities.getUuid().slice(0, 8).toUpperCase(), setoranId, katalogId:d.katalogId,
+      qtyDrop:d.qtyDrop, qtySisa:d.qtySisa, qtyLaku:d.qtyLaku,
+      sisa:d.qtySisa, terjual:d.qtyLaku, hargaJual:d.hargaJual,
+      hargaBeli:d.hargaBeli, subtotal:d.subtotal, tipePelanggan:d.tipePelanggan
+    }));
+    if (rows.length) appendObjectsByHeaders(detailSheet, rows);
 
     if (bayarTitipanHariIni.length) {
       const bayarSheet = ss.getSheetByName('BayarTitipanKaryawan');
@@ -1972,7 +2084,7 @@ function apiSubmitRekap(token, payload) {
         bayarTitipanHariIni.forEach(b => {
           for (let i = 1; i < bData.length; i++) {
             if (String(bData[i][bId]) === String(b.id)) {
-              if (bSetoran >= 0) bayarSheet.getRange(i + 1, bSetoran + 1).setValue(setoranId);
+              if (bSetoran >= 0) journalSetValue(journal, bayarSheet, i + 1, bSetoran + 1, setoranId);
               break;
             }
           }
@@ -1999,7 +2111,7 @@ function apiSubmitRekap(token, payload) {
           const draftData = konsinyasiSheet.getDataRange().getValues();
           const draftHeaders = draftData[0].map(x=>String(x).trim());
           const iDraftId=draftHeaders.indexOf('id'), iDraftSetoran=draftHeaders.indexOf('setoranId');
-          if(iDraftSetoran>=0) for(let ri=1;ri<draftData.length;ri++) if(String(draftData[ri][iDraftId])===String(existingDraft.id)){konsinyasiSheet.getRange(ri+1,iDraftSetoran+1).setValue(setoranId);break;}
+          if(iDraftSetoran>=0) for(let ri=1;ri<draftData.length;ri++) if(String(draftData[ri][iDraftId])===String(existingDraft.id)){journalSetValue(journal, konsinyasiSheet, ri+1, iDraftSetoran+1, setoranId);break;}
           return;
         }
         const hargaTitip = Number(k.hargaBeli) || 0;
@@ -2007,6 +2119,16 @@ function apiSubmitRekap(token, payload) {
         kRows.push(['KN' + Utilities.getUuid().slice(0, 8).toUpperCase(), new Date(), k.supplierId, sess.lapakId, d.katalogId, d.qtyLaku, hargaTitip, utang, 'Pending', '', '', '', setoranId, '']);
       });
       if (kRows.length) konsinyasiSheet.getRange(konsinyasiSheet.getLastRow() + 1, 1, kRows.length, kRows[0].length).setValues(kRows);
+    }
+    } catch (writeError) {
+      try {
+        rollbackWriteJournal(journal);
+      } catch (rollbackError) {
+        console.error('Gagal rollback submit rekap:', rollbackError.message);
+        return { success:false, message:'Penulisan transaksi gagal dan pemulihan otomatis tidak sepenuhnya berhasil. HENTIKAN transaksi lanjutan dan minta pemeriksaan admin. Detail: ' + writeError.message + ' | ' + rollbackError.message };
+      }
+      _clearSheetCache();
+      return { success:false, message:'Penulisan transaksi gagal. Perubahan pada transaksi ini telah dibatalkan: ' + writeError.message };
     }
     _clearSheetCache();
     const lapak = getSheetData('Lapak').find(l => String(l.id) === String(sess.lapakId)) || {};
@@ -2081,7 +2203,13 @@ function apiKaryawanBayarSupplier(token, payload) {
 
     // Feature A: TIDAK ada guard sudahSubmit — karyawan bisa bayar kapan saja
 
-    const ks = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Konsinyasi');
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ks = ss.getSheetByName('Konsinyasi');
+    const bayarSheet = ss.getSheetByName('BayarTitipanKaryawan');
+    if (!hasHeaders(ks, ['id','supplierId','lapakId','status','utang','bayarAt','bayarBy','catatan']) ||
+        !hasHeaders(bayarSheet, ['id','tanggal','lapakId','supplierId','userName','totalBayar','konsinyasiIds','setoranId','createdAt','catatan','noNota','metode','status'])) {
+      return { success:false, message:'Struktur sheet pembayaran titipan belum lengkap. Tidak ada perubahan yang dilakukan.' };
+    }
     const data = ks.getDataRange().getValues();
     const h = data[0];
     const iId = h.indexOf('id'), iSupplier = h.indexOf('supplierId');
@@ -2113,30 +2241,8 @@ function apiKaryawanBayarSupplier(token, payload) {
     const catatanText = String(payload.catatan || '').trim();
     const metode = ['Tunai','Transfer'].indexOf(payload.metode) !== -1 ? payload.metode : 'Tunai';
 
-    rowsToUpdate.forEach(r => {
-      ks.getRange(r, iStatus + 1).setValue('Bayar');
-      if (iBayarAt >= 0) ks.getRange(r, iBayarAt + 1).setValue(new Date());
-      if (iBayarBy >= 0) ks.getRange(r, iBayarBy + 1).setValue(sess.username);
-      if (iCatatan >= 0) {
-        const prev = String(ks.getRange(r, iCatatan + 1).getValue() || '');
-        let note = 'Bayar langsung oleh ' + sess.name;
-        if (noNota) note += ' (Nota: ' + noNota + ')';
-        note += ' [' + metode + ']';
-        if (catatanText) note += ' — ' + catatanText;
-        ks.getRange(r, iCatatan + 1).setValue((prev ? prev + ' | ' : '') + note);
-      }
-    });
-
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let bayarSheet = ss.getSheetByName('BayarTitipanKaryawan');
-    if (!bayarSheet) {
-      bayarSheet = ss.insertSheet('BayarTitipanKaryawan');
-      bayarSheet.getRange(1, 1, 1, 13).setValues([['id','tanggal','lapakId','supplierId','userName','totalBayar','konsinyasiIds','setoranId','createdAt','catatan','noNota','metode','status']]);
-      bayarSheet.setFrozenRows(1);
-    }
     const sup = getSheetData('Suppliers').find(s => String(s.id) === supplierId) || {};
     const bayarId = 'BT' + Utilities.getUuid().slice(0, 8).toUpperCase();
-
     const bh = bayarSheet.getRange(1, 1, 1, bayarSheet.getLastColumn()).getValues()[0];
     const newRow = bh.map(col => {
       switch (String(col).trim()) {
@@ -2156,7 +2262,31 @@ function apiKaryawanBayarSupplier(token, payload) {
         default: return '';
       }
     });
-    bayarSheet.appendRow(newRow);
+    const journal = beginWriteJournal(['Konsinyasi','BayarTitipanKaryawan']);
+    try {
+      rowsToUpdate.forEach(r => {
+        journalSetValue(journal, ks, r, iStatus + 1, 'Bayar');
+        if (iBayarAt >= 0) journalSetValue(journal, ks, r, iBayarAt + 1, new Date());
+        if (iBayarBy >= 0) journalSetValue(journal, ks, r, iBayarBy + 1, sess.username);
+        if (iCatatan >= 0) {
+          const prev = String(ks.getRange(r, iCatatan + 1).getValue() || '');
+          let note = 'Bayar langsung oleh ' + sess.name;
+          if (noNota) note += ' (Nota: ' + noNota + ')';
+          note += ' [' + metode + ']';
+          if (catatanText) note += ' — ' + catatanText;
+          journalSetValue(journal, ks, r, iCatatan + 1, (prev ? prev + ' | ' : '') + note);
+        }
+      });
+      bayarSheet.appendRow(newRow);
+    } catch (writeError) {
+      try { rollbackWriteJournal(journal); }
+      catch (rollbackError) {
+        console.error('Gagal rollback pembayaran titipan:', rollbackError.message);
+        return { success:false, message:'Pembayaran gagal dan pemulihan otomatis tidak sepenuhnya berhasil. Hentikan transaksi lanjutan dan minta pemeriksaan admin. Detail: ' + writeError.message + ' | ' + rollbackError.message };
+      }
+      _clearSheetCache();
+      return { success:false, message:'Pembayaran gagal. Perubahan telah dibatalkan: ' + writeError.message };
+    }
 
     _clearSheetCache();
 
@@ -2285,9 +2415,15 @@ function apiApproveSetoran(token, idSetoran) {
     const kasSheet = ss.getSheetByName('Kas');
     const data = setoranSheet.getDataRange().getValues();
     const h = data[0];
+    if (!hasHeaders(setoranSheet, ['id','status','uangDisetor','totalQris','lapakId','userId','tanggal','approvedAt','approvedBy'])) {
+      return { success:false, message:'Struktur Setoran lama belum mendukung persetujuan versi baru. Tidak ada perubahan yang dilakukan.' };
+    }
     const iId = h.indexOf('id'), iStatus = h.indexOf('status');
     const iUang = h.indexOf('uangDisetor'), iQris = h.indexOf('totalQris');
     const iLapak = h.indexOf('lapakId'), iAt = h.indexOf('approvedAt'), iBy = h.indexOf('approvedBy');
+    if (!hasHeaders(kasSheet, ['id','tanggal','keterangan','tipe','kategori','nominal','saldo'])) {
+      return { success:false, message:'Struktur Kas belum lengkap. Setoran tidak disetujui dan tidak ada perubahan.' };
+    }
     let rowIdx = -1, uangDisetor = 0, qris = 0, lapakId = '', userId = '', tanggal = '';
     for (let i = 1; i < data.length; i++) {
       if (String(data[i][iId]) === String(idSetoran)) {
@@ -2302,16 +2438,27 @@ function apiApproveSetoran(token, idSetoran) {
       }
     }
     if (rowIdx === -1) return { success: false, message: 'Setoran tidak ditemukan.' };
-    setoranSheet.getRange(rowIdx, iStatus + 1).setValue('approved');
-    if (iAt >= 0) setoranSheet.getRange(rowIdx, iAt + 1).setValue(new Date());
-    if (iBy >= 0) setoranSheet.getRange(rowIdx, iBy + 1).setValue(sess.username);
     const kasData = kasSheet.getDataRange().getValues();
     const iSaldo = kasData[0].indexOf('saldo');
     let saldo = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
     const newRows = [];
-    if (uangDisetor > 0) { saldo += uangDisetor; newRows.push(['KS' + Utilities.getUuid().slice(0, 8).toUpperCase(), new Date(), 'Setoran Tunai ' + lapakId, 'Masuk', 'Setoran', uangDisetor, saldo]); }
-    if (qris > 0) { saldo += qris; newRows.push(['KS' + Utilities.getUuid().slice(0, 8).toUpperCase(), new Date(), 'Setoran QRIS ' + lapakId, 'Masuk', 'Setoran', qris, saldo]); }
-    if (newRows.length) kasSheet.getRange(kasSheet.getLastRow() + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
+    if (uangDisetor > 0) { saldo += uangDisetor; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Setoran Tunai '+lapakId,tipe:'Masuk',kategori:'Setoran',nominal:uangDisetor,saldo}); }
+    if (qris > 0) { saldo += qris; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Setoran QRIS '+lapakId,tipe:'Masuk',kategori:'Setoran',nominal:qris,saldo}); }
+    const journal = beginWriteJournal(['Setoran','Kas']);
+    try {
+      journalSetValue(journal, setoranSheet, rowIdx, iStatus + 1, 'approved');
+      if (iAt >= 0) journalSetValue(journal, setoranSheet, rowIdx, iAt + 1, new Date());
+      if (iBy >= 0) journalSetValue(journal, setoranSheet, rowIdx, iBy + 1, sess.username);
+      if (newRows.length) appendObjectsByHeaders(kasSheet,newRows);
+    } catch (writeError) {
+      try { rollbackWriteJournal(journal); }
+      catch (rollbackError) {
+        console.error('Gagal rollback persetujuan setoran:', rollbackError.message);
+        return { success:false, message:'Persetujuan gagal dan pemulihan otomatis tidak sepenuhnya berhasil. Hentikan proses lanjutan dan minta pemeriksaan admin. Detail: ' + writeError.message + ' | ' + rollbackError.message };
+      }
+      _clearSheetCache();
+      return { success:false, message:'Persetujuan gagal. Perubahan telah dibatalkan: ' + writeError.message };
+    }
     _clearSheetCache();
     const user = getSheetData('Users').find(u => String(u.id) === String(userId));
     if (user && (user.email || user.username)) {
@@ -2326,6 +2473,7 @@ function apiRejectSetoran(token, idSetoran, reason) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Setoran');
   const data = sheet.getDataRange().getValues();
   const h = data[0];
+  if (!hasHeaders(sheet, ['id','status','catatan'])) return { success:false, message:'Struktur Setoran lama belum mendukung penolakan dengan catatan. Tidak ada perubahan yang dilakukan.' };
   const iId = h.indexOf('id'), iStatus = h.indexOf('status'), iCatatan = h.indexOf('catatan');
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][iId]) === String(idSetoran)) {
@@ -2346,6 +2494,9 @@ function apiEditSetoran(token, idSetoran, updates) {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Setoran');
     const data = sheet.getDataRange().getValues();
     const h = data[0];
+    if (!hasHeaders(sheet, ['id','status','totalTunai','totalQris','totalSistem','pengeluaran','expectedSetoran','selisih'])) {
+      return { success:false, message:'Struktur Setoran lama belum mendukung edit versi baru. Tidak ada perubahan yang dilakukan.' };
+    }
     const iId = h.indexOf('id'), iStatus = h.indexOf('status'), iEdit = h.indexOf('editHistory'), iLocked = h.indexOf('locked');
     for (let i = 1; i < data.length; i++) {
       if (String(data[i][iId]) === String(idSetoran)) {
@@ -2406,7 +2557,7 @@ function apiAddKas(token, item) {
     const iSaldo = data[0].indexOf('saldo');
     const saldoLama = data.length > 1 ? Number(data[data.length - 1][iSaldo]) || 0 : 0;
     const saldoBaru = tipe === 'Masuk' ? saldoLama + nominal : saldoLama - nominal;
-    sheet.appendRow(['KS' + Utilities.getUuid().slice(0, 8).toUpperCase(), new Date(), String(item.keterangan || ''), tipe, String(item.kategori || 'Lain'), nominal, saldoBaru]);
+    appendObjectsByHeaders(sheet, [{id:'KS' + Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:String(item.keterangan || ''),tipe,kategori:String(item.kategori || 'Lain'),nominal,saldo:saldoBaru}]);
     _clearSheetCache();
     return { success: true, message: 'Transaksi kas dicatat.' };
   } finally { lock.releaseLock(); }
@@ -2508,7 +2659,7 @@ function apiCheckBelanja(token, id, checked, hargaAktual) {
           const iSaldo = kasData[0].indexOf('saldo');
           const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
           const kasId = 'KS' + Utilities.getUuid().slice(0, 8).toUpperCase();
-          kasSheet.appendRow([kasId, new Date(), 'Belanja: ' + itemName, 'Keluar', 'Belanja', total, saldoLama - total]);
+          appendObjectsByHeaders(kasSheet,[{id:kasId,tanggal:new Date(),keterangan:'Belanja: '+itemName,tipe:'Keluar',kategori:'Belanja',nominal:total,saldo:saldoLama-total}]);
           sheet.getRange(i + 1, iChecked + 1).setValue(true);
           sheet.getRange(i + 1, iCheckedAt + 1).setValue(new Date());
           sheet.getRange(i + 1, iHA + 1).setValue(ha);
@@ -2745,7 +2896,7 @@ function apiBayarGaji(token, payload) {
     const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
     const kasId = 'KS' + Utilities.getUuid().slice(0, 8).toUpperCase();
     const uName = (getSheetData('Users').find(u => String(u.id) === String(userId)) || {}).name || userId;
-    if (gajiBersih > 0) kasSheet.appendRow([kasId, new Date(), 'Gaji ' + uName + ' (' + periode + ')', 'Keluar', 'Gaji', gajiBersih, saldoLama - gajiBersih]);
+    if (gajiBersih > 0) appendObjectsByHeaders(kasSheet,[{id:kasId,tanggal:new Date(),keterangan:'Gaji '+uName+' ('+periode+')',tipe:'Keluar',kategori:'Gaji',nominal:gajiBersih,saldo:saldoLama-gajiBersih}]);
     const gajiSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Gaji');
     const gajiId = 'G' + Utilities.getUuid().slice(0, 8).toUpperCase();
     gajiSheet.appendRow([gajiId, new Date(), userId, periode, gajiPokok, potonganKasbon, tunjangan, gajiBersih, gajiBersih > 0 ? kasId : '', String(payload.catatan || ''), sess.username]);
@@ -2788,7 +2939,7 @@ function apiBayarGajiBulk(token, payload) {
         const iSaldo = kasData[0].indexOf('saldo');
         const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
         kasId = 'KS' + Utilities.getUuid().slice(0, 8).toUpperCase();
-        kasSheet.appendRow([kasId, new Date(), 'Gaji ' + (userMap[userId] || userId) + ' (' + periode + ')', 'Keluar', 'Gaji', gajiBersih, saldoLama - gajiBersih]);
+        appendObjectsByHeaders(kasSheet,[{id:kasId,tanggal:new Date(),keterangan:'Gaji '+(userMap[userId]||userId)+' ('+periode+')',tipe:'Keluar',kategori:'Gaji',nominal:gajiBersih,saldo:saldoLama-gajiBersih}]);
       }
       const gajiId = 'G' + Utilities.getUuid().slice(0, 8).toUpperCase();
       gajiSheet.appendRow([gajiId, new Date(), userId, periode, gajiPokok, potonganKasbon, tunjangan + bonus, gajiBersih, kasId, String(it.catatan || ''), sess.username]);
@@ -3256,7 +3407,7 @@ function apiBayarPayroll(token, userId, bulan) {
     const iSaldo = kasData[0].indexOf('saldo');
     const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
     const kasId = 'KS' + Utilities.getUuid().slice(0, 8).toUpperCase();
-    if (totalBersih > 0) kasSheet.appendRow([kasId, new Date(), 'Payroll ' + user.userName + ' (' + bulan + ')', 'Keluar', 'Gaji', totalBersih, saldoLama - totalBersih]);
+    if (totalBersih > 0) appendObjectsByHeaders(kasSheet,[{id:kasId,tanggal:new Date(),keterangan:'Payroll '+user.userName+' ('+bulan+')',tipe:'Keluar',kategori:'Gaji',nominal:totalBersih,saldo:saldoLama-totalBersih}]);
     const rekapSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('RekapPayroll');
     const rekapId = 'RP' + Utilities.getUuid().slice(0, 8).toUpperCase();
     rekapSheet.appendRow([rekapId, bulan, user.userId, user.userName, JSON.stringify(user), totalBersih, totalBersih > 0 ? kasId : '', new Date(), sess.username]);
@@ -3467,7 +3618,7 @@ function apiBayarSupplier(token, payload) {
     const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
     const kasId = 'KS' + Utilities.getUuid().slice(0, 8).toUpperCase();
     const sup = getSheetData('Suppliers').find(s => String(s.id) === String(supplierId)) || {};
-    kasSheet.appendRow([kasId, new Date(), 'Bayar Supplier: ' + (sup.nama || supplierId) + ' (' + rowsToUpdate.length + ' transaksi)', 'Keluar', 'Konsinyasi', totalBayar, saldoLama - totalBayar]);
+    appendObjectsByHeaders(kasSheet,[{id:kasId,tanggal:new Date(),keterangan:'Bayar Supplier: '+(sup.nama||supplierId)+' ('+rowsToUpdate.length+' transaksi)',tipe:'Keluar',kategori:'Konsinyasi',nominal:totalBayar,saldo:saldoLama-totalBayar}]);
     rowsToUpdate.forEach(r => {
       sheet.getRange(r, iStatus + 1).setValue('Bayar');
       sheet.getRange(r, iKasId + 1).setValue(kasId);
@@ -3629,7 +3780,7 @@ function apiSavePesananPelanggan(token, payload) {
       const iSaldo = kasData[0].indexOf('saldo');
       const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
       kasIdDp = 'KS' + Utilities.getUuid().slice(0, 8).toUpperCase();
-      kasSheet.appendRow([kasIdDp, new Date(), 'DP Pesanan: ' + pelangganNama, 'Masuk', 'Pesanan-DP', dp, saldoLama + dp]);
+      appendObjectsByHeaders(kasSheet,[{id:kasIdDp,tanggal:new Date(),keterangan:'DP Pesanan: '+pelangganNama,tipe:'Masuk',kategori:'Pesanan-DP',nominal:dp,saldo:saldoLama+dp}]);
     }
     const row = [pesananId, payload.tanggal ? new Date(payload.tanggal) : new Date(), pelangganNama, String(payload.pelangganHp || ''), new Date(tanggalAmbil), jenisAmbil, metodeAmbil, String(payload.alamat || ''), String(payload.catatan || ''), totalSistem, dp, sisaBayar, metodeBayar, 'Dipesan', '', kasIdDp, '', payload.id ? payload.createdAt : new Date(), payload.id ? payload.createdBy : sess.username, new Date(), String(payload.pelangganEmail || '')];
     const data = pesananSheet.getDataRange().getValues();
@@ -3728,7 +3879,7 @@ function apiSelesaikanPesanan(token, id, payload) {
       const iSaldo = kasData[0].indexOf('saldo');
       const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
       kasIdLunas = 'KS' + Utilities.getUuid().slice(0, 8).toUpperCase();
-      kasSheet.appendRow([kasIdLunas, new Date(), 'Pelunasan Pesanan: ' + pelangganNama, 'Masuk', 'Pesanan-Lunas', sisaBayar, saldoLama + sisaBayar]);
+      appendObjectsByHeaders(kasSheet,[{id:kasIdLunas,tanggal:new Date(),keterangan:'Pelunasan Pesanan: '+pelangganNama,tipe:'Masuk',kategori:'Pesanan-Lunas',nominal:sisaBayar,saldo:saldoLama+sisaBayar}]);
     }
     let bonusId = existingBonus;
     if (metodeAmbil === 'Diantar' && payload.bonusAntar && payload.bonusAntar.userId && Number(payload.bonusAntar.nominal) > 0) {
