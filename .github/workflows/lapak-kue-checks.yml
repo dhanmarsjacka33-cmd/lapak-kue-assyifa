@@ -3,9 +3,7 @@ name: Lapak Kue - Automated Checks
 on:
   push:
     branches:
-      - main
-      - "test/**"
-      - "feat/**"
+      - 'fix/**'
   pull_request:
     branches:
       - main
