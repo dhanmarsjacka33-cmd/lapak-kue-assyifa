@@ -54,6 +54,7 @@ console.log('PASS: syntax and static regression checks');
 has(backend, /Pembayaran titipan tetap tercatat di BayarTitipanKaryawan[\s\S]*bukan pengeluaran modal\/operasional lapak/, 'Supplier consignment payment must remain outside operating expenses');
 has(backend, /totalTunai = Number\(data\[i\]\[iTunai\]\) \|\| 0/, 'Approval must post gross cash receipts, not net deposit');
 has(backend, /tipe:'Keluar',kategori:'Operasional Lapak',nominal:pengeluaranOperasional/, 'Approval must post operating expenses as a separate cash outflow');
+has(backend, /iStatus\] !== 'pending'.*Hanya setoran berstatus pending yang dapat disetujui/, 'Approval must only accept pending setoran');
 has(frontend, /Pembayaran titipan \(tidak mengurangi setoran\)/, 'Frontend must distinguish consignment payments from operating expenses');
 
 has(backend, /\['id','status','totalTunai','totalQris','pengeluaran','lapakId'/, 'Approval preflight must require gross cash and operating expense fields');
