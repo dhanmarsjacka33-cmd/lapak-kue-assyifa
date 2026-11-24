@@ -2432,12 +2432,12 @@ async function formEditSetoran(id) {
   if (s.locked) return toast('Setoran terkunci.', 'error');
   modal({
     title: 'Edit Setoran',
-    body: '<div class="field"><label>Total Tunai</label><input type="number" data-f="totalTunai" class="input" value="' + s.totalTunai + '"></div><div class="field"><label>Total QRIS</label><input type="number" data-f="totalQris" class="input" value="' + s.totalQris + '"></div><div class="field"><label>Pengeluaran</label><input type="number" data-f="pengeluaran" class="input" value="' + s.pengeluaran + '"></div><div class="field"><label>Uang Disetor</label><input type="number" data-f="uangDisetor" class="input" value="' + s.uangDisetor + '"></div><div class="field"><label>Catatan</label><textarea data-f="catatan" class="textarea">' + esc(s.catatan || '') + '</textarea></div>',
+    body: '<div class="field"><label>Total Tunai</label><input type="number" data-f="totalTunai" class="input" value="' + s.totalTunai + '"></div><div class="field"><label>Total QRIS</label><input type="number" data-f="totalQris" class="input" value="' + s.totalQris + '"></div><div class="field"><label>Pengeluaran</label><input type="number" data-f="pengeluaran" class="input" value="' + s.pengeluaran + '"></div><div class="field"><label>Catatan</label><textarea data-f="catatan" class="textarea">' + esc(s.catatan || '') + '</textarea></div>',
     actions: [
       { label: 'Batal', onClick: c => c() },
       { label: 'Simpan', className: 'btn-primary', onClick: async (c, w) => {
         const get = k => w.querySelector('[data-f="' + k + '"]').value;
-        const updates = { totalTunai: parseInt(get('totalTunai'), 10) || 0, totalQris: parseInt(get('totalQris'), 10) || 0, pengeluaran: parseInt(get('pengeluaran'), 10) || 0, uangDisetor: parseInt(get('uangDisetor'), 10) || 0, catatan: get('catatan') };
+        const updates = { totalTunai: parseInt(get('totalTunai'), 10) || 0, totalQris: parseInt(get('totalQris'), 10) || 0, pengeluaran: parseInt(get('pengeluaran'), 10) || 0, catatan: get('catatan') };
         c(); showLoader();
         try { const r = await api('editSetoran', { token: S.token, id, updates }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) { MEM.clear('setoran'); S.setoran = await api('getSetoranList', { token: S.token, filter: S._setoranFilter || {} }); } }
         catch (e) { toast(e.message, 'error'); }
