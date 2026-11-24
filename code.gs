@@ -2415,7 +2415,10 @@ function apiBatalBayarTitipan(token, bayarId) {
 //  ADMIN DASHBOARD & SETORAN
 // ============================================================
 function mapSetoran(s) {
-  return { id:s.id, tanggal: formatDate(s.tanggal), lapakId:s.lapakId, totalTunai: Number(s.totalTunai) || 0, totalQris: Number(s.totalQris) || 0, totalSistem: Number(s.totalSistem) || 0, pengeluaran: Number(s.pengeluaran) || 0, expectedSetoran: Number(s.expectedSetoran) || 0, uangDisetor: Number(s.uangDisetor) || 0, selisih: Number(s.selisih) || 0, status: s.status, catatan: s.catatan || '', locked: String(s.locked) === 'true' || s.locked === true, editHistory: s.editHistory || '' };
+  const totalTitipan = getSheetData('BayarTitipanKaryawan')
+    .filter(b => String(b.setoranId) === String(s.id) && String(b.status || 'Active') === 'Active')
+    .reduce((sum, b) => sum + (Number(b.totalBayar) || 0), 0);
+  return { id:s.id, tanggal: formatDate(s.tanggal), lapakId:s.lapakId, totalTunai: Number(s.totalTunai) || 0, totalQris: Number(s.totalQris) || 0, totalSistem: Number(s.totalSistem) || 0, pengeluaran: Number(s.pengeluaran) || 0, totalTitipan, expectedSetoran: Number(s.expectedSetoran) || 0, uangDisetor: Number(s.uangDisetor) || 0, selisih: Number(s.selisih) || 0, status: s.status, catatan: s.catatan || '', locked: String(s.locked) === 'true' || s.locked === true, editHistory: s.editHistory || '' };
 }
 function apiGetAdminDashboard(token) {
   requireRole(token, ['admin']);
@@ -3116,8 +3119,8 @@ function apiExportSetoranCSV(token, dari, sampai) {
   if (dari) filter.dari = dari;
   if (sampai) filter.sampai = sampai;
   const list = apiGetSetoranList(token, filter);
-  const rows = [['ID','Tanggal','Lapak','Tunai','QRIS','Total Sistem','Pengeluaran','Ekspektasi Setoran','Uang Disetor','Selisih','Status']];
-  list.forEach(s => rows.push([s.id, s.tanggal, s.lapakId, s.totalTunai, s.totalQris, s.totalSistem, s.pengeluaran, s.expectedSetoran, s.uangDisetor, s.selisih, s.status]));
+  const rows = [['ID','Tanggal','Lapak','Penjualan Tunai','QRIS Langsung Owner','Total Sistem','Pengeluaran Operasional','Pembayaran Titipan Supplier','Total Penerimaan Owner','Tunai Diserahkan Karyawan','Selisih','Status']];
+  list.forEach(s => rows.push([s.id, s.tanggal, s.lapakId, s.totalTunai, s.totalQris, s.totalSistem, s.pengeluaran, s.totalTitipan, s.expectedSetoran, s.uangDisetor, s.selisih, s.status]));
   const csv = rows.map(r => r.map(c => { const str = String(c); return /[",\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str; }).join(',')).join('\n');
   return { success: true, filename: 'Laporan_Setoran_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmm') + '.csv', content: csv };
 }
