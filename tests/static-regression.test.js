@@ -49,12 +49,18 @@ for (const sheet of requiredSheets) {
 
 console.log('PASS: syntax and static regression checks');
 
-// Accounting regression guards: supplier consignment payments are not operating expenses;
-// approval posts gross cash/QRIS inflows and a separate operating-expense outflow.
-has(backend, /Pembayaran titipan tetap tercatat di BayarTitipanKaryawan[\s\S]*bukan pengeluaran modal\/operasional lapak/, 'Supplier consignment payment must remain outside operating expenses');
-has(backend, /totalTunai = Number\(data\[i\]\[iTunai\]\) \|\| 0/, 'Approval must post gross cash receipts, not net deposit');
-has(backend, /tipe:'Keluar',kategori:'Operasional Lapak',nominal:pengeluaranOperasional/, 'Approval must post operating expenses as a separate cash outflow');
-has(frontend, /Pembayaran titipan \(tidak mengurangi setoran\)/, 'Frontend must distinguish consignment payments from operating expenses');
+// Accounting regression guards: QRIS is received directly by Owner; supplier payments
+// reduce the employee's cash handover and are posted separately from operating expenses.
+has(backend, /const totalTitipan = bayarTitipanHariIni\.filter\(b => String\(b\.metode \|\| 'Tunai'\) === 'Tunai'\)\.reduce/, 'Submit must total cash supplier payments linked to the settlement');
+has(backend, /if \(uangDisetor < 0\)/, 'Submit must reject cash outflows greater than cash sales');
+has(backend, /metode !== 'Tunai'/, 'Supplier payments must use cash from the employee-held sales proceeds');
+has(backend, /if\(tunaiDiserahkan<0\)/, 'Admin edits must reject negative cash handovers');
+has(backend, /const uangDisetor = totalTunai - totalTitipan - totalPengeluaran/, 'Employee cash handover must deduct supplier payments and operating expenses');
+has(backend, /kategori:'Pembayaran Titipan Supplier',nominal:totalTitipan/, 'Supplier payments must post as a distinct cash outflow');
+has(backend, /kategori:'Operasional Lapak',nominal:pengeluaranOperasional/, 'Operating expenses must post as a separate cash outflow');
+has(frontend, /Tunai — dari uang penjualan lapak/, 'Supplier payment form must clearly state cash-only settlement');
+has(frontend, /QRIS langsung ke Owner/, 'Frontend must explain that QRIS goes directly to Owner');
+has(frontend, /Tunai yang diserahkan karyawan/, 'Frontend must show net cash handed over by employee');
 
 has(backend, /\['id','status','totalTunai','totalQris','pengeluaran','lapakId'/, 'Approval preflight must require gross cash and operating expense fields');
 if (/data-f="uangDisetor"/.test(frontend)) throw new Error('Admin edit form must not expose legacy net-deposit field when ledger uses gross cash and separate expenses');
