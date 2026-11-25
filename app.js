@@ -707,7 +707,7 @@ function tabHome() {
   html += `<div class="row" style="gap:8px;margin-bottom:16px"><button class="btn btn-ghost btn-block" data-act="tab" data-tab="analisis-performa">${ico('pie-chart','ico-sm')} Analisis</button></div>
     <h3 class="card-title">${ico('wallet')} Kas Terbaru</h3>`;
   if (!d.recentKas || !d.recentKas.length) html += '<div class="empty">' + ico('inbox','ico') + '<p>Belum ada transaksi</p></div>';
-  else html += d.recentKas.map(k => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(k.keterangan)}</div><div class="list-item-sub">${esc(k.tanggal)}</div></div><div class="text-right"><div class="text-sm font-bold ${k.tipe === 'Masuk' ? 'text-green' : 'text-red'}">${k.tipe === 'Masuk' ? '+' : '-'} ${fmtRp(k.nominal)}</div><div class="text-xs text-gray">${fmtRp(k.saldo)}</div></div></div>`).join('');
+  else html += d.recentKas.map(k => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(k.keterangan)}</div><div class="list-item-sub">${esc(k.tanggal)}${k.metode ? ' · ' + esc(k.metode) : ''}</div></div><div class="text-right"><div class="text-sm font-bold ${k.tipe === 'Masuk' ? 'text-green' : 'text-red'}">${k.tipe === 'Masuk' ? '+' : '-'} ${fmtRp(k.nominal)}</div><div class="text-xs text-gray">${fmtRp(k.saldo)}</div></div></div>`).join('');
   return html;
 }
 
@@ -722,7 +722,7 @@ function tabKas() {
     <div class="hero"><div class="hero-label">Saldo Saat Ini</div><div class="hero-value">${fmtRp(d.kasBesar)}</div></div>`;
   if (!all.length) html += '<div class="empty">' + ico('inbox','ico') + '<p>Belum ada transaksi</p></div>';
   else {
-    html += p.items.map(k => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(k.keterangan)}</div><div class="list-item-sub">${esc(k.tanggal)}</div></div><div class="text-right"><div class="text-sm font-bold ${k.tipe === 'Masuk' ? 'text-green' : 'text-red'}">${k.tipe === 'Masuk' ? '+' : '-'} ${fmtRp(k.nominal)}</div><div class="text-xs text-gray">${fmtRp(k.saldo)}</div></div></div>`).join('');
+    html += p.items.map(k => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(k.keterangan)}</div><div class="list-item-sub">${esc(k.tanggal)}${k.metode ? ' · ' + esc(k.metode) : ''}</div></div><div class="text-right"><div class="text-sm font-bold ${k.tipe === 'Masuk' ? 'text-green' : 'text-red'}">${k.tipe === 'Masuk' ? '+' : '-'} ${fmtRp(k.nominal)}</div><div class="text-xs text-gray">${fmtRp(k.saldo)}</div></div></div>`).join('');
     html += paginationFooter(p, 'kas-page');
   }
   return html;
