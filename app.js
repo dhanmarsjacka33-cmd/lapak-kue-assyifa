@@ -750,7 +750,7 @@ function tabSetoran() {
         <div class="card-flat" style="padding:12px;font-size:13px">
           <div class="row-between"><span class="text-gray">Penjualan</span><strong>${fmtRp(s.totalSistem)}</strong></div>
           <div class="row-between text-gray"><span>Tunai</span><span>${fmtRp(s.totalTunai)}</span></div>
-          <div class="row-between text-gray"><span>QRIS langsung ke Owner</span><span>${fmtRp(s.totalQris)}</span></div>
+          <div class="row-between text-gray"><span>QRIS</span><span>${fmtRp(s.totalQris)}</span></div><div class="row-between text-gray"><span>Transfer</span><span>${fmtRp(s.totalTransfer || 0)}</span></div>
           <div class="row-between text-red"><span>Pengeluaran operasional</span><span>- ${fmtRp(s.pengeluaran)}</span></div>
           <div class="row-between text-gray"><span>Pembayaran titipan supplier</span><span>- ${fmtRp(s.totalTitipan)}</span></div>
           <div class="row-between text-gray"><span>Tunai diserahkan karyawan</span><span>${fmtRp(s.uangDisetor)}</span></div>
