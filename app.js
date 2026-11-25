@@ -1544,7 +1544,7 @@ function handleInput(e) {
   const t = e.target;
   if (t.dataset.katalogSearch !== undefined) {
     const q = String(t.value || '').trim().toLocaleLowerCase('id-ID');
-    const rows = $('[data-katalog-row]');
+    const rows = $$('[data-katalog-row]');
     let visible = 0;
     rows.forEach(row => {
       const match = !q || String(row.dataset.search || '').includes(q);
