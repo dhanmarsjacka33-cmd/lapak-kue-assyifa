@@ -956,7 +956,7 @@ function buildBootstrapData(user) {
     const todayPenjualan = todaySetoran.reduce((s, x) => s + (Number(x.totalSistem) || 0), 0);
     const todayTunai = todaySetoran.reduce((s, x) => s + (Number(x.totalTunai) || 0), 0);
     const todayQris = todaySetoran.reduce((s, x) => s + (Number(x.totalQris) || 0), 0);
-    const recentKas = kas.slice(-10).reverse().map(k => ({ tanggal: formatDateTime(k.tanggal), keterangan: k.keterangan || '', tipe: k.tipe || '', nominal: Number(k.nominal) || 0, saldo: Number(k.saldo) || 0 }));
+    const recentKas = kas.slice(-10).reverse().map(k => ({ tanggal: formatDateTime(k.tanggal), keterangan: k.keterangan || '', tipe: k.tipe || '', metode: k.metode || '', kategori: k.kategori || '', nominal: Number(k.nominal) || 0, saldo: Number(k.saldo) || 0 }));
     const unreadNotif = getSheetData('Notifikasi').filter(n => n.status === 'unread').length;
     const utangKonsinyasi = getSheetData('Konsinyasi').filter(k => k.status === 'Pending').reduce((s, k) => s + (Number(k.utang) || 0), 0);
     const todayPesanan = getSheetData('PesananPelanggan').filter(p => formatDate(p.tanggalAmbil) === tgl || formatDate(p.tanggal) === tgl);
@@ -2484,7 +2484,8 @@ function apiGetAdminDashboard(token) {
   const unreadNotif = getSheetData('Notifikasi').filter(n => n.status === 'unread').length;
   const utangKonsinyasi = getSheetData('Konsinyasi').filter(k => k.status === 'Pending').reduce((s, k) => s + (Number(k.utang) || 0), 0);
   const todayPesanan = getSheetData('PesananPelanggan').filter(p => formatDate(p.tanggalAmbil) === tgl || formatDate(p.tanggal) === tgl);
-  return { kasBesar:saldoKas, pendingCount:pending.length, pendingSetoran:pending.map(mapSetoran), todayPenjualan, todayTunai, todayQris, todaySetoranCount: todaySetoran.length, recentKas, unreadNotif, utangKonsinyasi, todayPesananCount: todayPesanan.length };
+  const todayTransfer = todaySetoran.reduce((s, x) => s + (Number(x.totalTransfer) || 0), 0);
+  return { kasBesar:saldoKas, pendingCount:pending.length, pendingSetoran:pending.map(mapSetoran), todayPenjualan, todayTunai, todayQris, todayTransfer, todaySetoranCount: todaySetoran.length, recentKas, unreadNotif, utangKonsinyasi, todayPesananCount: todayPesanan.length };
 }
 function apiGetSetoranList(token, filter) {
   requireRole(token, ['admin']);
@@ -3147,7 +3148,7 @@ function apiRekapPesanan(token, filter) {
   requireRole(token, ['admin']);
   filter = filter || {};
   const dari = filter.dari ? new Date(filter.dari) : new Date(Date.now() - 30 * 86400000);
-  const sampai = filter.sampai ? new Date(new Date(filter.sampai).getTime() + 86400000) : new Date();
+  const sampai = filter.sampai ? new Date(filter.sampai) : new Date();
   const fromMs = dari.getTime(), toMs = sampai.getTime();
   const supMap = {}; getSheetData('Suppliers').forEach(s => supMap[s.id] = s.nama);
   const all = getSheetData('Pesanan').filter(p => {
