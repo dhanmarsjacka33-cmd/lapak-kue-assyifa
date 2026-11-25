@@ -645,7 +645,7 @@ function renderRekapForm(d) {
         <p class="text-xs font-semibold mb-2">Total Penerimaan</p>
         <div class="form-grid">
           <div class="field"><label>Tunai (Rp)</label><input type="number" name="tunai" min="0" inputmode="numeric" class="input field-sm"></div>
-          <div class="field"><label>QRIS (Rp)</label><input type="number" name="qris" min="0" inputmode="numeric" class="input field-sm"></div>
+          <div class="field"><label>QRIS (Rp)</label><input type="number" name="qris" min="0" inputmode="numeric" class="input field-sm"></div><div class="field"><label>Transfer (Rp)</label><input type="number" name="transfer" min="0" inputmode="numeric" class="input field-sm"></div>
         </div>
       </div>
       <div class="alert alert-info" data-summary>${summaryHTML()}</div>
@@ -661,16 +661,17 @@ function summaryHTML() {
   $$('[data-peng-row]').forEach(r => { const el = r.querySelector('[data-peng-nom]'); if (el) pengeluaran += parseInt(el.value, 10) || 0; });
   const tk = S.titipanKaryawan || {};
   const totalTitipan = (tk.sudahBayar || []).filter(x => !x.setoranId).reduce((s, x) => s + (x.total || 0), 0);
-  const tunaiEl = $('input[name="tunai"]'), qrisEl = $('input[name="qris"]');
+  const tunaiEl = $('input[name="tunai"]'), qrisEl = $('input[name="qris"]'), transferEl = $('input[name="transfer"]');
   const tunai = tunaiEl ? (parseInt(tunaiEl.value, 10) || 0) : 0;
   const qris = qrisEl ? (parseInt(qrisEl.value, 10) || 0) : 0;
+  const transfer = transferEl ? (parseInt(transferEl.value, 10) || 0) : 0;
   const tunaiDiserahkan = tunai - pengeluaran - totalTitipan;
-  const expected = tunaiDiserahkan + qris;
-  const selisih = total - (tunai + qris);
+  const expected = tunaiDiserahkan + qris + transfer;
+  const selisih = total - (tunai + qris + transfer);
   return `<div style="flex:1">
     <div class="row-between text-xs"><span>Penjualan</span><strong>${fmtRp(total)}</strong></div>
     <div class="row-between text-xs"><span>Tunai dipegang karyawan</span><span>${fmtRp(tunai)}</span></div>
-    <div class="row-between text-xs"><span>QRIS langsung ke Owner</span><span>${fmtRp(qris)}</span></div>
+    <div class="row-between text-xs"><span>QRIS</span><span>${fmtRp(qris)}</span></div><div class="row-between text-xs"><span>Transfer</span><span>${fmtRp(transfer)}</span></div>
     ${totalTitipan > 0 ? `<div class="row-between text-xs text-gray"><span>Pembayaran titipan supplier (arus kas keluar)</span><span>- ${fmtRp(totalTitipan)}</span></div>` : ''}
     <div class="row-between text-xs text-red"><span>Pengeluaran operasional</span><span>- ${fmtRp(pengeluaran)}</span></div>
     <div class="row-between text-xs text-green font-bold mt-2"><span>Tunai yang diserahkan karyawan</span><span>${fmtRp(tunaiDiserahkan)}</span></div>
@@ -1885,7 +1886,7 @@ async function doSubmitRekap() {
   if (!ok) return;
   S.submitting = true;
   showLoader();
-  try { const r = await api('submitRekap', { token: S.token, payload: { tanggal: d.tanggal, items, pengeluaran, totalTunai: tunai, totalQris: qris } }); toast(r.message || 'Laporan terkirim', r.success ? 'success' : 'error'); if (r.success) await reloadKaryawan(); }
+  try { const r = await api('submitRekap', { token: S.token, payload: { tanggal: d.tanggal, items, pengeluaran, totalTunai: tunai, totalQris: qris, totalTransfer: (parseInt(($('input[name="transfer"]')||{}).value,10)||0) } }); toast(r.message || 'Laporan terkirim', r.success ? 'success' : 'error'); if (r.success) await reloadKaryawan(); }
   catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); S.submitting = false; render(); }
 }
@@ -2437,12 +2438,12 @@ async function formEditSetoran(id) {
   if (s.locked) return toast('Setoran terkunci.', 'error');
   modal({
     title: 'Edit Setoran',
-    body: '<div class="field"><label>Total Tunai</label><input type="number" data-f="totalTunai" class="input" value="' + s.totalTunai + '"></div><div class="field"><label>Total QRIS</label><input type="number" data-f="totalQris" class="input" value="' + s.totalQris + '"></div><div class="field"><label>Pengeluaran</label><input type="number" data-f="pengeluaran" class="input" value="' + s.pengeluaran + '"></div><div class="field"><label>Catatan</label><textarea data-f="catatan" class="textarea">' + esc(s.catatan || '') + '</textarea></div>',
+    body: '<div class="field"><label>Total Tunai</label><input type="number" data-f="totalTunai" class="input" value="' + s.totalTunai + '"></div><div class="field"><label>Total QRIS</label><input type="number" data-f="totalQris" class="input" value="' + s.totalQris + '"></div><div class="field"><label>Total Transfer</label><input type="number" data-f="totalTransfer" class="input" value="' + (s.totalTransfer || 0) + '"></div><div class="field"><label>Pengeluaran</label><input type="number" data-f="pengeluaran" class="input" value="' + s.pengeluaran + '"></div><div class="field"><label>Catatan</label><textarea data-f="catatan" class="textarea">' + esc(s.catatan || '') + '</textarea></div>',
     actions: [
       { label: 'Batal', onClick: c => c() },
       { label: 'Simpan', className: 'btn-primary', onClick: async (c, w) => {
         const get = k => w.querySelector('[data-f="' + k + '"]').value;
-        const updates = { totalTunai: parseInt(get('totalTunai'), 10) || 0, totalQris: parseInt(get('totalQris'), 10) || 0, pengeluaran: parseInt(get('pengeluaran'), 10) || 0, catatan: get('catatan') };
+        const updates = { totalTunai: parseInt(get('totalTunai'), 10) || 0, totalQris: parseInt(get('totalQris'), 10) || 0, totalTransfer: parseInt(get('totalTransfer'), 10) || 0, pengeluaran: parseInt(get('pengeluaran'), 10) || 0, catatan: get('catatan') };
         c(); showLoader();
         try { const r = await api('editSetoran', { token: S.token, id, updates }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) { MEM.clear('setoran'); S.setoran = await api('getSetoranList', { token: S.token, filter: S._setoranFilter || {} }); } }
         catch (e) { toast(e.message, 'error'); }
