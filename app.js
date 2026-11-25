@@ -1571,7 +1571,7 @@ function applyKatalogFilter() {
   const input = $('[data-katalog-search]');
   const q = String(input ? input.value : '').trim().toLocaleLowerCase('id-ID');
   const selected = S._katalogSupplierFilter || [];
-  const rows = $('[data-katalog-row]');
+  const rows = Array.from(document.querySelectorAll('[data-katalog-row]'));
   let visible = 0;
   rows.forEach(row => {
     const textMatch = !q || String(row.dataset.search || '').includes(q);
