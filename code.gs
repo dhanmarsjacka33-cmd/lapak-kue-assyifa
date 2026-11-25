@@ -2346,12 +2346,12 @@ function apiKaryawanBayarSupplier(token, payload) {
     const journal=beginWriteJournal(['Konsinyasi','BayarTitipanKaryawan']);
     try {
       allocations.forEach(item=>{
+        journalSetValue(journal,ks,item.row,iUtang+1,item.remaining);
         if(item.remaining<=0){
           journalSetValue(journal,ks,item.row,iStatus+1,'Bayar');
           if(iBayarAt>=0)journalSetValue(journal,ks,item.row,iBayarAt+1,new Date());
           if(iBayarBy>=0)journalSetValue(journal,ks,item.row,iBayarBy+1,sess.username);
         } else {
-          journalSetValue(journal,ks,item.row,iUtang+1,item.remaining);
           journalSetValue(journal,ks,item.row,iStatus+1,'Pending');
         }
         if(iCatatan>=0){
