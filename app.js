@@ -3181,13 +3181,15 @@ async function formBayarSupplier(supplierId) {
     body += '<p class="text-xs font-semibold text-gray mb-2">Rincian</p><div style="max-height:300px;overflow-y:auto">';
     body += detail.items.map(it => '<div class="row-between text-xs" style="padding:8px 0;border-bottom:1px solid #f8fafc"><div style="min-width:0;flex:1"><div class="font-semibold">' + esc(it.nama) + '</div><div class="text-gray">' + esc(it.tanggal) + ' · ' + esc(it.lapakNama) + '</div><div class="text-gray">' + it.qtyLaku + ' × ' + fmtRp(it.hargaTitip) + '</div></div><div class="text-right font-bold">' + fmtRp(it.utang) + '</div></div>').join('');
     body += '</div>';
+    body += '<div class="field mt-3"><label>Metode Pembayaran</label><select data-f="metode" class="select"><option value="Tunai">Tunai</option><option value="QRIS">QRIS</option><option value="Transfer">Transfer</option></select></div>';
     modal({
       title: 'Bayar Supplier', body,
       actions: [
         { label: 'Batal', onClick: c => c() },
-        { label: 'Bayar ' + fmtRp(detail.total), className: 'btn-success', onClick: async (c) => {
+        { label: 'Bayar ' + fmtRp(detail.total), className: 'btn-success', onClick: async (c, w) => {
+          const metode = w.querySelector('[data-f="metode"]').value;
           c(); showLoader();
-          try { const r = await api('bayarSupplier', { token: S.token, payload: { supplierId } }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) { await loadKonsinyasi(); S.dash = await api('getAdminDashboard', { token: S.token }); MEM.clear(); } }
+          try { const r = await api('bayarSupplier', { token: S.token, payload: { supplierId, metode } }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) { await loadKonsinyasi(); S.dash = await api('getAdminDashboard', { token: S.token }); MEM.clear(); } }
           catch (e) { toast(e.message, 'error'); }
           finally { hideLoader(); render(); }
         } }
