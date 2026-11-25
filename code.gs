@@ -956,7 +956,7 @@ function buildBootstrapData(user) {
     const todayPenjualan = todaySetoran.reduce((s, x) => s + (Number(x.totalSistem) || 0), 0);
     const todayTunai = todaySetoran.reduce((s, x) => s + (Number(x.totalTunai) || 0), 0);
     const todayQris = todaySetoran.reduce((s, x) => s + (Number(x.totalQris) || 0), 0);
-    const recentKas = kas.slice(-10).reverse().map(k => ({ tanggal: formatDateTime(k.tanggal), keterangan: k.keterangan || '', tipe: k.tipe || '', metode: k.metode || ((String(k.keterangan || '').match(/\\[(Tunai|QRIS|Transfer)\\]\\s*$/i) || [])[1] || ''), kategori: k.kategori || '', nominal: Number(k.nominal) || 0, saldo: Number(k.saldo) || 0 }));
+    const recentKas = kas.slice(-10).reverse().map(k => ({ tanggal: formatDateTime(k.tanggal), keterangan: k.keterangan || '', tipe: k.tipe || '', metode: k.metode || ((String(k.keterangan || '').match(/\[(Tunai|QRIS|Transfer)\]\s*$/i) || [])[1] || ''), kategori: k.kategori || '', nominal: Number(k.nominal) || 0, saldo: Number(k.saldo) || 0 }));
     const unreadNotif = getSheetData('Notifikasi').filter(n => n.status === 'unread').length;
     const utangKonsinyasi = getSheetData('Konsinyasi').filter(k => k.status === 'Pending').reduce((s, k) => s + (Number(k.utang) || 0), 0);
     const todayPesanan = getSheetData('PesananPelanggan').filter(p => formatDate(p.tanggalAmbil) === tgl || formatDate(p.tanggal) === tgl);
@@ -2687,7 +2687,7 @@ function apiEditSetoran(token, idSetoran, updates) {
 // ============================================================
 function apiGetKas(token, limit) {
   requireRole(token, ['admin']);
-  const kas = getSheetData('Kas').map(k => ({ id:k.id, tanggal:formatDateTime(k.tanggal), keterangan:k.keterangan || '', tipe:k.tipe || '', kategori:k.kategori || '', metode:k.metode || ((String(k.keterangan || '').match(/\\[(Tunai|QRIS|Transfer)\\]\\s*$/i) || [])[1] || ''), nominal:Number(k.nominal) || 0, saldo:Number(k.saldo) || 0 }));
+  const kas = getSheetData('Kas').map(k => ({ id:k.id, tanggal:formatDateTime(k.tanggal), keterangan:k.keterangan || '', tipe:k.tipe || '', kategori:k.kategori || '', metode:k.metode || ((String(k.keterangan || '').match(/\[(Tunai|QRIS|Transfer)\]\s*$/i) || [])[1] || ''), nominal:Number(k.nominal) || 0, saldo:Number(k.saldo) || 0 }));
   if (limit) return kas.slice(-limit).reverse();
   return kas.reverse();
 }
@@ -3799,7 +3799,7 @@ function apiGetRiwayatBayarSupplier(token, filter) {
   getSheetData('Konsinyasi').forEach(k => {
     if (k.status !== 'Bayar') return;
     const key = String(k.kasId) + '_' + String(k.supplierId);
-    if (!grouped[key]) grouped[key] = { kasId: k.kasId, supplierId: k.supplierId, supplierNama: supMap[k.supplierId] || k.supplierId, bayarAt: k.bayarAt instanceof Date ? Utilities.formatDate(k.bayarAt, Session.getScriptTimeZone(), 'dd MMM yyyy HH:mm') : String(k.bayarAt || ''), bayarBy: k.bayarBy || '', metode: (kasMap[String(k.kasId)] || {}).metode || ((String((kasMap[String(k.kasId)] || {}).keterangan || '').match(/\\[(Tunai|QRIS|Transfer)\\]\\s*$/i) || [])[1] || ''), total: 0, count: 0 };
+    if (!grouped[key]) grouped[key] = { kasId: k.kasId, supplierId: k.supplierId, supplierNama: supMap[k.supplierId] || k.supplierId, bayarAt: k.bayarAt instanceof Date ? Utilities.formatDate(k.bayarAt, Session.getScriptTimeZone(), 'dd MMM yyyy HH:mm') : String(k.bayarAt || ''), bayarBy: k.bayarBy || '', metode: (kasMap[String(k.kasId)] || {}).metode || ((String((kasMap[String(k.kasId)] || {}).keterangan || '').match(/\[(Tunai|QRIS|Transfer)\]\s*$/i) || [])[1] || ''), total: 0, count: 0 };
     grouped[key].total += Number(k.utang) || 0;
     grouped[key].count++;
   });
