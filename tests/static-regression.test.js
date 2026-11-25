@@ -19,6 +19,13 @@ has(backend, /match\(\/\\\\\[\(Tunai\|QRIS\|Transfer\)\\\\\]\\\\s\*\$\/i\)/, 'Da
 has(backend, /DRAFT_REKAP\|/, 'Draft marker must be present in backend');
 has(frontend, /prepare-rekap-draft/, 'Frontend must expose prepare-draft action');
 has(frontend, /data-drop-search/, 'Frontend must include product search');
+// Catalog live-search regression guards.
+has(frontend, /data-katalog-search/, 'Catalog must expose a product search input');
+has(frontend, /data-katalog-row/, 'Catalog products must expose searchable rows');
+has(frontend, /const rows = \\$\\$\\('\[data-katalog-row\]'\)/, 'Catalog search must query all product rows');
+has(frontend, /data-katalog-count/, 'Catalog search must update visible result count');
+has(frontend, /data-katalog-empty/, 'Catalog search must show an empty state when no products match');
+
 has(config, /API_URL\s*:/, 'Frontend API URL must be configurable');
 
 // Transaction-safety regression guards for the fixes in this PR.
