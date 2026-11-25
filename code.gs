@@ -2288,118 +2288,94 @@ function apiGetTitipanKaryawan(token) {
 function apiKaryawanBayarSupplier(token, payload) {
   const sess = requireRole(token, ['karyawan']);
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success: false, message: 'Sistem sibuk. Coba lagi.' };
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success:false, message:'Sistem sibuk. Coba lagi.' };
   try {
+    payload = payload || {};
     const supplierId = String(payload.supplierId || '').trim();
-    if (!supplierId) return { success: false, message: 'Supplier wajib dipilih.' };
-    const lapakId = sess.lapakId;
-    const tgl = todayStr();
-    if (isPeriodeLocked(tgl)) return { success: false, message: 'Periode ini terkunci.' };
-
-    // Feature A: TIDAK ada guard sudahSubmit — karyawan bisa bayar kapan saja
-
+    if (!supplierId) return { success:false, message:'Supplier wajib dipilih.' };
+    const lapakId = sess.lapakId, tgl = todayStr();
+    if (isPeriodeLocked(tgl)) return { success:false, message:'Periode ini terkunci.' };
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const ks = ss.getSheetByName('Konsinyasi');
-    const bayarSheet = ss.getSheetByName('BayarTitipanKaryawan');
+    const ks = ss.getSheetByName('Konsinyasi'), bayarSheet = ss.getSheetByName('BayarTitipanKaryawan');
     if (!hasHeaders(ks, ['id','supplierId','lapakId','status','utang','bayarAt','bayarBy','catatan']) ||
         !hasHeaders(bayarSheet, ['id','tanggal','lapakId','supplierId','userName','totalBayar','konsinyasiIds','setoranId','createdAt','catatan','noNota','metode','status'])) {
-      return { success:false, message:'Struktur sheet pembayaran titipan belum lengkap. Tidak ada perubahan yang dilakukan.' };
+      return {success:false,message:'Struktur sheet pembayaran titipan belum lengkap. Tidak ada perubahan yang dilakukan.'};
     }
-    const data = ks.getDataRange().getValues();
-    const h = data[0];
-    const iId = h.indexOf('id'), iSupplier = h.indexOf('supplierId');
-    const iLapak = h.indexOf('lapakId'), iStatus = h.indexOf('status');
-    const iUtang = h.indexOf('utang'), iBayarAt = h.indexOf('bayarAt');
-    const iBayarBy = h.indexOf('bayarBy'), iCatatan = h.indexOf('catatan');
-
-    // Feature B: filter by selected konsinyasiIds (kalau ada)
-    const selectedIds = Array.isArray(payload.konsinyasiIds) ? payload.konsinyasiIds.map(String) : [];
-    const useFilter = selectedIds.length > 0;
-    const selectedSet = {};
-    selectedIds.forEach(id => { selectedSet[id] = true; });
-
-    const rowsToUpdate = [];
-    const konsinyasiIds = [];
-    let totalBayar = 0;
-    for (let i = 1; i < data.length; i++) {
-      if (String(data[i][iSupplier]) !== supplierId) continue;
-      if (String(data[i][iLapak]) !== String(lapakId)) continue;
-      if (data[i][iStatus] !== 'Pending') continue;
-      if (useFilter && !selectedSet[String(data[i][iId])]) continue;
-      totalBayar += Number(data[i][iUtang]) || 0;
-      rowsToUpdate.push(i + 1);
-      konsinyasiIds.push(data[i][iId]);
+    const data = ks.getDataRange().getValues(), h = data[0].map(x => String(x).trim());
+    const iId=h.indexOf('id'), iSupplier=h.indexOf('supplierId'), iLapak=h.indexOf('lapakId');
+    const iStatus=h.indexOf('status'), iUtang=h.indexOf('utang'), iBayarAt=h.indexOf('bayarAt');
+    const iBayarBy=h.indexOf('bayarBy'), iCatatan=h.indexOf('catatan');
+    const pendingRows=[]; let totalUtang=0;
+    for (let i=1;i<data.length;i++) {
+      if (String(data[i][iSupplier])!==supplierId || String(data[i][iLapak])!==String(lapakId) || String(data[i][iStatus])!=='Pending') continue;
+      const outstanding=Math.max(0,Number(data[i][iUtang])||0);
+      if (!outstanding) continue;
+      pendingRows.push({row:i+1,id:String(data[i][iId]),outstanding});
+      totalUtang+=outstanding;
     }
-    if (totalBayar <= 0) return { success: false, message: 'Tidak ada utang pending yang dipilih.' };
+    if (totalUtang<=0) return {success:false,message:'Tidak ada utang pending untuk supplier ini.'};
+    const nominalBayar=Number(payload.nominalBayar);
+    if (!Number.isSafeInteger(nominalBayar)||nominalBayar<=0||nominalBayar>totalUtang)
+      return {success:false,message:'Nominal pembayaran harus angka bulat lebih dari 0 dan tidak melebihi sisa utang '+fmtRpLocal(totalUtang)+'.'};
+    const metode=String(payload.metode||'Tunai');
+    if (metode !== 'Tunai') return {success:false,message:'Pembayaran titipan lapak harus dicatat Tunai karena dibayarkan dari uang penjualan yang dipegang karyawan.'};
 
-    const noNota = String(payload.noNota || '').trim();
-    const catatanText = String(payload.catatan || '').trim();
-    const metode = String(payload.metode || 'Tunai');
-    if (metode !== 'Tunai') return { success:false, message:'Pembayaran titipan lapak harus dicatat Tunai karena dibayarkan dari uang penjualan yang dipegang karyawan.' };
-
-    const sup = getSheetData('Suppliers').find(s => String(s.id) === supplierId) || {};
-    const bayarId = 'BT' + Utilities.getUuid().slice(0, 8).toUpperCase();
-    const bh = bayarSheet.getRange(1, 1, 1, bayarSheet.getLastColumn()).getValues()[0];
-    const newRow = bh.map(col => {
-      switch (String(col).trim()) {
-        case 'id': return bayarId;
-        case 'tanggal': return new Date(tgl);
-        case 'lapakId': return lapakId;
-        case 'supplierId': return supplierId;
-        case 'userName': return sess.username;
-        case 'totalBayar': return totalBayar;
-        case 'konsinyasiIds': return konsinyasiIds.join(',');
-        case 'setoranId': return '';
-        case 'createdAt': return new Date();
-        case 'catatan': return catatanText;
-        case 'noNota': return noNota;
-        case 'metode': return metode;
-        case 'status': return 'Active';
-        default: return '';
+    // Alokasikan ke tagihan tertua. Kolom utang menyimpan sisa saldo yang belum dibayar.
+    let sisaBayar=nominalBayar; const allocations=[];
+    pendingRows.forEach(item=>{
+      if(sisaBayar<=0)return;
+      const amount=Math.min(item.outstanding,sisaBayar);
+      if(amount<=0)return;
+      allocations.push({id:item.id,amount,remaining:item.outstanding-amount,row:item.row});
+      sisaBayar-=amount;
+    });
+    if(sisaBayar!==0)return {success:false,message:'Nominal tidak dapat dialokasikan. Muat ulang data dan coba lagi.'};
+    const noNota=String(payload.noNota||'').trim(), catatanText=String(payload.catatan||'').trim();
+    const sup=getSheetData('Suppliers').find(s=>String(s.id)===supplierId)||{};
+    const bayarId='BT'+Utilities.getUuid().slice(0,8).toUpperCase();
+    const bh=bayarSheet.getRange(1,1,1,bayarSheet.getLastColumn()).getValues()[0];
+    const newRow=bh.map(col=>{
+      switch(String(col).trim()){
+        case 'id':return bayarId; case 'tanggal':return new Date(tgl); case 'lapakId':return lapakId;
+        case 'supplierId':return supplierId; case 'userName':return sess.username; case 'totalBayar':return nominalBayar;
+        case 'konsinyasiIds':return JSON.stringify(allocations.map(x=>({id:x.id,amount:x.amount})));
+        case 'setoranId':return ''; case 'createdAt':return new Date(); case 'catatan':return catatanText;
+        case 'noNota':return noNota; case 'metode':return metode; case 'status':return 'Active'; default:return '';
       }
     });
-    const journal = beginWriteJournal(['Konsinyasi','BayarTitipanKaryawan']);
+    const journal=beginWriteJournal(['Konsinyasi','BayarTitipanKaryawan']);
     try {
-      rowsToUpdate.forEach(r => {
-        journalSetValue(journal, ks, r, iStatus + 1, 'Bayar');
-        if (iBayarAt >= 0) journalSetValue(journal, ks, r, iBayarAt + 1, new Date());
-        if (iBayarBy >= 0) journalSetValue(journal, ks, r, iBayarBy + 1, sess.username);
-        if (iCatatan >= 0) {
-          const prev = String(ks.getRange(r, iCatatan + 1).getValue() || '');
-          let note = 'Bayar langsung oleh ' + sess.name;
-          if (noNota) note += ' (Nota: ' + noNota + ')';
-          note += ' [' + metode + ']';
-          if (catatanText) note += ' — ' + catatanText;
-          journalSetValue(journal, ks, r, iCatatan + 1, (prev ? prev + ' | ' : '') + note);
+      allocations.forEach(item=>{
+        journalSetValue(journal,ks,item.row,iUtang+1,item.remaining);
+        if(item.remaining<=0){
+          journalSetValue(journal,ks,item.row,iStatus+1,'Bayar');
+          if(iBayarAt>=0)journalSetValue(journal,ks,item.row,iBayarAt+1,new Date());
+          if(iBayarBy>=0)journalSetValue(journal,ks,item.row,iBayarBy+1,sess.username);
+        } else {
+          journalSetValue(journal,ks,item.row,iStatus+1,'Pending');
+        }
+        if(iCatatan>=0){
+          const prev=String(ks.getRange(item.row,iCatatan+1).getValue()||'');
+          const note='Pembayaran '+fmtRpLocal(item.amount)+' oleh '+sess.name+(noNota?' (Nota: '+noNota+')':'')+(catatanText?' — '+catatanText:'');
+          journalSetValue(journal,ks,item.row,iCatatan+1,(prev?prev+' | ':'')+note);
         }
       });
       bayarSheet.appendRow(newRow);
-    } catch (writeError) {
-      try { rollbackWriteJournal(journal); }
-      catch (rollbackError) {
-        console.error('Gagal rollback pembayaran titipan:', rollbackError.message);
-        return { success:false, message:'Pembayaran gagal dan pemulihan otomatis tidak sepenuhnya berhasil. Hentikan transaksi lanjutan dan minta pemeriksaan admin. Detail: ' + writeError.message + ' | ' + rollbackError.message };
+    } catch(writeError) {
+      try{rollbackWriteJournal(journal);}catch(rollbackError){
+        console.error('Gagal rollback pembayaran titipan:',rollbackError.message);
+        return {success:false,message:'Pembayaran gagal dan pemulihan otomatis tidak sepenuhnya berhasil. Hentikan transaksi lanjutan dan minta pemeriksaan admin. Detail: '+writeError.message+' | '+rollbackError.message};
       }
       _clearSheetCache();
-      return { success:false, message:'Pembayaran gagal. Perubahan telah dibatalkan: ' + writeError.message };
+      return {success:false,message:'Pembayaran gagal. Perubahan telah dibatalkan: '+writeError.message};
     }
-
     _clearSheetCache();
-
-    const sudahSubmit = getSheetData('Setoran').some(s => formatDate(s.tanggal) === tgl && String(s.lapakId) === String(lapakId));
-    const tail = sudahSubmit
-      ? ' Akan masuk ke rekap setoran berikutnya.'
-      : ' Setoran hari ini otomatis berkurang.';
-
-    return {
-      success: true,
-      message: 'Bayar ' + (sup.nama || supplierId) + ' ' + fmtRpLocal(totalBayar) + ' berhasil.' + tail,
-      total: totalBayar,
-      count: rowsToUpdate.length
-    };
+    const sudahSubmit=getSheetData('Setoran').some(s=>formatDate(s.tanggal)===tgl&&String(s.lapakId)===String(lapakId));
+    const sisaUtang=totalUtang-nominalBayar;
+    const tail=sudahSubmit?' Akan masuk ke rekap setoran berikutnya.':' Setoran hari ini otomatis berkurang.';
+    return {success:true,message:'Pembayaran '+(sup.nama||supplierId)+' '+fmtRpLocal(nominalBayar)+' berhasil. Sisa utang supplier: '+fmtRpLocal(sisaUtang)+'.'+tail,total:nominalBayar,remaining:sisaUtang,count:allocations.length};
   } finally { lock.releaseLock(); }
 }
-
 function apiBatalBayarTitipan(token, bayarId) {
   const sess = requireRole(token, ['karyawan']);
   const lock = LockService.getScriptLock();
@@ -2431,30 +2407,44 @@ function apiBatalBayarTitipan(token, bayarId) {
     if (String(lapakId) !== String(sess.lapakId)) return { success: false, message: 'Anda tidak punya akses ke data ini.' };
     if (setoranId) return { success: false, message: 'Sudah masuk rekap setoran. Hubungi admin untuk koreksi.' };
 
-    const ids = konsinyasiIdsStr.split(',').map(s => s.trim()).filter(Boolean);
-    const idSet = {};
-    ids.forEach(x => { idSet[x] = true; });
+    let allocations = [], legacyIds = [];
+    if (konsinyasiIdsStr.trim().startsWith('[')) {
+      try { allocations = JSON.parse(konsinyasiIdsStr).filter(x => x && x.id); }
+      catch (e) { return {success:false,message:'Rincian alokasi pembayaran tidak valid. Minta admin memeriksa transaksi ini.'}; }
+    } else legacyIds = konsinyasiIdsStr.split(',').map(s => s.trim()).filter(Boolean);
+    const allocationMap = {};
+    allocations.forEach(x => { allocationMap[String(x.id)] = (allocationMap[String(x.id)] || 0) + Math.max(0,Number(x.amount)||0); });
+    legacyIds.forEach(x => { allocationMap[x] = null; });
     const ks = ss.getSheetByName('Konsinyasi');
     const kData = ks.getDataRange().getValues();
     const kH = kData[0];
-    const kId = kH.indexOf('id'), kStatus = kH.indexOf('status');
-    const kBayarAt = kH.indexOf('bayarAt'), kBayarBy = kH.indexOf('bayarBy');
-    const kKasId = kH.indexOf('kasId'), kCatatan = kH.indexOf('catatan');
-    let reverted = 0;
-    for (let i = 1; i < kData.length; i++) {
-      if (idSet[String(kData[i][kId])]) {
-        ks.getRange(i + 1, kStatus + 1).setValue('Pending');
-        if (kBayarAt >= 0) ks.getRange(i + 1, kBayarAt + 1).setValue('');
-        if (kBayarBy >= 0) ks.getRange(i + 1, kBayarBy + 1).setValue('');
-        if (kKasId >= 0) ks.getRange(i + 1, kKasId + 1).setValue('');
-        if (kCatatan >= 0) {
-          const prev = String(ks.getRange(i + 1, kCatatan + 1).getValue() || '');
-          ks.getRange(i + 1, kCatatan + 1).setValue((prev ? prev + ' | ' : '') + 'DIBATALKAN oleh ' + sess.name);
+    const kId=kH.indexOf('id'), kStatus=kH.indexOf('status'), kUtang=kH.indexOf('utang');
+    const kBayarAt=kH.indexOf('bayarAt'), kBayarBy=kH.indexOf('bayarBy'), kKasId=kH.indexOf('kasId'), kCatatan=kH.indexOf('catatan');
+    let reverted=0;
+    const journal=beginWriteJournal(['Konsinyasi','BayarTitipanKaryawan']);
+    try {
+      for(let i=1;i<kData.length;i++){
+        const itemId=String(kData[i][kId]);
+        if(!Object.prototype.hasOwnProperty.call(allocationMap,itemId))continue;
+        if(allocationMap[itemId]!==null&&kUtang>=0){
+          const current=Number(kData[i][kUtang])||0;
+          journalSetValue(journal,ks,i+1,kUtang+1,current+allocationMap[itemId]);
+        }
+        journalSetValue(journal,ks,i+1,kStatus+1,'Pending');
+        if(kBayarAt>=0)journalSetValue(journal,ks,i+1,kBayarAt+1,'');
+        if(kBayarBy>=0)journalSetValue(journal,ks,i+1,kBayarBy+1,'');
+        if(kKasId>=0)journalSetValue(journal,ks,i+1,kKasId+1,'');
+        if(kCatatan>=0){
+          const prev=String(ks.getRange(i+1,kCatatan+1).getValue()||'');
+          journalSetValue(journal,ks,i+1,kCatatan+1,(prev?prev+' | ':'')+'DIBATALKAN oleh '+sess.name);
         }
         reverted++;
       }
+      journalSetValue(journal,bayarSheet,rowIdx,iStatus+1,'Cancelled');
+    } catch(e) {
+      try{rollbackWriteJournal(journal);}catch(rollbackError){return {success:false,message:'Pembatalan gagal dan rollback perlu pemeriksaan admin: '+e.message+' | '+rollbackError.message};}
+      return {success:false,message:'Pembatalan gagal. Tidak ada perubahan yang dipertahankan: '+e.message};
     }
-    bayarSheet.getRange(rowIdx, iStatus + 1).setValue('Cancelled');
     _clearSheetCache();
     return { success: true, message: 'Pembayaran dibatalkan. ' + reverted + ' transaksi kembali pending.', reverted };
   } finally { lock.releaseLock(); }

@@ -90,3 +90,9 @@ has(backend, /formatDate\(b\.tanggal\) === tgl \|\| !b\.setoranId/, 'Employee su
 has(backend, /tanggal: formatDate\(b\.tanggal\)/, 'Supplier payment history must expose payment date');
 has(frontend, /filter\(x => !x\.setoranId\)/, 'Cash handover preview must deduct only unlinked supplier payments');
 has(frontend, /Belum masuk setoran — dipotong pada rekap berikutnya/, 'Carry-over payments must be identified in the employee UI');
+
+has(backend, /const nominalBayar=Number\(payload\.nominalBayar\)/, 'Employee supplier payment must accept an editable partial payment amount');
+has(backend, /JSON\.stringify\(allocations\.map\(x=>\(\{id:x\.id,amount:x\.amount\}\)\)\)/, 'Partial supplier payment must persist exact per-invoice allocations');
+has(backend, /journalSetValue\(journal,ks,item\.row,iUtang\+1,item\.remaining\)/, 'Partial supplier payment must preserve remaining supplier debt');
+has(backend, /current\+allocationMap\[itemId\]/, 'Cancelling a partial payment must restore the allocated debt amount');
+has(frontend, /data-f="nominalBayar"/, 'Employee supplier payment form must allow editing payment amount');
