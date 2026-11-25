@@ -37,7 +37,8 @@ const S = {
   _dirty: {},
   darkMode: localStorage.getItem('darkMode') === '1',
   _pageSetoran: 1, _pageKas: 1, _pageKartuStok: 1, _pagePesanan: 1,
-  _pageSize: 15
+  _pageSize: 15,
+  _katalogSupplierFilter: []
 };
 
 // ============================================
@@ -904,7 +905,14 @@ function analisisControlBar(range, groupBy, selectedEntities, allEntities) {
 function tabKatalog() {
   const isAdmin = S.user.role === 'admin';
   let html = `<div class="row-between mb-3"><h3 class="card-title" style="margin:0">${ico('box')} Katalog (${S.katalog.length})</h3><div class="row" style="gap:4px"><button class="btn btn-ghost btn-sm" data-act="tab" data-tab="harga-tingkat">${ico('tag','ico-sm')}</button><button class="btn btn-primary btn-sm" data-act="add-katalog">+ Tambah</button></div></div>`;
-  html += `<div class="field mb-3"><input type="search" class="input" data-katalog-search placeholder="Cari nama produk, supplier, atau kategori..." autocomplete="off" aria-label="Cari produk katalog"></div>`;
+  html += `<div class="field mb-2"><input type="search" class="input" data-katalog-search placeholder="Cari nama produk atau kategori..." autocomplete="off" aria-label="Cari produk katalog"></div>`;
+  const availableSuppliers = S.suppliers.filter(s => S.katalog.some(k => String(k.supplierId || '') === String(s.id)));
+  if (availableSuppliers.length) {
+    html += `<div class="mb-3"><div class="text-xs text-gray mb-2">Filter Supplier (bisa pilih beberapa)</div><div class="chip-group" style="display:flex;flex-wrap:wrap;gap:6px">
+      <button class="chip ${S._katalogSupplierFilter.length ? '' : 'active'}" data-act="katalog-supplier-clear">Semua Supplier</button>
+      ${availableSuppliers.map(s => `<button class="chip ${S._katalogSupplierFilter.includes(String(s.id)) ? 'active' : ''}" data-act="katalog-supplier-toggle" data-id="${esc(s.id)}">${esc(s.nama)}</button>`).join('')}
+    </div></div>`;
+  }
   if (!S.katalog.length) return html + '<div class="empty"><p>Katalog masih kosong.</p></div>';
   html += `<p class="text-xs text-gray mb-2" data-katalog-count>Menampilkan ${S.katalog.length} dari ${S.katalog.length} produk</p>`;
   html += S.katalog.map(k => {
@@ -913,7 +921,7 @@ function tabKatalog() {
       ? esc(k.supplierNama) + ' · ' + esc(k.kategori || '-')
       : '<span style="color:var(--red);font-weight:600">⚠ Belum ada supplier — klik Edit</span>';
     const searchText = [k.nama, k.supplierNama, k.kategori, k.id].filter(Boolean).join(' ').toLocaleLowerCase('id-ID');
-    return `<div class="list-item" data-katalog-row data-search="${esc(searchText)}"><div class="list-item-main"><div class="list-item-title">${esc(k.nama)}</div><div class="list-item-sub">${subText}</div><div class="text-sm mt-2"><strong class="text-green">${fmtRp(k.hargaJual)}</strong>${isAdmin ? ` <span class="text-xs text-gray">· Beli ${fmtRp(k.hargaBeli)} · Margin ${fmtRp(k.margin)}</span>` : ''}</div></div><div class="list-item-actions"><button class="action-btn action-edit" data-act="edit-katalog" data-id="${esc(k.id)}">${ico('edit','ico-sm')}</button><button class="action-btn action-del" data-act="del-katalog" data-id="${esc(k.id)}">${ico('trash','ico-sm')}</button></div></div>`;
+    return `<div class="list-item" data-katalog-row data-supplier-id="${esc(k.supplierId || '')}" data-search="${esc(searchText)}"><div class="list-item-main"><div class="list-item-title">${esc(k.nama)}</div><div class="list-item-sub">${subText}</div><div class="text-sm mt-2"><strong class="text-green">${fmtRp(k.hargaJual)}</strong>${isAdmin ? ` <span class="text-xs text-gray">· Beli ${fmtRp(k.hargaBeli)} · Margin ${fmtRp(k.margin)}</span>` : ''}</div></div><div class="list-item-actions"><button class="action-btn action-edit" data-act="edit-katalog" data-id="${esc(k.id)}">${ico('edit','ico-sm')}</button><button class="action-btn action-del" data-act="del-katalog" data-id="${esc(k.id)}">${ico('trash','ico-sm')}</button></div></div>`;
   }).join('');
   html += '<div class="empty" data-katalog-empty hidden><p>Produk tidak ditemukan.</p></div>';
   return html;
@@ -1393,6 +1401,25 @@ function handleClick(e) {
 
   if (a === 'logout') return doLogout();
   if (a === 'tab') return switchTab(tab);
+  if (a === 'katalog-supplier-toggle') {
+    const supplierId = String(id || '');
+    S._katalogSupplierFilter = S._katalogSupplierFilter.includes(supplierId)
+      ? S._katalogSupplierFilter.filter(x => x !== supplierId)
+      : S._katalogSupplierFilter.concat(supplierId);
+    $('[data-act="katalog-supplier-toggle"]').forEach(chip => chip.classList.toggle('active', S._katalogSupplierFilter.includes(String(chip.dataset.id))));
+    const clearChip = $('[data-act="katalog-supplier-clear"]');
+    if (clearChip) clearChip.classList.toggle('active', S._katalogSupplierFilter.length === 0);
+    applyKatalogFilter();
+    return;
+  }
+  if (a === 'katalog-supplier-clear') {
+    S._katalogSupplierFilter = [];
+    $('[data-act="katalog-supplier-toggle"]').forEach(chip => chip.classList.remove('active'));
+    const clearChip = $('[data-act="katalog-supplier-clear"]');
+    if (clearChip) clearChip.classList.add('active');
+    applyKatalogFilter();
+    return;
+  }
   if (a === 'refresh') return doRefresh();
   if (a === 'refresh-stok') return loadKartuStok();
   if (a === 'refresh-analytics') return loadAnalytics();
@@ -1540,21 +1567,38 @@ function handleClick(e) {
   if (a === 'kalender-day') return kalenderDay(btn.dataset.tgl);
 }
 
+function applyKatalogFilter() {
+  const input = $('[data-katalog-search]');
+  const q = String(input ? input.value : '').trim().toLocaleLowerCase('id-ID');
+  const selected = S._katalogSupplierFilter || [];
+  const rows = Array.from(document.querySelectorAll('[data-katalog-row]'));
+  let visible = 0;
+  rows.forEach(row => {
+    const textMatch = !q || String(row.dataset.search || '').includes(q);
+    const supplierMatch = selected.length === 0 || selected.includes(String(row.dataset.supplierId || ''));
+    const match = textMatch && supplierMatch;
+    row.hidden = !match;
+    if (match) {
+      row.style.removeProperty('display');
+      visible++;
+    } else {
+      row.style.setProperty('display', 'none', 'important');
+    }
+  });
+  const count = $('[data-katalog-count]');
+  if (count) count.textContent = 'Menampilkan ' + visible + ' dari ' + rows.length + ' produk';
+  const empty = $('[data-katalog-empty]');
+  if (empty) {
+    empty.hidden = visible !== 0;
+    if (visible) empty.style.removeProperty('display');
+    else empty.style.setProperty('display', 'block', 'important');
+  }
+}
+
 function handleInput(e) {
   const t = e.target;
   if (t.dataset.katalogSearch !== undefined) {
-    const q = String(t.value || '').trim().toLocaleLowerCase('id-ID');
-    const rows = $$('[data-katalog-row]');
-    let visible = 0;
-    rows.forEach(row => {
-      const match = !q || String(row.dataset.search || '').includes(q);
-      row.hidden = !match;
-      if (match) visible++;
-    });
-    const count = $('[data-katalog-count]');
-    if (count) count.textContent = 'Menampilkan ' + visible + ' dari ' + rows.length + ' produk';
-    const empty = $('[data-katalog-empty]');
-    if (empty) empty.hidden = visible !== 0;
+    applyKatalogFilter();
     return;
   }
   if (t.dataset.dropSearch !== undefined) {
