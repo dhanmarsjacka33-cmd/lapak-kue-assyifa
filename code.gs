@@ -956,7 +956,7 @@ function buildBootstrapData(user) {
     const todayPenjualan = todaySetoran.reduce((s, x) => s + (Number(x.totalSistem) || 0), 0);
     const todayTunai = todaySetoran.reduce((s, x) => s + (Number(x.totalTunai) || 0), 0);
     const todayQris = todaySetoran.reduce((s, x) => s + (Number(x.totalQris) || 0), 0);
-    const recentKas = kas.slice(-10).reverse().map(k => ({ tanggal: formatDateTime(k.tanggal), keterangan: k.keterangan || '', tipe: k.tipe || '', nominal: Number(k.nominal) || 0, saldo: Number(k.saldo) || 0 }));
+    const recentKas = kas.slice(-10).reverse().map(k => ({ tanggal: formatDateTime(k.tanggal), keterangan: k.keterangan || '', tipe: k.tipe || '', metode: k.metode || '', kategori: k.kategori || '', nominal: Number(k.nominal) || 0, saldo: Number(k.saldo) || 0 }));
     const unreadNotif = getSheetData('Notifikasi').filter(n => n.status === 'unread').length;
     const utangKonsinyasi = getSheetData('Konsinyasi').filter(k => k.status === 'Pending').reduce((s, k) => s + (Number(k.utang) || 0), 0);
     const todayPesanan = getSheetData('PesananPelanggan').filter(p => formatDate(p.tanggalAmbil) === tgl || formatDate(p.tanggal) === tgl);
@@ -1033,11 +1033,25 @@ function buildLaporanForRange(dari, sampai, lapakId) {
   });
   setoran.forEach(s => { if (perLapak[s.lapakId]) perLapak[s.lapakId].setoranCount++; });
   const itemArr = Object.values(perItem).sort((a, b) => b.qtyLaku - a.qtyLaku);
+  const pembelianSusulan = getSheetData('Konsinyasi').filter(k => {
+    if (String(k.catatan || '').indexOf('PEMBELIAN_SUSULAN|') !== 0) return false;
+    if (lapakId && String(k.lapakId) !== String(lapakId)) return false;
+    const t = k.tanggal instanceof Date ? k.tanggal.getTime() : new Date(k.tanggal).getTime();
+    return t >= fromMs && t <= toMs;
+  });
+  const susulanBySupplier = {};
+  pembelianSusulan.forEach(k => {
+    const sid=String(k.supplierId), amount=Number(k.utang)||0;
+    if(!susulanBySupplier[sid]) susulanBySupplier[sid]={supplierId:sid,nama:supMap[sid]||sid,count:0,qty:0,total:0,pending:0,paid:0};
+    const x=susulanBySupplier[sid]; x.count++; x.qty+=Number(k.qtyLaku)||0; x.total+=amount;
+    if(k.status==='Pending') x.pending+=amount; else if(k.status==='Bayar') x.paid+=amount;
+  });
   return {
     periode: { dari: formatDate(dari), sampai: formatDate(new Date(toMs - 86400000)) },
-    ringkasan: { totalOmzet: itemArr.reduce((s, x) => s + x.omzet, 0), totalProfit: itemArr.reduce((s, x) => s + x.profit, 0), totalQty: itemArr.reduce((s, x) => s + x.qtyLaku, 0), totalSetoran: setoran.length },
+    ringkasan: { totalOmzet: itemArr.reduce((s, x) => s + x.omzet, 0), totalProfit: itemArr.reduce((s, x) => s + x.profit, 0), totalQty: itemArr.reduce((s, x) => s + x.qtyLaku, 0), totalSetoran: setoran.length, totalPembelianSusulan: pembelianSusulan.reduce((s,k)=>s+(Number(k.utang)||0),0), utangPembelianSusulan: pembelianSusulan.filter(k=>k.status==='Pending').reduce((s,k)=>s+(Number(k.utang)||0),0), dibayarPembelianSusulan: pembelianSusulan.filter(k=>k.status==='Bayar').reduce((s,k)=>s+(Number(k.utang)||0),0) },
     perItem: itemArr, topItems: itemArr.slice(0, 10), bottomItems: itemArr.slice(-10).reverse(),
     perSupplier: Object.values(perSupplier).map(s => ({ supplierId:s.supplierId, nama:s.nama, qtyLaku:s.qtyLaku, omzet:s.omzet, profit:s.profit, itemCount: Object.keys(s.itemCount).length, margin: s.omzet > 0 ? (s.profit / s.omzet * 100) : 0 })).sort((a, b) => b.profit - a.profit),
+    pembelianSusulanPerSupplier: Object.values(susulanBySupplier).sort((a,b)=>b.total-a.total),
     perLapak: Object.values(perLapak).map(l => ({ lapakId:l.lapakId, nama:l.nama, qtyLaku:l.qtyLaku, omzet:l.omzet, profit:l.profit, setoranCount:l.setoranCount, margin: l.omzet > 0 ? (l.profit / l.omzet * 100) : 0 })).sort((a, b) => b.omzet - a.omzet)
   };
 }
@@ -2470,7 +2484,8 @@ function apiGetAdminDashboard(token) {
   const unreadNotif = getSheetData('Notifikasi').filter(n => n.status === 'unread').length;
   const utangKonsinyasi = getSheetData('Konsinyasi').filter(k => k.status === 'Pending').reduce((s, k) => s + (Number(k.utang) || 0), 0);
   const todayPesanan = getSheetData('PesananPelanggan').filter(p => formatDate(p.tanggalAmbil) === tgl || formatDate(p.tanggal) === tgl);
-  return { kasBesar:saldoKas, pendingCount:pending.length, pendingSetoran:pending.map(mapSetoran), todayPenjualan, todayTunai, todayQris, todaySetoranCount: todaySetoran.length, recentKas, unreadNotif, utangKonsinyasi, todayPesananCount: todayPesanan.length };
+  const todayTransfer = todaySetoran.reduce((s, x) => s + (Number(x.totalTransfer) || 0), 0);
+  return { kasBesar:saldoKas, pendingCount:pending.length, pendingSetoran:pending.map(mapSetoran), todayPenjualan, todayTunai, todayQris, todayTransfer, todaySetoranCount: todaySetoran.length, recentKas, unreadNotif, utangKonsinyasi, todayPesananCount: todayPesanan.length };
 }
 function apiGetSetoranList(token, filter) {
   requireRole(token, ['admin']);
@@ -3133,7 +3148,7 @@ function apiRekapPesanan(token, filter) {
   requireRole(token, ['admin']);
   filter = filter || {};
   const dari = filter.dari ? new Date(filter.dari) : new Date(Date.now() - 30 * 86400000);
-  const sampai = filter.sampai ? new Date(new Date(filter.sampai).getTime() + 86400000) : new Date();
+  const sampai = filter.sampai ? new Date(filter.sampai) : new Date();
   const fromMs = dari.getTime(), toMs = sampai.getTime();
   const supMap = {}; getSheetData('Suppliers').forEach(s => supMap[s.id] = s.nama);
   const all = getSheetData('Pesanan').filter(p => {
@@ -3212,8 +3227,8 @@ function apiExportSetoranCSV(token, dari, sampai) {
   if (dari) filter.dari = dari;
   if (sampai) filter.sampai = sampai;
   const list = apiGetSetoranList(token, filter);
-  const rows = [['ID','Tanggal','Lapak','Penjualan Tunai','QRIS Langsung Owner','Total Sistem','Pengeluaran Operasional','Pembayaran Titipan Supplier','Total Penerimaan Owner','Tunai Diserahkan Karyawan','Selisih','Status']];
-  list.forEach(s => rows.push([s.id, s.tanggal, s.lapakId, s.totalTunai, s.totalQris, s.totalSistem, s.pengeluaran, s.totalTitipan, s.expectedSetoran, s.uangDisetor, s.selisih, s.status]));
+  const rows = [['ID','Tanggal','Lapak','Penjualan Tunai','QRIS Langsung Owner','Transfer Langsung Owner','Total Sistem','Pengeluaran Operasional','Pembayaran Titipan Supplier','Total Penerimaan Owner','Tunai Diserahkan Karyawan','Selisih','Status']];
+  list.forEach(s => rows.push([s.id, s.tanggal, s.lapakId, s.totalTunai, s.totalQris, s.totalTransfer, s.totalSistem, s.pengeluaran, s.totalTitipan, s.expectedSetoran, s.uangDisetor, s.selisih, s.status]));
   const csv = rows.map(r => r.map(c => { const str = String(c); return /[",\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str; }).join(',')).join('\n');
   return { success: true, filename: 'Laporan_Setoran_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmm') + '.csv', content: csv };
 }
@@ -3798,7 +3813,8 @@ function apiGetKonsinyasiDetailSupplier(token, supplierId) {
   const katMap = {}; getSheetData('Katalog').forEach(k => katMap[k.id] = k.nama);
   const lapakMap = {}; getSheetData('Lapak').forEach(l => lapakMap[l.id] = l.nama);
   const list = getSheetData('Konsinyasi').filter(k => String(k.supplierId) === String(supplierId) && k.status === 'Pending');
-  return { count: list.length, total: list.reduce((s, k) => s + (Number(k.utang) || 0), 0), items: list.map(k => ({ id: k.id, tanggal: formatDate(k.tanggal), lapakNama: lapakMap[k.lapakId] || k.lapakId, nama: katMap[k.katalogId] || k.katalogId, qtyLaku: Number(k.qtyLaku) || 0, hargaTitip: Number(k.hargaTitip) || 0, utang: Number(k.utang) || 0 })).sort((a, b) => a.tanggal.localeCompare(b.tanggal)) };
+  const items = list.map(k => { const susulan=String(k.catatan||'').indexOf('PEMBELIAN_SUSULAN|')===0; return { id:k.id, tanggal:formatDate(k.tanggal), lapakNama:lapakMap[k.lapakId]||k.lapakId, nama:katMap[k.katalogId]||k.katalogId, qtyLaku:Number(k.qtyLaku)||0, hargaTitip:Number(k.hargaTitip)||0, utang:Number(k.utang)||0, jenis:susulan?'Pembelian susulan':'Titipan terjual', setoranId:susulan?String(k.catatan||'').split('|')[1]:'', catatan:susulan?String(k.catatan||'').split('|').slice(2).join('|'):'' }; }).sort((a,b)=>a.tanggal.localeCompare(b.tanggal));
+  return { count:list.length, total:list.reduce((s,k)=>s+(Number(k.utang)||0),0), countPembelianSusulan:items.filter(x=>x.jenis==='Pembelian susulan').length, totalPembelianSusulan:items.filter(x=>x.jenis==='Pembelian susulan').reduce((s,x)=>s+x.utang,0), countTitipan:items.filter(x=>x.jenis==='Titipan terjual').length, totalTitipan:items.filter(x=>x.jenis==='Titipan terjual').reduce((s,x)=>s+x.utang,0), items };
 }
 
 // ============================================================

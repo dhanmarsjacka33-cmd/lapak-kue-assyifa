@@ -707,7 +707,7 @@ function tabHome() {
   html += `<div class="row" style="gap:8px;margin-bottom:16px"><button class="btn btn-ghost btn-block" data-act="tab" data-tab="analisis-performa">${ico('pie-chart','ico-sm')} Analisis</button></div>
     <h3 class="card-title">${ico('wallet')} Kas Terbaru</h3>`;
   if (!d.recentKas || !d.recentKas.length) html += '<div class="empty">' + ico('inbox','ico') + '<p>Belum ada transaksi</p></div>';
-  else html += d.recentKas.map(k => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(k.keterangan)}</div><div class="list-item-sub">${esc(k.tanggal)}</div></div><div class="text-right"><div class="text-sm font-bold ${k.tipe === 'Masuk' ? 'text-green' : 'text-red'}">${k.tipe === 'Masuk' ? '+' : '-'} ${fmtRp(k.nominal)}</div><div class="text-xs text-gray">${fmtRp(k.saldo)}</div></div></div>`).join('');
+  else html += d.recentKas.map(k => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(k.keterangan)}</div><div class="list-item-sub">${esc(k.tanggal)}${k.metode ? ' · ' + esc(k.metode) : ''}</div></div><div class="text-right"><div class="text-sm font-bold ${k.tipe === 'Masuk' ? 'text-green' : 'text-red'}">${k.tipe === 'Masuk' ? '+' : '-'} ${fmtRp(k.nominal)}</div><div class="text-xs text-gray">${fmtRp(k.saldo)}</div></div></div>`).join('');
   return html;
 }
 
@@ -722,7 +722,7 @@ function tabKas() {
     <div class="hero"><div class="hero-label">Saldo Saat Ini</div><div class="hero-value">${fmtRp(d.kasBesar)}</div></div>`;
   if (!all.length) html += '<div class="empty">' + ico('inbox','ico') + '<p>Belum ada transaksi</p></div>';
   else {
-    html += p.items.map(k => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(k.keterangan)}</div><div class="list-item-sub">${esc(k.tanggal)}</div></div><div class="text-right"><div class="text-sm font-bold ${k.tipe === 'Masuk' ? 'text-green' : 'text-red'}">${k.tipe === 'Masuk' ? '+' : '-'} ${fmtRp(k.nominal)}</div><div class="text-xs text-gray">${fmtRp(k.saldo)}</div></div></div>`).join('');
+    html += p.items.map(k => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(k.keterangan)}</div><div class="list-item-sub">${esc(k.tanggal)}${k.metode ? ' · ' + esc(k.metode) : ''}</div></div><div class="text-right"><div class="text-sm font-bold ${k.tipe === 'Masuk' ? 'text-green' : 'text-red'}">${k.tipe === 'Masuk' ? '+' : '-'} ${fmtRp(k.nominal)}</div><div class="text-xs text-gray">${fmtRp(k.saldo)}</div></div></div>`).join('');
     html += paginationFooter(p, 'kas-page');
   }
   return html;
@@ -815,6 +815,13 @@ function tabLaporan() {
             </span>
           </div>`;
         }).join('')}
+    </div>
+    <div class="card">
+      <div class="card-title">Pembelian Susulan (bukan omzet penjualan)</div>
+      <div class="row-between text-sm"><span>Total pembelian</span><strong>${fmtRp(L.ringkasan.totalPembelianSusulan || 0)}</strong></div>
+      <div class="row-between text-xs text-gray"><span>Masih menjadi utang</span><span>${fmtRp(L.ringkasan.utangPembelianSusulan || 0)}</span></div>
+      <div class="row-between text-xs text-gray"><span>Sudah dibayar</span><span>${fmtRp(L.ringkasan.dibayarPembelianSusulan || 0)}</span></div>
+      ${(L.pembelianSusulanPerSupplier || []).map(x => '<div class="row-between text-xs" style="padding:6px 0;border-top:1px solid #f8fafc"><span>' + esc(x.nama) + ' · ' + x.qty + ' pcs</span><strong>' + fmtRp(x.total) + '</strong></div>').join('')}
     </div>
     <div class="card">
       <div class="card-title">Performa Lapak</div>
@@ -3201,9 +3208,9 @@ async function formBayarSupplier(supplierId) {
     hideLoader();
     if (detail.total <= 0) return toast('Tidak ada utang pending.', 'info');
     const sup = S.suppliers.find(s => String(s.id) === String(supplierId)) || {};
-    let body = '<div class="card-flat" style="padding:12px;margin-bottom:12px"><strong>' + esc(sup.nama || supplierId) + '</strong><div class="text-xs text-gray mt-1">' + detail.count + ' transaksi pending</div><div class="hero" style="margin-top:12px;margin-bottom:0;padding:16px"><div class="hero-label">Total Bayar</div><div class="hero-value" style="font-size:22px;margin-bottom:0">' + fmtRp(detail.total) + '</div></div></div>';
-    body += '<p class="text-xs font-semibold text-gray mb-2">Rincian</p><div style="max-height:300px;overflow-y:auto">';
-    body += detail.items.map(it => '<div class="row-between text-xs" style="padding:8px 0;border-bottom:1px solid #f8fafc"><div style="min-width:0;flex:1"><div class="font-semibold">' + esc(it.nama) + '</div><div class="text-gray">' + esc(it.tanggal) + ' · ' + esc(it.lapakNama) + '</div><div class="text-gray">' + it.qtyLaku + ' × ' + fmtRp(it.hargaTitip) + '</div></div><div class="text-right font-bold">' + fmtRp(it.utang) + '</div></div>').join('');
+    let body = '<div class="card-flat" style="padding:12px;margin-bottom:12px"><strong>' + esc(sup.nama || supplierId) + '</strong><div class="text-xs text-gray mt-1">' + detail.count + ' transaksi pending · Titipan: ' + fmtRp(detail.totalTitipan || 0) + ' · Pembelian susulan: ' + fmtRp(detail.totalPembelianSusulan || 0) + '</div><div class="hero" style="margin-top:12px;margin-bottom:0;padding:16px"><div class="hero-label">Total Bayar</div><div class="hero-value" style="font-size:22px;margin-bottom:0">' + fmtRp(detail.total) + '</div></div></div>';
+    body += '<p class="text-xs font-semibold text-gray mb-2">Rincian (jenis transaksi dibedakan)</p><div style="max-height:300px;overflow-y:auto">';
+    body += detail.items.map(it => '<div class="row-between text-xs" style="padding:8px 0;border-bottom:1px solid #f8fafc"><div style="min-width:0;flex:1"><div class="font-semibold">' + esc(it.nama) + ' <span class="badge ' + (it.jenis === 'Pembelian susulan' ? 'badge-warn' : 'badge-info') + '">' + esc(it.jenis || 'Titipan terjual') + '</span></div><div class="text-gray">' + esc(it.tanggal) + ' · ' + esc(it.lapakNama) + (it.setoranId ? ' · Setoran ' + esc(it.setoranId) : '') + '</div><div class="text-gray">' + it.qtyLaku + ' × ' + fmtRp(it.hargaTitip) + '</div></div><div class="text-right font-bold">' + fmtRp(it.utang) + '</div></div>').join('');
     body += '</div>';
     body += '<div class="field mt-3"><label>Metode Pembayaran</label><select data-f="metode" class="select"><option value="Tunai">Tunai</option><option value="QRIS">QRIS</option><option value="Transfer">Transfer</option></select></div>';
     modal({
