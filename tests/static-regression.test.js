@@ -96,3 +96,4 @@ has(backend, /JSON\.stringify\(allocations\.map\(x=>\(\{id:x\.id,amount:x\.amoun
 has(backend, /journalSetValue\(journal,ks,item\.row,iUtang\+1,item\.remaining\)/, 'Partial supplier payment must preserve remaining supplier debt');
 has(backend, /current\+allocationMap\[itemId\]/, 'Cancelling a partial payment must restore the allocated debt amount');
 has(frontend, /data-f="nominalBayar"/, 'Employee supplier payment form must allow editing payment amount');
+has(frontend, /__PARTIAL_PAYMENT_REQUIRES_UPDATED_BACKEND__/, 'Legacy backend must safely reject partial payments rather than charge the full supplier debt');
