@@ -2318,7 +2318,7 @@ function apiKaryawanBayarSupplier(token, payload) {
     if (!Number.isSafeInteger(nominalBayar)||nominalBayar<=0||nominalBayar>totalUtang)
       return {success:false,message:'Nominal pembayaran harus angka bulat lebih dari 0 dan tidak melebihi sisa utang '+fmtRpLocal(totalUtang)+'.'};
     const metode=String(payload.metode||'Tunai');
-    if (metode!=='Tunai') return {success:false,message:'Pembayaran titipan lapak harus dicatat Tunai karena dibayarkan dari uang penjualan yang dipegang karyawan.'};
+    if (metode !== 'Tunai') return {success:false,message:'Pembayaran titipan lapak harus dicatat Tunai karena dibayarkan dari uang penjualan yang dipegang karyawan.'};
 
     // Alokasikan ke tagihan tertua. Kolom utang menyimpan sisa saldo yang belum dibayar.
     let sisaBayar=nominalBayar; const allocations=[];
