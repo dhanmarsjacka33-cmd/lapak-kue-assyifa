@@ -82,6 +82,7 @@ const ROUTES = {
   getAdminDashboard: p => apiGetAdminDashboard(p.token),
   getSetoranList: p => apiGetSetoranList(p.token, p.filter),
   getSetoranDetail: p => apiGetSetoranDetail(p.token, p.id),
+  addSetoranPembelianSusulan: p => apiAddSetoranPembelianSusulan(p.token, p.payload),
   approveSetoran: p => apiApproveSetoran(p.token, p.id),
   rejectSetoran: p => apiRejectSetoran(p.token, p.id, p.reason),
   editSetoran: p => apiEditSetoran(p.token, p.id, p.updates),
@@ -2460,9 +2461,55 @@ function apiGetSetoranDetail(token, setoranId) {
   requireRole(token, ['admin']);
   const detail = getSheetData('SetoranDetail').filter(d => String(d.setoranId) === String(setoranId)).map(d => ({ katalogId:d.katalogId, qtyDrop:Number(d.qtyDrop) || 0, qtySisa:Number(d.qtySisa) || 0, qtyLaku:Number(d.qtyLaku) || 0, hargaJual:Number(d.hargaJual) || 0, hargaBeli:Number(d.hargaBeli) || 0, subtotal:Number(d.subtotal) || 0, tipePelanggan:d.tipePelanggan || 'Umum' }));
   const pengeluaran = getSheetData('PengeluaranLapak').filter(p => String(p.setoranId) === String(setoranId)).map(p => ({ keterangan: p.keterangan, kategori: p.kategori, nominal: Number(p.nominal) || 0 }));
+  const pembelianSusulan = getSheetData('Konsinyasi').filter(k => String(k.setoranId) === String(setoranId) && String(k.catatan || '').indexOf('PEMBELIAN_SUSULAN|') === 0).map(k => ({ id:k.id, katalogId:k.katalogId, supplierId:k.supplierId, qty:Number(k.qtyLaku)||0, hargaSatuan:Number(k.hargaTitip)||0, total:Number(k.utang)||0, status:k.status, tanggal:formatDate(k.tanggal), catatan:String(k.catatan||'').split('|').slice(2).join('|') }));
   const katMap = {}; getSheetData('Katalog').forEach(k => katMap[k.id] = k);
   detail.forEach(d => d.nama = (katMap[d.katalogId] || {}).nama || d.katalogId);
-  return { items: detail, pengeluaran };
+  pembelianSusulan.forEach(d => { const k=katMap[d.katalogId]||{}; d.nama=k.nama||d.katalogId; d.supplierNama=(getSheetData('Suppliers').find(s=>String(s.id)===String(d.supplierId))||{}).nama||d.supplierId; });
+  return { items: detail, pengeluaran, pembelianSusulan };
+}
+function apiAddSetoranPembelianSusulan(token, payload) {
+  const sess = requireRole(token, ['admin']);
+  payload = payload || {};
+  const setoranId = String(payload.setoranId || '').trim();
+  const katalogId = String(payload.katalogId || '').trim();
+  const qty = Number(payload.qty);
+  const harga = toPosNum(payload.hargaSatuan);
+  if (!setoranId || !katalogId) return {success:false,message:'Setoran dan item wajib dipilih.'};
+  if (!Number.isInteger(qty) || qty <= 0) return {success:false,message:'Jumlah pembelian harus bilangan bulat lebih dari 0.'};
+  if (harga <= 0) return {success:false,message:'Harga beli harus lebih dari 0.'};
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return {success:false,message:'Sistem sibuk. Coba lagi.'};
+  try {
+    const ss=SpreadsheetApp.getActiveSpreadsheet();
+    const setoran=getSheetData('Setoran').find(s=>String(s.id)===setoranId);
+    if(!setoran) return {success:false,message:'Setoran tidak ditemukan.'};
+    if(String(setoran.status).toLowerCase()!=='approved') return {success:false,message:'Pembelian susulan hanya dapat ditambahkan pada setoran yang sudah disetujui.'};
+    if(String(setoran.locked)==='true'||setoran.locked===true) return {success:false,message:'Periode/setoran terkunci. Pembelian susulan tidak dapat ditambahkan.'};
+    if(isPeriodeLocked(formatDate(setoran.tanggal))) return {success:false,message:'Periode setoran sudah dikunci.'};
+    const katalog=getSheetData('Katalog').find(k=>String(k.id)===katalogId);
+    if(!katalog) return {success:false,message:'Item katalog tidak ditemukan.'};
+    const supplierId=String(katalog.supplierId||'');
+    const supplier=getSheetData('Suppliers').find(s=>String(s.id)===supplierId);
+    if(!supplier) return {success:false,message:'Supplier item belum terdaftar di katalog.'};
+    const kSheet=ss.getSheetByName('Konsinyasi'), stokSheet=ss.getSheetByName('KartuStok');
+    if(!hasHeaders(kSheet,['id','tanggal','supplierId','lapakId','katalogId','qtyLaku','hargaTitip','utang','status','kasId','bayarAt','bayarBy','setoranId','catatan']) || !hasHeaders(stokSheet,['id','tanggal','katalogId','lapakId','tipe','masuk','keluar','saldo','refId','keterangan'])) return {success:false,message:'Struktur sheet supplier/stok belum lengkap. Tidak ada perubahan.'};
+    const id='KN'+Utilities.getUuid().slice(0,8).toUpperCase();
+    const utang=qty*harga;
+    const marker='PEMBELIAN_SUSULAN|'+setoranId+'|'+String(payload.catatan||'').trim().slice(0,120);
+    const journal=beginWriteJournal(['Konsinyasi','KartuStok']);
+    try {
+      appendObjectsByHeaders(kSheet,[{id,tanggal:new Date(),supplierId,lapakId:setoran.lapakId,katalogId,qtyLaku:qty,hargaTitip:harga,utang,status:'Pending',kasId:'',bayarAt:'',bayarBy:'',setoranId,catatan:marker}]);
+      catatKartuStok(katalogId,setoran.lapakId,'Pembelian Susulan',qty,0,id,'Pembelian susulan setoran '+setoranId+' · '+(supplier.nama||supplierId));
+    } catch(e) {
+      try { rollbackWriteJournal(journal); }
+      catch(re) { return {success:false,message:'Pembelian gagal dan rollback perlu diperiksa: '+e.message+' | '+re.message}; }
+      _clearSheetCache();
+      return {success:false,message:'Pembelian tidak tersimpan; perubahan dibatalkan: '+e.message};
+    }
+    logAction(sess.username,'TAMBAH_PEMBELIAN_SUSULAN',{id,setoranId,katalogId,supplierId,qty,harga,utang});
+    _clearSheetCache();
+    return {success:true,message:'Pembelian susulan ditambahkan. Utang supplier bertambah '+utang.toLocaleString('id-ID')+' dan stok bertambah '+qty+' pcs.',id,total:utang};
+  } finally { lock.releaseLock(); }
 }
 function apiApproveSetoran(token, idSetoran) {
   const sess = requireRole(token, ['admin']);
