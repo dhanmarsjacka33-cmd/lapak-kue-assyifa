@@ -193,11 +193,11 @@ function setupDatabase() {
     { name: 'Katalog',         headers: ['id','nama','supplierId','hargaBeli','hargaJual','kategori','aktif'] },
     { name: 'Distribusi',      headers: ['id','tanggal','lapakId','katalogId','qtyDrop','droppedBy','droppedAt'] },
     { name: 'Absensi',         headers: ['id','tanggal','lapakId','userId','jamBuka','jamTutup','catatan'] },
-    { name: 'Setoran',         headers: ['id','tanggal','lapakId','userId','totalTunai','totalQris','totalSistem','pengeluaran','expectedSetoran','uangDisetor','selisih','status','approvedAt','approvedBy','catatan','editHistory','locked'] },
+    { name: 'Setoran',         headers: ['id','tanggal','lapakId','userId','totalTunai','totalQris','totalTransfer','totalSistem','pengeluaran','expectedSetoran','uangDisetor','selisih','status','approvedAt','approvedBy','catatan','editHistory','locked'] },
     { name: 'SetoranDetail',   headers: ['id','setoranId','katalogId','qtyDrop','qtySisa','qtyLaku','hargaJual','hargaBeli','subtotal','tipePelanggan'] },
     { name: 'PengeluaranLapak',headers: ['id','setoranId','keterangan','kategori','nominal'] },
     { name: 'Belanja',         headers: ['id','tanggal','item','supplierId','qty','estimasiHarga','hargaAktual','checked','checkedAt','kasId','keterangan'] },
-    { name: 'Kas',             headers: ['id','tanggal','keterangan','tipe','kategori','nominal','saldo'] },
+    { name: 'Kas',             headers: ['id','tanggal','keterangan','tipe','kategori','metode','nominal','saldo'] },
     { name: 'Jadwal',          headers: ['id','tanggal','supplierId','tipe','keterangan','done'] },
     { name: 'Kasbon',          headers: ['id','tanggal','userId','nominal','keterangan','tipe','status','approvedBy','approvedAt','gajiId'] },
     { name: 'Gaji',            headers: ['id','tanggal','userId','periode','gajiPokok','potonganKasbon','tunjangan','gajiBersih','kasId','catatan','dibayarBy'] },
@@ -283,6 +283,31 @@ function setupDatabase() {
   }
   _clearSheetCache();
   return 'Setup v5.10 selesai. Sheet Users sudah berisi akun; tidak ada perubahan akun.';
+}
+
+// Migrasi header akuntansi non-destruktif. Jalankan manual satu kali dari Apps Script.
+function migrateUnifiedCashSchema() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) throw new Error('Sistem sedang sibuk. Coba lagi.');
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const required = { Setoran: ['totalTransfer'], Kas: ['metode'] };
+    const result = [];
+    Object.keys(required).forEach(name => {
+      const sheet = ss.getSheetByName(name);
+      if (!sheet) throw new Error('Sheet ' + name + ' tidak ditemukan. Tidak ada header yang ditambahkan.');
+      const lastCol = Math.max(sheet.getLastColumn(), 1);
+      const headers = sheet.getRange(1, 1, 1, lastCol).getDisplayValues()[0].map(v => String(v).trim());
+      required[name].forEach(header => {
+        if (headers.indexOf(header) !== -1) { result.push(name + '.' + header + ': sudah ada'); return; }
+        const nextCol = sheet.getLastColumn() + 1;
+        sheet.getRange(1, nextCol).setValue(header);
+        result.push(name + '.' + header + ': ditambahkan di kolom ' + nextCol);
+      });
+    });
+    _clearSheetCache();
+    return 'Migrasi selesai tanpa mengubah baris historis. ' + result.join('; ');
+  } finally { lock.releaseLock(); }
 }
 
 function seedIfEmpty(name, rows) {
