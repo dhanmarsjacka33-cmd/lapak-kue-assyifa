@@ -1406,7 +1406,7 @@ function handleClick(e) {
     S._katalogSupplierFilter = S._katalogSupplierFilter.includes(supplierId)
       ? S._katalogSupplierFilter.filter(x => x !== supplierId)
       : S._katalogSupplierFilter.concat(supplierId);
-    $('[data-act="katalog-supplier-toggle"]').forEach(chip => chip.classList.toggle('active', S._katalogSupplierFilter.includes(String(chip.dataset.id))));
+    Array.from(document.querySelectorAll('[data-act="katalog-supplier-toggle"]')).forEach(chip => chip.classList.toggle('active', S._katalogSupplierFilter.includes(String(chip.dataset.id))));
     const clearChip = $('[data-act="katalog-supplier-clear"]');
     if (clearChip) clearChip.classList.toggle('active', S._katalogSupplierFilter.length === 0);
     applyKatalogFilter();
@@ -1414,7 +1414,7 @@ function handleClick(e) {
   }
   if (a === 'katalog-supplier-clear') {
     S._katalogSupplierFilter = [];
-    $('[data-act="katalog-supplier-toggle"]').forEach(chip => chip.classList.remove('active'));
+    Array.from(document.querySelectorAll('[data-act="katalog-supplier-toggle"]')).forEach(chip => chip.classList.remove('active'));
     const clearChip = $('[data-act="katalog-supplier-clear"]');
     if (clearChip) clearChip.classList.add('active');
     applyKatalogFilter();
