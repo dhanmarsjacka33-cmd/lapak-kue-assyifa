@@ -24,6 +24,10 @@ assert.ok(styles.includes('.list-item[hidden]{display:none!important}'), 'Filter
 // Catalog live-search regression guards.
 has(frontend, /data-katalog-search/, 'Catalog must expose a product search input');
 has(frontend, /data-katalog-row/, 'Catalog products must expose searchable rows');
+has(frontend, /data-supplier-id=/, 'Catalog rows must expose supplier IDs for filtering');
+has(frontend, /katalog-supplier-toggle/, 'Catalog must support selecting multiple suppliers');
+has(frontend, /function applyKatalogFilter\\s*\\(/, 'Catalog search and supplier filters must share one filter function');
+has(frontend, /style\\.setProperty\\('display', 'none', 'important'\\)/, 'Non-matching catalog rows must be hidden inline even when stale CSS is cached');
 assert.ok(frontend.includes("const rows = $$('[data-katalog-row]')"), 'Catalog search must query all product rows');
 has(frontend, /data-katalog-count/, 'Catalog search must update visible result count');
 has(frontend, /data-katalog-empty/, 'Catalog search must show an empty state when no products match');
