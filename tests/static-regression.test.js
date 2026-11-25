@@ -15,6 +15,7 @@ has(backend, /function apiKaryawanBayarSupplier\s*\(/, 'Supplier payment API mus
 has(backend, /function apiGetTitipanKaryawan\s*\(/, 'Employee consignment summary API must exist');
 has(backend, /const recentKas = kas\.slice\(-10\)\.reverse\(\)/, 'Dashboard must map recent cash transactions');
 has(backend, /metode:k\.metode \|\|/, 'Dashboard recent cash transactions must expose payment method with legacy fallback');
+has(backend, /match\(\/\\\\\[\(Tunai\|QRIS\|Transfer\)\\\\\]\\\\s\*\$\/i\)/, 'Dashboard legacy payment method parser must match bracketed methods');
 has(backend, /DRAFT_REKAP\|/, 'Draft marker must be present in backend');
 has(frontend, /prepare-rekap-draft/, 'Frontend must expose prepare-draft action');
 has(frontend, /data-drop-search/, 'Frontend must include product search');
