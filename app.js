@@ -2008,147 +2008,49 @@ async function doAbsenKeluar() {
 function formBayarTitipan(supplierId) {
   const tk = S.titipanKaryawan || {};
   const pending = (tk.pending || []).find(x => String(x.supplierId) === String(supplierId));
-  if (!pending) return toast('Data titipan tidak ditemukan.', 'error');
-  if (!pending.items || !pending.items.length) return toast('Tidak ada transaksi pending.', 'error');
-
-  const state = {
-    selected: {},
-    noNota: '',
-    catatan: '',
-    metode: 'Tunai'
-  };
-  pending.items.forEach(it => { state.selected[it.id] = true; });
-
-  const computeTotal = () => pending.items.reduce((sum, it) => sum + (state.selected[it.id] ? (Number(it.utang) || 0) : 0), 0);
-  const selectedCount = () => pending.items.filter(it => state.selected[it.id]).length;
-
-  const renderItems = () => pending.items.map(it => `
-    <label class="item-selector ${state.selected[it.id] ? 'selected' : ''}" style="margin-bottom:6px">
-      <input type="checkbox" ${state.selected[it.id] ? 'checked' : ''} data-cb="${esc(it.id)}">
-      <div class="item-selector-info">
-        <div class="item-selector-name">${esc(it.nama)}</div>
-        <div class="item-selector-price">${esc(it.tanggal)} · ${it.qtyLaku} × ${fmtRp(it.hargaTitip)}</div>
-      </div>
-      <strong style="color:var(--red);font-size:13px;flex-shrink:0">${fmtRp(it.utang)}</strong>
-    </label>
-  `).join('');
-
-  const renderBody = () => `
+  if (!pending || !pending.items || !pending.items.length) return toast('Tidak ada utang pending untuk supplier ini.', 'error');
+  const nominalMaks = Number(pending.total) || 0;
+  const body = \`
     <div class="card-flat" style="padding:12px;margin-bottom:12px;background:var(--amber-50);border:1px solid rgba(245,158,11,.3)">
-      <div class="row-between mb-2">
-        <span class="text-xs text-gray">Total Dipilih (<span data-count>${selectedCount()}</span>/${pending.items.length})</span>
-        <strong style="font-size:20px;color:var(--amber-600)" data-total>${fmtRp(computeTotal())}</strong>
-      </div>
-      <div class="text-xs text-gray">${esc(pending.supplierNama)}</div>
-    </div>
-
-    <div class="row-between mb-2">
-      <strong class="text-xs text-gray">PILIH TRANSAKSI</strong>
-      <div class="row" style="gap:6px">
-        <button type="button" class="btn btn-ghost btn-sm" data-act-all="1">Semua</button>
-        <button type="button" class="btn btn-ghost btn-sm" data-act-all="0">Kosong</button>
-      </div>
-    </div>
-    <div style="max-height:240px;overflow-y:auto;margin-bottom:12px">
-      ${renderItems()}
-    </div>
-
-    <div class="form-grid" style="margin-bottom:8px">
-      <div class="field" style="margin-bottom:0">
-        <label>No. Nota</label>
-        <input type="text" class="input" data-f="noNota" placeholder="Opsional" value="${esc(state.noNota)}">
-      </div>
-      <div class="field" style="margin-bottom:0">
-        <label>Metode</label>
-        <select class="select" data-f="metode">
-          <option value="Tunai" selected>Tunai — dari uang penjualan lapak</option>
-        </select>
-      </div>
+      <div class="text-xs text-gray">Sisa utang \${esc(pending.supplierNama)}</div>
+      <div class="text-lg font-bold" style="color:var(--red)">\${fmtRp(nominalMaks)}</div>
+      <div class="text-xs text-gray mt-1">\${pending.count} transaksi belum lunas</div>
     </div>
     <div class="field">
-      <label>Catatan (opsional)</label>
-      <textarea class="textarea" data-f="catatan" placeholder="Misal: diantar supir, dsb." style="min-height:60px">${esc(state.catatan)}</textarea>
+      <label>Nominal yang dibayarkan (bisa diedit)</label>
+      <input type="number" min="1" max="\${nominalMaks}" step="1" inputmode="numeric" class="input" data-f="nominalBayar" value="\${nominalMaks}">
+      <p class="text-xs text-gray mt-1">Isi sesuai uang yang benar-benar dibayarkan. Sisa utang tetap tercatat jika pembayaran sebagian.</p>
     </div>
-
-    <div class="alert alert-warn" style="margin-bottom:0">${ico('info','ico-sm')}<span>Setoran hari ini otomatis berkurang. Jika setoran sudah dikirim, jumlah ini akan masuk ke rekap setoran berikutnya.</span></div>
-  `;
-
+    <div class="form-grid" style="margin-bottom:8px">
+      <div class="field" style="margin-bottom:0"><label>No. Nota</label><input type="text" class="input" data-f="noNota" placeholder="Opsional"></div>
+      <div class="field" style="margin-bottom:0"><label>Metode</label><input class="input" value="Tunai — dari uang penjualan lapak" disabled></div>
+    </div>
+    <div class="field"><label>Catatan (opsional)</label><textarea class="textarea" data-f="catatan" placeholder="Catatan pembayaran" style="min-height:60px"></textarea></div>
+    <div class="alert alert-info" style="margin-bottom:0">Pembayaran sebagian akan mengurangi sisa utang supplier. Sisanya dapat dibayar nanti.</div>\`;
   modal({
-    title: 'Bayar ' + esc(pending.supplierNama),
-    body: '<div id="form-bayar-body">' + renderBody() + '</div>',
+    title: 'Bayar ' + esc(pending.supplierNama), body,
     actions: [
       { label: 'Batal', onClick: c => c() },
       { label: 'Bayar', className: 'btn-success', onClick: async (c, w) => {
-        const ids = pending.items.filter(it => state.selected[it.id]).map(it => it.id);
-        if (!ids.length) return toast('Pilih minimal 1 transaksi.', 'error');
+        const nominalBayar = Number((w.querySelector('[data-f="nominalBayar"]') || {}).value);
+        if (!Number.isSafeInteger(nominalBayar) || nominalBayar <= 0 || nominalBayar > nominalMaks) return toast('Nominal harus angka bulat lebih dari 0 dan tidak melebihi sisa utang.', 'error');
         if (S.submitting) return;
-        S.submitting = true;
-        c(); showLoader();
+        S.submitting = true; c(); showLoader();
         try {
-          const r = await api('bayarTitipanKaryawan', {
-            token: S.token,
-            payload: {
-              supplierId: pending.supplierId,
-              konsinyasiIds: ids,
-              noNota: state.noNota,
-              catatan: state.catatan,
-              metode: state.metode
-            }
-          });
+          const r = await api('bayarTitipanKaryawan', { token:S.token, payload:{
+            supplierId:pending.supplierId, nominalBayar,
+            noNota:(w.querySelector('[data-f="noNota"]') || {}).value || '',
+            catatan:(w.querySelector('[data-f="catatan"]') || {}).value || '',
+            metode:'Tunai'
+          }});
           toast(r.message || 'Pembayaran berhasil!', r.success === false ? 'error' : 'success');
           if (r.success) await reloadKaryawan();
         } catch (e) { toast(e.message, 'error'); }
         finally { hideLoader(); S.submitting = false; render(); }
-      } }
-    ],
-    onMount: (w) => {
-      const container = w.querySelector('#form-bayar-body');
-
-      const updateTotals = () => {
-        const t = container.querySelector('[data-total]');
-        const cEl = container.querySelector('[data-count]');
-        if (t) t.textContent = fmtRp(computeTotal());
-        if (cEl) cEl.textContent = selectedCount();
-      };
-
-      container.addEventListener('change', e => {
-        const cb = e.target.closest('[data-cb]');
-        if (cb) {
-          state.selected[cb.dataset.cb] = cb.checked;
-          const label = cb.closest('.item-selector');
-          if (label) label.classList.toggle('selected', cb.checked);
-          updateTotals();
-          return;
-        }
-        const sel = e.target.closest('[data-f="metode"]');
-        if (sel) { state.metode = sel.value; return; }
-      });
-
-      container.addEventListener('input', e => {
-        const noNota = e.target.closest('[data-f="noNota"]');
-        if (noNota) { state.noNota = noNota.value; return; }
-        const catatan = e.target.closest('[data-f="catatan"]');
-        if (catatan) { state.catatan = catatan.value; return; }
-      });
-
-      container.addEventListener('click', e => {
-        const allBtn = e.target.closest('[data-act-all]');
-        if (allBtn) {
-          const val = allBtn.dataset.actAll === '1';
-          pending.items.forEach(it => { state.selected[it.id] = val; });
-          container.querySelectorAll('[data-cb]').forEach(cb => {
-            cb.checked = val;
-            const label = cb.closest('.item-selector');
-            if (label) label.classList.toggle('selected', val);
-          });
-          updateTotals();
-          return;
-        }
-      });
-    }
+      }}
+    ]
   });
 }
-
 async function batalBayarTitipan(bayarId) {
   if (!bayarId) return;
   const ok = await confirmDlg('Batalkan Pembayaran?', 'Transaksi akan kembali ke status Pending. Hanya bisa dilakukan sebelum masuk rekap setoran.', 'Batalkan');
