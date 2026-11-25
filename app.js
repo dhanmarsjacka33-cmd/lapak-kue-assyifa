@@ -2428,7 +2428,10 @@ async function formPembelianSusulan(setoranId) {
   const activeKatalog = (S.katalog || []).filter(k => k.supplierId && (S.suppliers || []).some(s => String(s.id) === String(k.supplierId)));
   if (!activeKatalog.length) return toast('Belum ada item katalog dengan supplier yang valid.', 'error');
   const body = '<div class="alert alert-info">Pembelian ini ditautkan ke setoran yang sudah disetujui. Penerimaan kas setoran lama tidak diubah; utang supplier dan stok bertambah sebagai transaksi baru.</div><div class="field"><label>Item</label><select data-f="katalogId" class="select">' + activeKatalog.map(k => '<option value="' + esc(k.id) + '">' + esc(k.nama) + ' · ' + esc((S.suppliers.find(s=>String(s.id)===String(k.supplierId))||{}).nama||'') + '</option>').join('') + '</select></div><div class="form-grid"><div class="field"><label>Jumlah (pcs)</label><input type="number" min="1" step="1" data-f="qty" class="input" value="1"></div><div class="field"><label>Harga beli / pcs</label><input type="number" min="1" data-f="hargaSatuan" class="input" value="' + (Number(activeKatalog[0].hargaBeli)||0) + '"></div></div><div class="field"><label>Catatan (opsional)</label><input data-f="catatan" class="input" placeholder="Mis. tambahan pesanan sore"></div>';
-  modal({ title:'Tambah Pembelian Susulan', body, actions:[
+  modal({ title:'Tambah Pembelian Susulan', body, onMount:w=>{
+    const select=w.querySelector('[data-f="katalogId"]'), price=w.querySelector('[data-f="hargaSatuan"]');
+    if(select&&price) select.addEventListener('change',()=>{const k=activeKatalog.find(x=>String(x.id)===String(select.value));price.value=Number(k&&k.hargaBeli)||0;});
+  }, actions:[
     {label:'Batal',onClick:c=>c()},
     {label:'Simpan Pembelian',className:'btn-primary',onClick:async(c,w)=>{
       const payload={setoranId,katalogId:w.querySelector('[data-f="katalogId"]').value,qty:parseInt(w.querySelector('[data-f="qty"]').value,10)||0,hargaSatuan:parseInt(w.querySelector('[data-f="hargaSatuan"]').value,10)||0,catatan:w.querySelector('[data-f="catatan"]').value};
