@@ -30,6 +30,7 @@ assert.ok(frontend.includes("$('[data-act=\"katalog-supplier-toggle\"]')"), 'Sup
 assert.ok(frontend.includes('function applyKatalogFilter()'), 'Catalog search and supplier filters must share one filter function');
 assert.ok(frontend.includes("row.style.setProperty('display', 'none', 'important')"), 'Non-matching catalog rows must be hidden inline even when stale CSS is cached');
 assert.ok(frontend.includes("Array.from(document.querySelectorAll('[data-katalog-row]'))"), 'Catalog search must query all product rows');
+assert.ok((frontend.match(/Array\\.from\\(document\\.querySelectorAll\\('\[data-act=\\\"katalog-supplier-toggle\\\"\\]'\\)\\)\\.forEach/g) || []).length >= 2, 'Supplier chip selection must update all chips without treating a single element as a list');
 has(frontend, /data-katalog-count/, 'Catalog search must update visible result count');
 has(frontend, /data-katalog-empty/, 'Catalog search must show an empty state when no products match');
 
