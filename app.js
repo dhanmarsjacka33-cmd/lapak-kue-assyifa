@@ -2010,15 +2010,15 @@ function formBayarTitipan(supplierId) {
   const pending = (tk.pending || []).find(x => String(x.supplierId) === String(supplierId));
   if (!pending || !pending.items || !pending.items.length) return toast('Tidak ada utang pending untuk supplier ini.', 'error');
   const nominalMaks = Number(pending.total) || 0;
-  const body = \`
+  const body = `
     <div class="card-flat" style="padding:12px;margin-bottom:12px;background:var(--amber-50);border:1px solid rgba(245,158,11,.3)">
-      <div class="text-xs text-gray">Sisa utang \${esc(pending.supplierNama)}</div>
-      <div class="text-lg font-bold" style="color:var(--red)">\${fmtRp(nominalMaks)}</div>
-      <div class="text-xs text-gray mt-1">\${pending.count} transaksi belum lunas</div>
+      <div class="text-xs text-gray">Sisa utang ${esc(pending.supplierNama)}</div>
+      <div class="text-lg font-bold" style="color:var(--red)">${fmtRp(nominalMaks)}</div>
+      <div class="text-xs text-gray mt-1">${pending.count} transaksi belum lunas</div>
     </div>
     <div class="field">
       <label>Nominal yang dibayarkan (bisa diedit)</label>
-      <input type="number" min="1" max="\${nominalMaks}" step="1" inputmode="numeric" class="input" data-f="nominalBayar" value="\${nominalMaks}">
+      <input type="number" min="1" max="${nominalMaks}" step="1" inputmode="numeric" class="input" data-f="nominalBayar" value="${nominalMaks}">
       <p class="text-xs text-gray mt-1">Isi sesuai uang yang benar-benar dibayarkan. Sisa utang tetap tercatat jika pembayaran sebagian.</p>
     </div>
     <div class="form-grid" style="margin-bottom:8px">
@@ -2026,7 +2026,7 @@ function formBayarTitipan(supplierId) {
       <div class="field" style="margin-bottom:0"><label>Metode</label><input class="input" value="Tunai — dari uang penjualan lapak" disabled></div>
     </div>
     <div class="field"><label>Catatan (opsional)</label><textarea class="textarea" data-f="catatan" placeholder="Catatan pembayaran" style="min-height:60px"></textarea></div>
-    <div class="alert alert-info" style="margin-bottom:0">Pembayaran sebagian akan mengurangi sisa utang supplier. Sisanya dapat dibayar nanti.</div>\`;
+    <div class="alert alert-info" style="margin-bottom:0">Pembayaran sebagian akan mengurangi sisa utang supplier. Sisanya dapat dibayar nanti.</div>`;
   modal({
     title: 'Bayar ' + esc(pending.supplierNama), body,
     actions: [
