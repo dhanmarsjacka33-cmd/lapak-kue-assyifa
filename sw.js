@@ -1,5 +1,5 @@
 /* Kue As-Syifa POS — Service Worker v4 */
-const CACHE_VERSION = 'kueassyifa-v8';
+const CACHE_VERSION = 'kueassyifa-v9';
 const CACHE_STATIC = CACHE_VERSION + '-static';
 const CACHE_DYNAMIC = CACHE_VERSION + '-dynamic';
 
