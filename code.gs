@@ -2597,7 +2597,7 @@ function apiEditSetoran(token, idSetoran, updates) {
 // ============================================================
 function apiGetKas(token, limit) {
   requireRole(token, ['admin']);
-  const kas = getSheetData('Kas').map(k => ({ id:k.id, tanggal:formatDateTime(k.tanggal), keterangan:k.keterangan || '', tipe:k.tipe || '', kategori:k.kategori || '', nominal:Number(k.nominal) || 0, saldo:Number(k.saldo) || 0 }));
+  const kas = getSheetData('Kas').map(k => ({ id:k.id, tanggal:formatDateTime(k.tanggal), keterangan:k.keterangan || '', tipe:k.tipe || '', kategori:k.kategori || '', metode:k.metode || '', nominal:Number(k.nominal) || 0, saldo:Number(k.saldo) || 0 }));
   if (limit) return kas.slice(-limit).reverse();
   return kas.reverse();
 }
@@ -3649,8 +3649,11 @@ function apiGetSaldoSupplier(token) {
 }
 function apiBayarSupplier(token, payload) {
   const sess = requireRole(token, ['admin']);
-  const supplierId = payload.supplierId;
+  payload = payload || {};
+  const supplierId = String(payload.supplierId || '').trim();
   if (!supplierId) return { success: false, message: 'Supplier wajib.' };
+  const metode = String(payload.metode || 'Tunai').trim();
+  if (!['Tunai','QRIS','Transfer'].includes(metode)) return { success:false, message:'Metode pembayaran harus Tunai, QRIS, atau Transfer.' };
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success: false, message: 'Sistem sibuk. Coba lagi.' };
   try {
@@ -3661,29 +3664,40 @@ function apiBayarSupplier(token, payload) {
     const iSupplier = h.indexOf('supplierId'), iStatus = h.indexOf('status');
     const iUtang = h.indexOf('utang'), iKasId = h.indexOf('kasId');
     const iBayarAt = h.indexOf('bayarAt'), iBayarBy = h.indexOf('bayarBy');
+    if (iSupplier < 0 || iStatus < 0 || iUtang < 0 || iKasId < 0) return {success:false,message:'Struktur Konsinyasi belum lengkap. Tidak ada perubahan.'};
     let totalBayar = 0;
     const rowsToUpdate = [];
     for (let i = 1; i < data.length; i++) {
-      if (String(data[i][iSupplier]) === String(supplierId) && data[i][iStatus] === 'Pending') {
+      if (String(data[i][iSupplier]) === supplierId && data[i][iStatus] === 'Pending') {
         totalBayar += Number(data[i][iUtang]) || 0; rowsToUpdate.push(i + 1);
       }
     }
     if (totalBayar <= 0) return { success: false, message: 'Tidak ada utang pending.' };
     const kasSheet = ss.getSheetByName('Kas');
+    if (!hasHeaders(kasSheet, ['id','tanggal','keterangan','tipe','kategori','nominal','saldo'])) return {success:false,message:'Struktur Kas belum lengkap. Tidak ada perubahan.'};
     const kasData = kasSheet.getDataRange().getValues();
     const iSaldo = kasData[0].indexOf('saldo');
     const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
     const kasId = 'KS' + Utilities.getUuid().slice(0, 8).toUpperCase();
-    const sup = getSheetData('Suppliers').find(s => String(s.id) === String(supplierId)) || {};
-    appendObjectsByHeaders(kasSheet,[{id:kasId,tanggal:new Date(),keterangan:'Bayar Supplier: '+(sup.nama||supplierId)+' ('+rowsToUpdate.length+' transaksi)',tipe:'Keluar',kategori:'Konsinyasi',nominal:totalBayar,saldo:saldoLama-totalBayar}]);
-    rowsToUpdate.forEach(r => {
-      sheet.getRange(r, iStatus + 1).setValue('Bayar');
-      sheet.getRange(r, iKasId + 1).setValue(kasId);
-      if (iBayarAt >= 0) sheet.getRange(r, iBayarAt + 1).setValue(new Date());
-      if (iBayarBy >= 0) sheet.getRange(r, iBayarBy + 1).setValue(sess.username);
-    });
+    const sup = getSheetData('Suppliers').find(s => String(s.id) === supplierId) || {};
+    const kasRow = {id:kasId,tanggal:new Date(),keterangan:'Bayar Supplier: '+(sup.nama||supplierId)+' ('+rowsToUpdate.length+' transaksi) ['+metode+']',tipe:'Keluar',kategori:'Konsinyasi',metode,nominal:totalBayar,saldo:saldoLama-totalBayar};
+    const journal = beginWriteJournal(['Konsinyasi','Kas']);
+    try {
+      appendObjectsByHeaders(kasSheet,[kasRow]);
+      rowsToUpdate.forEach(r => {
+        journalSetValue(journal, sheet, r, iStatus + 1, 'Bayar');
+        journalSetValue(journal, sheet, r, iKasId + 1, kasId);
+        if (iBayarAt >= 0) journalSetValue(journal, sheet, r, iBayarAt + 1, new Date());
+        if (iBayarBy >= 0) journalSetValue(journal, sheet, r, iBayarBy + 1, sess.username);
+      });
+    } catch (writeError) {
+      try { rollbackWriteJournal(journal); }
+      catch (rollbackError) { console.error('Gagal rollback pembayaran supplier:',rollbackError.message); return {success:false,message:'Pembayaran gagal dan pemulihan otomatis perlu diperiksa. '+writeError.message+' | '+rollbackError.message}; }
+      _clearSheetCache();
+      return {success:false,message:'Pembayaran gagal. Perubahan dibatalkan: '+writeError.message};
+    }
     _clearSheetCache();
-    return { success: true, message: 'Bayar ' + (sup.nama || supplierId) + ': Rp ' + totalBayar.toLocaleString('id-ID'), total: totalBayar, count: rowsToUpdate.length };
+    return { success: true, message: 'Bayar ' + (sup.nama || supplierId) + ': Rp ' + totalBayar.toLocaleString('id-ID') + ' via ' + metode, total: totalBayar, count: rowsToUpdate.length, kasId, metode };
   } finally { lock.releaseLock(); }
 }
 function apiGetRiwayatBayarSupplier(token, filter) {
