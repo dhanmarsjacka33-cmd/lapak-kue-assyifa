@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const backend = fs.readFileSync('code.gs', 'utf8');
 const frontend = fs.readFileSync('app.js', 'utf8');
 const config = fs.readFileSync('config.js', 'utf8');
+const styles = fs.readFileSync('styles.css', 'utf8');
 
 function has(text, pattern, message) {
   assert.match(text, pattern, message);
@@ -19,6 +20,7 @@ has(backend, /match\(\/\\\\\[\(Tunai\|QRIS\|Transfer\)\\\\\]\\\\s\*\$\/i\)/, 'Da
 has(backend, /DRAFT_REKAP\|/, 'Draft marker must be present in backend');
 has(frontend, /prepare-rekap-draft/, 'Frontend must expose prepare-draft action');
 has(frontend, /data-drop-search/, 'Frontend must include product search');
+assert.ok(styles.includes('.list-item[hidden]{display:none!important}'), 'Filtered catalog rows must be hidden even when list-item uses display:flex');
 // Catalog live-search regression guards.
 has(frontend, /data-katalog-search/, 'Catalog must expose a product search input');
 has(frontend, /data-katalog-row/, 'Catalog products must expose searchable rows');
