@@ -762,7 +762,7 @@ function tabSetoran() {
   if (done.length) {
     const p = paginate(done, S._pageSetoran);
     html += `<h3 class="card-title mt-3">${ico('file')} Riwayat (${done.length})</h3>`;
-    html += p.items.map(s => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(s.lapakId)} · ${esc(s.tanggal)}</div><div class="list-item-sub">${fmtRp(s.totalSistem)}${s.locked ? ' · 🔒' : ''}</div></div><span class="badge ${s.status === 'approved' ? 'badge-success' : 'badge-danger'}">${esc(s.status)}</span></div>`).join('');
+    html += p.items.map(s => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(s.lapakId)} · ${esc(s.tanggal)}</div><div class="list-item-sub">${fmtRp(s.totalSistem)}${s.locked ? ' · 🔒' : ''}</div></div><div class="list-item-actions"><span class="badge ${s.status === 'approved' ? 'badge-success' : 'badge-danger'}">${esc(s.status)}</span><button class="action-btn action-info" data-act="detail-setoran" data-id="${esc(s.id)}" title="Detail">${ico('eye','ico-sm')}</button>${s.status === 'approved' && !s.locked ? '<button class="action-btn action-edit" data-act="add-pembelian-susulan" data-id="' + esc(s.id) + '" title="Tambah pembelian susulan">+</button>' : ''}</div></div>`).join('');
     html += paginationFooter(p, 'setoran-page');
   }
   return html;
@@ -1423,6 +1423,7 @@ function handleClick(e) {
   if (a === 'approve') return doApprove(id);
   if (a === 'reject') return doReject(id);
   if (a === 'detail-setoran') return showSetoranDetail(id);
+  if (a === 'add-pembelian-susulan') return formPembelianSusulan(id);
   if (a === 'edit-setoran') return formEditSetoran(id);
   if (a === 'cetak-struk') return showStruk(id);
   if (a === 'add-kas') return formKas();
@@ -2422,6 +2423,26 @@ async function doReject(id) {
   } catch (e) { if (s) s.status = oldStatus; toast(e.message, 'error'); }
   finally { hideLoader(); render(); }
 }
+async function formPembelianSusulan(setoranId) {
+  if (!setoranId) return toast('Setoran tidak ditemukan.', 'error');
+  const activeKatalog = (S.katalog || []).filter(k => k.supplierId && (S.suppliers || []).some(s => String(s.id) === String(k.supplierId)));
+  if (!activeKatalog.length) return toast('Belum ada item katalog dengan supplier yang valid.', 'error');
+  const body = '<div class="alert alert-info">Pembelian ini ditautkan ke setoran yang sudah disetujui. Penerimaan kas setoran lama tidak diubah; utang supplier dan stok bertambah sebagai transaksi baru.</div><div class="field"><label>Item</label><select data-f="katalogId" class="select">' + activeKatalog.map(k => '<option value="' + esc(k.id) + '">' + esc(k.nama) + ' · ' + esc((S.suppliers.find(s=>String(s.id)===String(k.supplierId))||{}).nama||'') + '</option>').join('') + '</select></div><div class="form-grid"><div class="field"><label>Jumlah (pcs)</label><input type="number" min="1" step="1" data-f="qty" class="input" value="1"></div><div class="field"><label>Harga beli / pcs</label><input type="number" min="1" data-f="hargaSatuan" class="input" value="' + (Number(activeKatalog[0].hargaBeli)||0) + '"></div></div><div class="field"><label>Catatan (opsional)</label><input data-f="catatan" class="input" placeholder="Mis. tambahan pesanan sore"></div>';
+  modal({ title:'Tambah Pembelian Susulan', body, onMount:w=>{
+    const select=w.querySelector('[data-f="katalogId"]'), price=w.querySelector('[data-f="hargaSatuan"]');
+    if(select&&price) select.addEventListener('change',()=>{const k=activeKatalog.find(x=>String(x.id)===String(select.value));price.value=Number(k&&k.hargaBeli)||0;});
+  }, actions:[
+    {label:'Batal',onClick:c=>c()},
+    {label:'Simpan Pembelian',className:'btn-primary',onClick:async(c,w)=>{
+      const payload={setoranId,katalogId:w.querySelector('[data-f="katalogId"]').value,qty:parseInt(w.querySelector('[data-f="qty"]').value,10)||0,hargaSatuan:parseInt(w.querySelector('[data-f="hargaSatuan"]').value,10)||0,catatan:w.querySelector('[data-f="catatan"]').value};
+      if(payload.qty<=0||payload.hargaSatuan<=0) return toast('Jumlah dan harga harus lebih dari 0.','error');
+      c();showLoader();
+      try{const r=await api('addSetoranPembelianSusulan',{token:S.token,payload});toast(r.message,r.success?'success':'error');if(r.success){MEM.clear();S.setoran=await api('getSetoranList',{token:S.token,filter:S._setoranFilter||{}});S.saldoSupplier=await api('getSaldoSupplier',{token:S.token});S.kartuStok=await api('getKartuStok',{token:S.token,filter:{}});}}
+      catch(e){toast(e.message,'error');}
+      finally{hideLoader();render();}
+    }}
+  ]});
+}
 async function showSetoranDetail(id) {
   showLoader();
   try {
@@ -2429,7 +2450,9 @@ async function showSetoranDetail(id) {
     hideLoader();
     let itemsHtml = (d.items || []).length ? d.items.map(it => '<div class="row-between" style="padding:8px 0;border-bottom:1px solid #f8fafc;font-size:13px"><div style="min-width:0;flex:1"><strong>' + esc(it.nama) + '</strong><span class="text-xs text-gray">Drop ' + it.qtyDrop + ' · Sisa ' + it.qtySisa + ' · Laku ' + it.qtyLaku + '</span></div><strong class="text-green">' + fmtRp(it.subtotal) + '</strong></div>').join('') : '<p class="text-xs text-gray">Tidak ada item.</p>';
     let pengHtml = (d.pengeluaran || []).length ? d.pengeluaran.map(p => '<div class="row-between" style="padding:6px 0;font-size:13px"><span>' + esc(p.keterangan) + '</span><span class="text-red">- ' + fmtRp(p.nominal) + '</span></div>').join('') : '<p class="text-xs text-gray">Tidak ada pengeluaran.</p>';
-    modal({ title: 'Detail Setoran', body: '<strong class="text-sm">Item Terjual</strong><div class="mb-3 mt-2">' + itemsHtml + '</div><strong class="text-sm">Pengeluaran</strong><div class="mt-2">' + pengHtml + '</div>', actions: [{ label: 'Tutup', onClick: c => c() }] });
+    const susulan = d.pembelianSusulan || [];
+    const susulanHtml = susulan.length ? susulan.map(p => '<div class="row-between" style="padding:7px 0;border-bottom:1px solid #f8fafc;font-size:13px"><div><strong>' + esc(p.nama) + '</strong><div class="text-xs text-gray">' + esc(p.supplierNama) + ' · ' + p.qty + ' × ' + fmtRp(p.hargaSatuan) + ' · ' + esc(p.status) + '</div></div><strong>' + fmtRp(p.total) + '</strong></div>').join('') : '<p class="text-xs text-gray">Belum ada pembelian susulan.</p>';
+    modal({ title: 'Detail Setoran', body: '<strong class="text-sm">Item Terjual</strong><div class="mb-3 mt-2">' + itemsHtml + '</div><strong class="text-sm">Pengeluaran</strong><div class="mt-2 mb-3">' + pengHtml + '</div><strong class="text-sm">Pembelian Susulan / Utang Supplier</strong><div class="mt-2">' + susulanHtml + '</div>', actions: [{ label: 'Tutup', onClick: c => c() }] });
   } catch (e) { hideLoader(); toast(e.message, 'error'); }
 }
 async function formEditSetoran(id) {
