@@ -1218,7 +1218,7 @@ function tabRiwayatBayarSupplier() {
   const total = list.reduce((s, x) => s + (x.total || 0), 0);
   let html = `<h3 class="card-title">${ico('file')} Riwayat Bayar Supplier</h3><div class="hero"><div class="hero-label">Total Dibayar</div><div class="hero-value">${fmtRp(total)}</div><div class="hero-sub">${list.length} pembayaran</div></div>`;
   if (!list.length) html += '<div class="empty"><p>Belum ada riwayat.</p></div>';
-  else html += list.map(r => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(r.supplierNama)}</div><div class="list-item-sub">${esc(r.bayarAt)} · ${esc(r.bayarBy)}</div><div class="text-xs text-gray mt-1">${r.count} transaksi</div></div><div class="text-sm font-bold text-green">${fmtRp(r.total)}</div></div>`).join('');
+  else html += list.map(r => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(r.supplierNama)}</div><div class="list-item-sub">${esc(r.bayarAt)} · ${esc(r.bayarBy)}${r.metode ? " · " + esc(r.metode) : ""}</div><div class="text-xs text-gray mt-1">${r.count} transaksi</div></div><div class="text-sm font-bold text-green">${fmtRp(r.total)}</div></div>`).join('');
   return html;
 }
 
