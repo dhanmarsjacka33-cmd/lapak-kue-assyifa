@@ -26,7 +26,8 @@ has(frontend, /data-katalog-search/, 'Catalog must expose a product search input
 has(frontend, /data-katalog-row/, 'Catalog products must expose searchable rows');
 has(frontend, /data-supplier-id=/, 'Catalog rows must expose supplier IDs for filtering');
 has(frontend, /katalog-supplier-toggle/, 'Catalog must support selecting multiple suppliers');
-assert.ok(frontend.includes("$('[data-act=\"katalog-supplier-toggle\"]')"), 'Supplier chip handlers must update all selected chips');
+const supplierChipSelector = "Array.from(document.querySelectorAll('[data-act=\"katalog-supplier-toggle\"]')).forEach";
+assert.ok(frontend.indexOf(supplierChipSelector) >= 0 && frontend.lastIndexOf(supplierChipSelector) > frontend.indexOf(supplierChipSelector), 'Both supplier chip handlers must update all selected chips');
 assert.ok(frontend.includes('function applyKatalogFilter()'), 'Catalog search and supplier filters must share one filter function');
 assert.ok(frontend.includes("row.style.setProperty('display', 'none', 'important')"), 'Non-matching catalog rows must be hidden inline even when stale CSS is cached');
 assert.ok(frontend.includes("Array.from(document.querySelectorAll('[data-katalog-row]'))"), 'Catalog search must query all product rows');
