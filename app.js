@@ -645,7 +645,7 @@ function renderRekapForm(d) {
         <p class="text-xs font-semibold mb-2">Total Penerimaan</p>
         <div class="form-grid">
           <div class="field"><label>Tunai (Rp)</label><input type="number" name="tunai" min="0" inputmode="numeric" class="input field-sm"></div>
-          <div class="field"><label>QRIS (Rp)</label><input type="number" name="qris" min="0" inputmode="numeric" class="input field-sm"></div>
+          <div class="field"><label>QRIS (Rp)</label><input type="number" name="qris" min="0" inputmode="numeric" class="input field-sm"></div><div class="field"><label>Transfer (Rp)</label><input type="number" name="transfer" min="0" inputmode="numeric" class="input field-sm"></div>
         </div>
       </div>
       <div class="alert alert-info" data-summary>${summaryHTML()}</div>
@@ -661,16 +661,17 @@ function summaryHTML() {
   $$('[data-peng-row]').forEach(r => { const el = r.querySelector('[data-peng-nom]'); if (el) pengeluaran += parseInt(el.value, 10) || 0; });
   const tk = S.titipanKaryawan || {};
   const totalTitipan = (tk.sudahBayar || []).filter(x => !x.setoranId).reduce((s, x) => s + (x.total || 0), 0);
-  const tunaiEl = $('input[name="tunai"]'), qrisEl = $('input[name="qris"]');
+  const tunaiEl = $('input[name="tunai"]'), qrisEl = $('input[name="qris"]'), transferEl = $('input[name="transfer"]');
   const tunai = tunaiEl ? (parseInt(tunaiEl.value, 10) || 0) : 0;
   const qris = qrisEl ? (parseInt(qrisEl.value, 10) || 0) : 0;
+  const transfer = transferEl ? (parseInt(transferEl.value, 10) || 0) : 0;
   const tunaiDiserahkan = tunai - pengeluaran - totalTitipan;
-  const expected = tunaiDiserahkan + qris;
-  const selisih = total - (tunai + qris);
+  const expected = tunaiDiserahkan + qris + transfer;
+  const selisih = total - (tunai + qris + transfer);
   return `<div style="flex:1">
     <div class="row-between text-xs"><span>Penjualan</span><strong>${fmtRp(total)}</strong></div>
     <div class="row-between text-xs"><span>Tunai dipegang karyawan</span><span>${fmtRp(tunai)}</span></div>
-    <div class="row-between text-xs"><span>QRIS langsung ke Owner</span><span>${fmtRp(qris)}</span></div>
+    <div class="row-between text-xs"><span>QRIS</span><span>${fmtRp(qris)}</span></div><div class="row-between text-xs"><span>Transfer</span><span>${fmtRp(transfer)}</span></div>
     ${totalTitipan > 0 ? `<div class="row-between text-xs text-gray"><span>Pembayaran titipan supplier (arus kas keluar)</span><span>- ${fmtRp(totalTitipan)}</span></div>` : ''}
     <div class="row-between text-xs text-red"><span>Pengeluaran operasional</span><span>- ${fmtRp(pengeluaran)}</span></div>
     <div class="row-between text-xs text-green font-bold mt-2"><span>Tunai yang diserahkan karyawan</span><span>${fmtRp(tunaiDiserahkan)}</span></div>
@@ -749,7 +750,7 @@ function tabSetoran() {
         <div class="card-flat" style="padding:12px;font-size:13px">
           <div class="row-between"><span class="text-gray">Penjualan</span><strong>${fmtRp(s.totalSistem)}</strong></div>
           <div class="row-between text-gray"><span>Tunai</span><span>${fmtRp(s.totalTunai)}</span></div>
-          <div class="row-between text-gray"><span>QRIS langsung ke Owner</span><span>${fmtRp(s.totalQris)}</span></div>
+          <div class="row-between text-gray"><span>QRIS</span><span>${fmtRp(s.totalQris)}</span></div><div class="row-between text-gray"><span>Transfer</span><span>${fmtRp(s.totalTransfer || 0)}</span></div>
           <div class="row-between text-red"><span>Pengeluaran operasional</span><span>- ${fmtRp(s.pengeluaran)}</span></div>
           <div class="row-between text-gray"><span>Pembayaran titipan supplier</span><span>- ${fmtRp(s.totalTitipan)}</span></div>
           <div class="row-between text-gray"><span>Tunai diserahkan karyawan</span><span>${fmtRp(s.uangDisetor)}</span></div>
@@ -1217,7 +1218,7 @@ function tabRiwayatBayarSupplier() {
   const total = list.reduce((s, x) => s + (x.total || 0), 0);
   let html = `<h3 class="card-title">${ico('file')} Riwayat Bayar Supplier</h3><div class="hero"><div class="hero-label">Total Dibayar</div><div class="hero-value">${fmtRp(total)}</div><div class="hero-sub">${list.length} pembayaran</div></div>`;
   if (!list.length) html += '<div class="empty"><p>Belum ada riwayat.</p></div>';
-  else html += list.map(r => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(r.supplierNama)}</div><div class="list-item-sub">${esc(r.bayarAt)} · ${esc(r.bayarBy)}</div><div class="text-xs text-gray mt-1">${r.count} transaksi</div></div><div class="text-sm font-bold text-green">${fmtRp(r.total)}</div></div>`).join('');
+  else html += list.map(r => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(r.supplierNama)}</div><div class="list-item-sub">${esc(r.bayarAt)} · ${esc(r.bayarBy)}${r.metode ? " · " + esc(r.metode) : ""}</div><div class="text-xs text-gray mt-1">${r.count} transaksi</div></div><div class="text-sm font-bold text-green">${fmtRp(r.total)}</div></div>`).join('');
   return html;
 }
 
@@ -1885,7 +1886,7 @@ async function doSubmitRekap() {
   if (!ok) return;
   S.submitting = true;
   showLoader();
-  try { const r = await api('submitRekap', { token: S.token, payload: { tanggal: d.tanggal, items, pengeluaran, totalTunai: tunai, totalQris: qris } }); toast(r.message || 'Laporan terkirim', r.success ? 'success' : 'error'); if (r.success) await reloadKaryawan(); }
+  try { const r = await api('submitRekap', { token: S.token, payload: { tanggal: d.tanggal, items, pengeluaran, totalTunai: tunai, totalQris: qris, totalTransfer: (parseInt(($('input[name="transfer"]')||{}).value,10)||0) } }); toast(r.message || 'Laporan terkirim', r.success ? 'success' : 'error'); if (r.success) await reloadKaryawan(); }
   catch (e) { toast(e.message, 'error'); }
   finally { hideLoader(); S.submitting = false; render(); }
 }
@@ -2437,12 +2438,12 @@ async function formEditSetoran(id) {
   if (s.locked) return toast('Setoran terkunci.', 'error');
   modal({
     title: 'Edit Setoran',
-    body: '<div class="field"><label>Total Tunai</label><input type="number" data-f="totalTunai" class="input" value="' + s.totalTunai + '"></div><div class="field"><label>Total QRIS</label><input type="number" data-f="totalQris" class="input" value="' + s.totalQris + '"></div><div class="field"><label>Pengeluaran</label><input type="number" data-f="pengeluaran" class="input" value="' + s.pengeluaran + '"></div><div class="field"><label>Catatan</label><textarea data-f="catatan" class="textarea">' + esc(s.catatan || '') + '</textarea></div>',
+    body: '<div class="field"><label>Total Tunai</label><input type="number" data-f="totalTunai" class="input" value="' + s.totalTunai + '"></div><div class="field"><label>Total QRIS</label><input type="number" data-f="totalQris" class="input" value="' + s.totalQris + '"></div><div class="field"><label>Total Transfer</label><input type="number" data-f="totalTransfer" class="input" value="' + (s.totalTransfer || 0) + '"></div><div class="field"><label>Pengeluaran</label><input type="number" data-f="pengeluaran" class="input" value="' + s.pengeluaran + '"></div><div class="field"><label>Catatan</label><textarea data-f="catatan" class="textarea">' + esc(s.catatan || '') + '</textarea></div>',
     actions: [
       { label: 'Batal', onClick: c => c() },
       { label: 'Simpan', className: 'btn-primary', onClick: async (c, w) => {
         const get = k => w.querySelector('[data-f="' + k + '"]').value;
-        const updates = { totalTunai: parseInt(get('totalTunai'), 10) || 0, totalQris: parseInt(get('totalQris'), 10) || 0, pengeluaran: parseInt(get('pengeluaran'), 10) || 0, catatan: get('catatan') };
+        const updates = { totalTunai: parseInt(get('totalTunai'), 10) || 0, totalQris: parseInt(get('totalQris'), 10) || 0, totalTransfer: parseInt(get('totalTransfer'), 10) || 0, pengeluaran: parseInt(get('pengeluaran'), 10) || 0, catatan: get('catatan') };
         c(); showLoader();
         try { const r = await api('editSetoran', { token: S.token, id, updates }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) { MEM.clear('setoran'); S.setoran = await api('getSetoranList', { token: S.token, filter: S._setoranFilter || {} }); } }
         catch (e) { toast(e.message, 'error'); }
@@ -3181,13 +3182,15 @@ async function formBayarSupplier(supplierId) {
     body += '<p class="text-xs font-semibold text-gray mb-2">Rincian</p><div style="max-height:300px;overflow-y:auto">';
     body += detail.items.map(it => '<div class="row-between text-xs" style="padding:8px 0;border-bottom:1px solid #f8fafc"><div style="min-width:0;flex:1"><div class="font-semibold">' + esc(it.nama) + '</div><div class="text-gray">' + esc(it.tanggal) + ' · ' + esc(it.lapakNama) + '</div><div class="text-gray">' + it.qtyLaku + ' × ' + fmtRp(it.hargaTitip) + '</div></div><div class="text-right font-bold">' + fmtRp(it.utang) + '</div></div>').join('');
     body += '</div>';
+    body += '<div class="field mt-3"><label>Metode Pembayaran</label><select data-f="metode" class="select"><option value="Tunai">Tunai</option><option value="QRIS">QRIS</option><option value="Transfer">Transfer</option></select></div>';
     modal({
       title: 'Bayar Supplier', body,
       actions: [
         { label: 'Batal', onClick: c => c() },
-        { label: 'Bayar ' + fmtRp(detail.total), className: 'btn-success', onClick: async (c) => {
+        { label: 'Bayar ' + fmtRp(detail.total), className: 'btn-success', onClick: async (c, w) => {
+          const metode = w.querySelector('[data-f="metode"]').value;
           c(); showLoader();
-          try { const r = await api('bayarSupplier', { token: S.token, payload: { supplierId } }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) { await loadKonsinyasi(); S.dash = await api('getAdminDashboard', { token: S.token }); MEM.clear(); } }
+          try { const r = await api('bayarSupplier', { token: S.token, payload: { supplierId, metode } }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) { await loadKonsinyasi(); S.dash = await api('getAdminDashboard', { token: S.token }); MEM.clear(); } }
           catch (e) { toast(e.message, 'error'); }
           finally { hideLoader(); render(); }
         } }

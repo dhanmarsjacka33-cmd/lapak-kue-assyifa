@@ -1477,7 +1477,7 @@ function apiGetStrukData(token, setoranId) {
   const details = getSheetData('SetoranDetail').filter(d => String(d.setoranId) === String(setoranId));
   const katMap = {}; getSheetData('Katalog').forEach(k => katMap[k.id] = k.nama);
   const lapak = getSheetData('Lapak').find(l => String(l.id) === String(setoran.lapakId)) || {};
-  return { success: true, id: setoran.id, tanggal: formatDateTime(setoran.tanggal), lapakNama: lapak.nama || setoran.lapakId, items: details.map(d => ({ nama: katMap[d.katalogId] || d.katalogId, qty: Number(d.qtyLaku) || 0, harga: Number(d.hargaJual) || 0, subtotal: Number(d.subtotal) || 0 })), totalSistem: Number(setoran.totalSistem) || 0, totalTunai: Number(setoran.totalTunai) || 0, totalQris: Number(setoran.totalQris) || 0, pengeluaran: Number(setoran.pengeluaran) || 0 };
+  return { success: true, id: setoran.id, tanggal: formatDateTime(setoran.tanggal), lapakNama: lapak.nama || setoran.lapakId, items: details.map(d => ({ nama: katMap[d.katalogId] || d.katalogId, qty: Number(d.qtyLaku) || 0, harga: Number(d.hargaJual) || 0, subtotal: Number(d.subtotal) || 0 })), totalSistem: Number(setoran.totalSistem) || 0, totalTunai: Number(setoran.totalTunai) || 0, totalQris: Number(setoran.totalQris) || 0, totalTransfer: Number(setoran.totalTransfer) || 0, pengeluaran: Number(setoran.pengeluaran) || 0 };
 }
 function apiGetStrukPesanan(token, id) {
   requireRole(token, ['admin']);
@@ -1995,6 +1995,7 @@ function apiSubmitRekap(token, payload) {
   const pengeluaranList = Array.isArray(payload.pengeluaran) ? payload.pengeluaran.slice() : [];
   const totalTunai = toPosNum(payload.totalTunai);
   const totalQris = toPosNum(payload.totalQris);
+  const totalTransfer = toPosNum(payload.totalTransfer);
   if (!items.length) return { success: false, message: 'Tidak ada item yang dilaporkan.' };
   const seenCatalogIds = {};
   for (const it of items) {
@@ -2052,7 +2053,7 @@ function apiSubmitRekap(token, payload) {
     if (!Number.isFinite(nominal) || nominal < 0) return { success:false, message:'Nominal pengeluaran tidak valid. Periksa kembali daftar pengeluaran.' };
   }
   const totalPengeluaran = pengeluaranList.reduce((s, p) => s + toPosNum(p.nominal), 0);
-  const selisih = totalSistem - (totalTunai + totalQris);
+  const selisih = totalSistem - (totalTunai + totalQris + totalTransfer);
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success: false, message: 'Sistem sibuk. Coba lagi.' };
   try {
@@ -2063,7 +2064,7 @@ function apiSubmitRekap(token, payload) {
     // QRIS langsung diterima Owner; karyawan hanya menyerahkan sisa uang tunai.
     const uangDisetor = totalTunai - totalTitipan - totalPengeluaran;
     if (uangDisetor < 0) return { success:false, message:'Pembayaran titipan dan pengeluaran melebihi penerimaan tunai. Periksa kembali transaksi tunai.' };
-    const expectedSetoran = uangDisetor + totalQris;
+    const expectedSetoran = uangDisetor + totalQris + totalTransfer;
     const unpaidDraft = getSheetData('Konsinyasi').filter(k => String(k.lapakId)===String(sess.lapakId) && String(k.catatan||'').indexOf(draftMarker)===0 && String(k.status)==='Pending');
     if (unpaidDraft.length) return {success:false,message:'Masih ada tagihan titip jual yang belum dibayar. Lunasi terlebih dahulu sebelum mengirim laporan.'};
     if (getSheetData('Setoran').some(x => formatDate(x.tanggal)===tgl && String(x.lapakId)===String(sess.lapakId))) return {success:false,message:'Laporan hari ini sudah dikirim.'};
@@ -2091,7 +2092,7 @@ function apiSubmitRekap(token, payload) {
     const setoranSheet = ss.getSheetByName('Setoran');
     const detailSheet = ss.getSheetByName('SetoranDetail');
     const pengSheet = ss.getSheetByName('PengeluaranLapak');
-    const requiredSetoran = ['id','tanggal','lapakId','userId','totalTunai','totalQris','totalSistem','pengeluaran','expectedSetoran','uangDisetor','selisih','status'];
+    const requiredSetoran = ['id','tanggal','lapakId','userId','totalTunai','totalQris','totalTransfer','totalSistem','pengeluaran','expectedSetoran','uangDisetor','selisih','status'];
     if (!hasHeaders(setoranSheet, requiredSetoran)) {
       return { success:false, message:'Struktur Setoran masih menggunakan format lama. Submit ditahan agar data historis tidak tertimpa. Tambahkan kolom versi baru secara non-destruktif pada Spreadsheet testing sebelum uji submit.' };
     }
@@ -2115,7 +2116,7 @@ function apiSubmitRekap(token, payload) {
     try {
     appendObjectsByHeaders(setoranSheet, [{
       id:setoranId, tanggal:tgl, lapakId:sess.lapakId, userId:sess.id,
-      totalTunai, totalQris, totalSistem, pengeluaran:totalPengeluaran,
+      totalTunai, totalQris, totalTransfer, totalSistem, pengeluaran:totalPengeluaran,
       expectedSetoran, uangDisetor, selisih, status:'pending',
       approvedAt:'', approvedBy:'', catatan:String(payload.catatan || ''),
       editHistory:'', locked:false, lapak:sess.lapakId, totalCash:totalTunai
@@ -2426,7 +2427,7 @@ function mapSetoran(s) {
   const totalTitipan = getSheetData('BayarTitipanKaryawan')
     .filter(b => String(b.setoranId) === String(s.id) && String(b.status || 'Active') === 'Active' && String(b.metode || 'Tunai') === 'Tunai')
     .reduce((sum, b) => sum + (Number(b.totalBayar) || 0), 0);
-  return { id:s.id, tanggal: formatDate(s.tanggal), lapakId:s.lapakId, totalTunai: Number(s.totalTunai) || 0, totalQris: Number(s.totalQris) || 0, totalSistem: Number(s.totalSistem) || 0, pengeluaran: Number(s.pengeluaran) || 0, totalTitipan, expectedSetoran: Number(s.expectedSetoran) || 0, uangDisetor: Number(s.uangDisetor) || 0, selisih: Number(s.selisih) || 0, status: s.status, catatan: s.catatan || '', locked: String(s.locked) === 'true' || s.locked === true, editHistory: s.editHistory || '' };
+  return { id:s.id, tanggal: formatDate(s.tanggal), lapakId:s.lapakId, totalTunai: Number(s.totalTunai) || 0, totalQris: Number(s.totalQris) || 0, totalTransfer: Number(s.totalTransfer) || 0, totalSistem: Number(s.totalSistem) || 0, pengeluaran: Number(s.pengeluaran) || 0, totalTitipan, expectedSetoran: Number(s.expectedSetoran) || 0, uangDisetor: Number(s.uangDisetor) || 0, selisih: Number(s.selisih) || 0, status: s.status, catatan: s.catatan || '', locked: String(s.locked) === 'true' || s.locked === true, editHistory: s.editHistory || '' };
 }
 function apiGetAdminDashboard(token) {
   requireRole(token, ['admin']);
@@ -2477,7 +2478,7 @@ function apiApproveSetoran(token, idSetoran) {
       return { success:false, message:'Struktur Setoran lama belum mendukung persetujuan versi baru. Tidak ada perubahan yang dilakukan.' };
     }
     const iId = h.indexOf('id'), iStatus = h.indexOf('status');
-    const iTunai = h.indexOf('totalTunai'), iQris = h.indexOf('totalQris'), iPengeluaran = h.indexOf('pengeluaran');
+    const iTunai = h.indexOf('totalTunai'), iQris = h.indexOf('totalQris'), iTransfer = h.indexOf('totalTransfer'), iPengeluaran = h.indexOf('pengeluaran');
     const iLapak = h.indexOf('lapakId'), iAt = h.indexOf('approvedAt'), iBy = h.indexOf('approvedBy');
     if (!hasHeaders(kasSheet, ['id','tanggal','keterangan','tipe','kategori','nominal','saldo'])) {
       return { success:false, message:'Struktur Kas belum lengkap. Setoran tidak disetujui dan tidak ada perubahan.' };
@@ -2485,13 +2486,14 @@ function apiApproveSetoran(token, idSetoran) {
     if (iTunai < 0 || iPengeluaran < 0) {
       return { success:false, message:'Kolom totalTunai/pengeluaran belum tersedia. Setoran tidak disetujui dan tidak ada perubahan.' };
     }
-    let rowIdx = -1, totalTunai = 0, qris = 0, pengeluaranOperasional = 0, lapakId = '', userId = '', tanggal = '';
+    let rowIdx = -1, totalTunai = 0, qris = 0, transfer = 0, pengeluaranOperasional = 0, lapakId = '', userId = '', tanggal = '';
     for (let i = 1; i < data.length; i++) {
       if (String(data[i][iId]) === String(idSetoran)) {
         if (data[i][iStatus] === 'approved') return { success: false, message: 'Setoran sudah disetujui.' };
         if (data[i][iStatus] === 'rejected') return { success: false, message: 'Setoran sudah ditolak.' };
         totalTunai = Number(data[i][iTunai]) || 0;
         qris = Number(data[i][iQris]) || 0;
+        transfer = iTransfer >= 0 ? Number(data[i][iTransfer]) || 0 : 0;
         pengeluaranOperasional = Number(data[i][iPengeluaran]) || 0;
         lapakId = data[i][iLapak];
         userId = data[i][h.indexOf('userId')];
@@ -2505,8 +2507,9 @@ function apiApproveSetoran(token, idSetoran) {
     let saldo = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
     const newRows = [];
     // Catat penerimaan bruto. QRIS langsung ke Owner, sedangkan tunai dipegang karyawan.
-    if (totalTunai > 0) { saldo += totalTunai; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Penjualan Tunai '+lapakId,tipe:'Masuk',kategori:'Penjualan Tunai',nominal:totalTunai,saldo}); }
-    if (qris > 0) { saldo += qris; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Penerimaan QRIS langsung Owner '+lapakId,tipe:'Masuk',kategori:'Penjualan QRIS',nominal:qris,saldo}); }
+    if (totalTunai > 0) { saldo += totalTunai; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Penjualan Tunai '+lapakId,tipe:'Masuk',kategori:'Penjualan Tunai',metode:'Tunai',nominal:totalTunai,saldo}); }
+    if (qris > 0) { saldo += qris; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Penerimaan QRIS '+lapakId,tipe:'Masuk',kategori:'Penjualan QRIS',metode:'QRIS',nominal:qris,saldo}); }
+    if (transfer > 0) { saldo += transfer; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Penerimaan Transfer '+lapakId,tipe:'Masuk',kategori:'Penjualan Transfer',metode:'Transfer',nominal:transfer,saldo}); }
     // Pembayaran supplier adalah arus kas keluar tersendiri, bukan biaya operasional.
     const totalTitipan = getSheetData('BayarTitipanKaryawan')
       .filter(b => String(b.setoranId) === String(idSetoran) && String(b.status || 'Active') === 'Active' && String(b.metode || 'Tunai') === 'Tunai')
@@ -2533,7 +2536,7 @@ function apiApproveSetoran(token, idSetoran) {
     const user = getSheetData('Users').find(u => String(u.id) === String(userId));
     if (user && (user.email || user.username)) {
       const lapak = getSheetData('Lapak').find(l => String(l.id) === String(lapakId)) || {};
-      try { notifySetoranApproved({ id: idSetoran, tanggal, expectedSetoran: totalTunai + qris - pengeluaranOperasional - totalTitipan }, lapak.nama || lapakId, user.email || '', user.username || ''); } catch (notifyError) { console.error('Notifikasi persetujuan gagal, transaksi tetap disetujui:', notifyError.message); }
+      try { notifySetoranApproved({ id: idSetoran, tanggal, expectedSetoran: totalTunai + qris + transfer - pengeluaranOperasional - totalTitipan }, lapak.nama || lapakId, user.email || '', user.username || ''); } catch (notifyError) { console.error('Notifikasi persetujuan gagal, transaksi tetap disetujui:', notifyError.message); }
     }
     return { success: true, message: 'Setoran disetujui.' };
   } finally { lock.releaseLock(); }
@@ -2570,17 +2573,17 @@ function apiEditSetoran(token, idSetoran, updates) {
       if(iLocked>=0&&(String(data[i][iLocked])==='true'||data[i][iLocked]===true)) return {success:false,message:'Setoran ini terkunci.'};
       const row=i+1, changes={}, journal=beginWriteJournal(['Setoran']);
       try {
-        ['totalTunai','totalQris','pengeluaran','catatan'].forEach(field=>{
+        ['totalTunai','totalQris','totalTransfer','pengeluaran','catatan'].forEach(field=>{
           if(updates[field]!==undefined){const idx=h.indexOf(field);if(idx>=0){const before=data[i][idx];journalSetValue(journal,sheet,row,idx+1,field==='catatan'?String(updates[field]):toPosNum(updates[field]));changes[field]={from:before,to:updates[field]};}}
         });
-        const it=h.indexOf('totalTunai'), iq=h.indexOf('totalQris'), is=h.indexOf('totalSistem'), ip=h.indexOf('pengeluaran'), ie=h.indexOf('expectedSetoran'), iu=h.indexOf('uangDisetor'), il=h.indexOf('selisih');
-        const nt=Number(sheet.getRange(row,it+1).getValue())||0, nq=Number(sheet.getRange(row,iq+1).getValue())||0, ns=Number(sheet.getRange(row,is+1).getValue())||0, np=Number(sheet.getRange(row,ip+1).getValue())||0;
+        const it=h.indexOf('totalTunai'), iq=h.indexOf('totalQris'), itr=h.indexOf('totalTransfer'), is=h.indexOf('totalSistem'), ip=h.indexOf('pengeluaran'), ie=h.indexOf('expectedSetoran'), iu=h.indexOf('uangDisetor'), il=h.indexOf('selisih');
+        const nt=Number(sheet.getRange(row,it+1).getValue())||0, nq=Number(sheet.getRange(row,iq+1).getValue())||0, ntr=itr>=0?Number(sheet.getRange(row,itr+1).getValue())||0:0, ns=Number(sheet.getRange(row,is+1).getValue())||0, np=Number(sheet.getRange(row,ip+1).getValue())||0;
         const titipan=getSheetData('BayarTitipanKaryawan').filter(b=>String(b.setoranId)===String(idSetoran)&&String(b.status||'Active')==='Active'&&String(b.metode||'Tunai')==='Tunai').reduce((sum,b)=>sum+(Number(b.totalBayar)||0),0);
         const tunaiDiserahkan=nt-np-titipan;
         if(tunaiDiserahkan<0) throw new Error('Pembayaran titipan dan pengeluaran melebihi penerimaan tunai.');
         if(ie>=0) journalSetValue(journal,sheet,row,ie+1,tunaiDiserahkan+nq);
         if(iu>=0) journalSetValue(journal,sheet,row,iu+1,tunaiDiserahkan);
-        journalSetValue(journal,sheet,row,il+1,ns-(nt+nq));
+        journalSetValue(journal,sheet,row,il+1,ns-(nt+nq+ntr));
         if(iEdit>=0){const prev=sheet.getRange(row,iEdit+1).getValue(), entry=formatDateTime(new Date())+' by '+sess.username+': '+JSON.stringify(changes);journalSetValue(journal,sheet,row,iEdit+1,(prev?prev+' || ':'')+entry);}
       } catch(writeError) {
         try{rollbackWriteJournal(journal);}catch(rollbackError){console.error('Gagal rollback edit setoran:',rollbackError.message);return{success:false,message:'Edit setoran gagal dan pemulihan otomatis tidak sepenuhnya berhasil. Hentikan proses dan minta admin memeriksa data. Detail: '+writeError.message+' | '+rollbackError.message};}
@@ -2597,7 +2600,7 @@ function apiEditSetoran(token, idSetoran, updates) {
 // ============================================================
 function apiGetKas(token, limit) {
   requireRole(token, ['admin']);
-  const kas = getSheetData('Kas').map(k => ({ id:k.id, tanggal:formatDateTime(k.tanggal), keterangan:k.keterangan || '', tipe:k.tipe || '', kategori:k.kategori || '', nominal:Number(k.nominal) || 0, saldo:Number(k.saldo) || 0 }));
+  const kas = getSheetData('Kas').map(k => ({ id:k.id, tanggal:formatDateTime(k.tanggal), keterangan:k.keterangan || '', tipe:k.tipe || '', kategori:k.kategori || '', metode:k.metode || '', nominal:Number(k.nominal) || 0, saldo:Number(k.saldo) || 0 }));
   if (limit) return kas.slice(-limit).reverse();
   return kas.reverse();
 }
@@ -3649,8 +3652,11 @@ function apiGetSaldoSupplier(token) {
 }
 function apiBayarSupplier(token, payload) {
   const sess = requireRole(token, ['admin']);
-  const supplierId = payload.supplierId;
+  payload = payload || {};
+  const supplierId = String(payload.supplierId || '').trim();
   if (!supplierId) return { success: false, message: 'Supplier wajib.' };
+  const metode = String(payload.metode || 'Tunai').trim();
+  if (!['Tunai','QRIS','Transfer'].includes(metode)) return { success:false, message:'Metode pembayaran harus Tunai, QRIS, atau Transfer.' };
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success: false, message: 'Sistem sibuk. Coba lagi.' };
   try {
@@ -3661,40 +3667,52 @@ function apiBayarSupplier(token, payload) {
     const iSupplier = h.indexOf('supplierId'), iStatus = h.indexOf('status');
     const iUtang = h.indexOf('utang'), iKasId = h.indexOf('kasId');
     const iBayarAt = h.indexOf('bayarAt'), iBayarBy = h.indexOf('bayarBy');
+    if (iSupplier < 0 || iStatus < 0 || iUtang < 0 || iKasId < 0) return {success:false,message:'Struktur Konsinyasi belum lengkap. Tidak ada perubahan.'};
     let totalBayar = 0;
     const rowsToUpdate = [];
     for (let i = 1; i < data.length; i++) {
-      if (String(data[i][iSupplier]) === String(supplierId) && data[i][iStatus] === 'Pending') {
+      if (String(data[i][iSupplier]) === supplierId && data[i][iStatus] === 'Pending') {
         totalBayar += Number(data[i][iUtang]) || 0; rowsToUpdate.push(i + 1);
       }
     }
     if (totalBayar <= 0) return { success: false, message: 'Tidak ada utang pending.' };
     const kasSheet = ss.getSheetByName('Kas');
+    if (!hasHeaders(kasSheet, ['id','tanggal','keterangan','tipe','kategori','nominal','saldo'])) return {success:false,message:'Struktur Kas belum lengkap. Tidak ada perubahan.'};
     const kasData = kasSheet.getDataRange().getValues();
     const iSaldo = kasData[0].indexOf('saldo');
     const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
     const kasId = 'KS' + Utilities.getUuid().slice(0, 8).toUpperCase();
-    const sup = getSheetData('Suppliers').find(s => String(s.id) === String(supplierId)) || {};
-    appendObjectsByHeaders(kasSheet,[{id:kasId,tanggal:new Date(),keterangan:'Bayar Supplier: '+(sup.nama||supplierId)+' ('+rowsToUpdate.length+' transaksi)',tipe:'Keluar',kategori:'Konsinyasi',nominal:totalBayar,saldo:saldoLama-totalBayar}]);
-    rowsToUpdate.forEach(r => {
-      sheet.getRange(r, iStatus + 1).setValue('Bayar');
-      sheet.getRange(r, iKasId + 1).setValue(kasId);
-      if (iBayarAt >= 0) sheet.getRange(r, iBayarAt + 1).setValue(new Date());
-      if (iBayarBy >= 0) sheet.getRange(r, iBayarBy + 1).setValue(sess.username);
-    });
+    const sup = getSheetData('Suppliers').find(s => String(s.id) === supplierId) || {};
+    const kasRow = {id:kasId,tanggal:new Date(),keterangan:'Bayar Supplier: '+(sup.nama||supplierId)+' ('+rowsToUpdate.length+' transaksi) ['+metode+']',tipe:'Keluar',kategori:'Konsinyasi',metode,nominal:totalBayar,saldo:saldoLama-totalBayar};
+    const journal = beginWriteJournal(['Konsinyasi','Kas']);
+    try {
+      appendObjectsByHeaders(kasSheet,[kasRow]);
+      rowsToUpdate.forEach(r => {
+        journalSetValue(journal, sheet, r, iStatus + 1, 'Bayar');
+        journalSetValue(journal, sheet, r, iKasId + 1, kasId);
+        if (iBayarAt >= 0) journalSetValue(journal, sheet, r, iBayarAt + 1, new Date());
+        if (iBayarBy >= 0) journalSetValue(journal, sheet, r, iBayarBy + 1, sess.username);
+      });
+    } catch (writeError) {
+      try { rollbackWriteJournal(journal); }
+      catch (rollbackError) { console.error('Gagal rollback pembayaran supplier:',rollbackError.message); return {success:false,message:'Pembayaran gagal dan pemulihan otomatis perlu diperiksa. '+writeError.message+' | '+rollbackError.message}; }
+      _clearSheetCache();
+      return {success:false,message:'Pembayaran gagal. Perubahan dibatalkan: '+writeError.message};
+    }
     _clearSheetCache();
-    return { success: true, message: 'Bayar ' + (sup.nama || supplierId) + ': Rp ' + totalBayar.toLocaleString('id-ID'), total: totalBayar, count: rowsToUpdate.length };
+    return { success: true, message: 'Bayar ' + (sup.nama || supplierId) + ': Rp ' + totalBayar.toLocaleString('id-ID') + ' via ' + metode, total: totalBayar, count: rowsToUpdate.length, kasId, metode };
   } finally { lock.releaseLock(); }
 }
 function apiGetRiwayatBayarSupplier(token, filter) {
   requireRole(token, ['admin']);
   filter = filter || {};
   const supMap = {}; getSheetData('Suppliers').forEach(s => supMap[s.id] = s.nama);
+  const kasMap = {}; getSheetData('Kas').forEach(k => kasMap[String(k.id)] = k);
   const grouped = {};
   getSheetData('Konsinyasi').forEach(k => {
     if (k.status !== 'Bayar') return;
     const key = String(k.kasId) + '_' + String(k.supplierId);
-    if (!grouped[key]) grouped[key] = { kasId: k.kasId, supplierId: k.supplierId, supplierNama: supMap[k.supplierId] || k.supplierId, bayarAt: k.bayarAt instanceof Date ? Utilities.formatDate(k.bayarAt, Session.getScriptTimeZone(), 'dd MMM yyyy HH:mm') : String(k.bayarAt || ''), bayarBy: k.bayarBy || '', total: 0, count: 0 };
+    if (!grouped[key]) grouped[key] = { kasId: k.kasId, supplierId: k.supplierId, supplierNama: supMap[k.supplierId] || k.supplierId, bayarAt: k.bayarAt instanceof Date ? Utilities.formatDate(k.bayarAt, Session.getScriptTimeZone(), 'dd MMM yyyy HH:mm') : String(k.bayarAt || ''), bayarBy: k.bayarBy || '', metode: (kasMap[String(k.kasId)] || {}).metode || '', total: 0, count: 0 };
     grouped[key].total += Number(k.utang) || 0;
     grouped[key].count++;
   });
