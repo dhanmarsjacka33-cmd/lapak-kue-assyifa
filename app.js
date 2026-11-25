@@ -2039,6 +2039,8 @@ function formBayarTitipan(supplierId) {
         try {
           const r = await api('bayarTitipanKaryawan', { token:S.token, payload:{
             supplierId:pending.supplierId, nominalBayar,
+            // Older Apps Script deployments do not understand nominalBayar. Send all IDs only for full payment; use a nonmatching sentinel for partial payments so an old backend safely refuses instead of paying the full balance.
+            konsinyasiIds: nominalBayar === nominalMaks ? pending.items.map(it => it.id) : ['__PARTIAL_PAYMENT_REQUIRES_UPDATED_BACKEND__'],
             noNota:(w.querySelector('[data-f="noNota"]') || {}).value || '',
             catatan:(w.querySelector('[data-f="catatan"]') || {}).value || '',
             metode:'Tunai'
