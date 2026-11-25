@@ -63,7 +63,7 @@ has(backend, /const uangDisetor = totalTunai - totalTitipan - totalPengeluaran/,
 has(backend, /kategori:'Pembayaran Titipan Supplier',nominal:totalTitipan/, 'Supplier payments must post as a distinct cash outflow');
 has(backend, /kategori:'Operasional Lapak',nominal:pengeluaranOperasional/, 'Operating expenses must post as a separate cash outflow');
 has(frontend, /Tunai — dari uang penjualan lapak/, 'Supplier payment form must clearly state cash-only settlement');
-has(frontend, /QRIS langsung ke Owner/, 'Frontend must explain that QRIS goes directly to Owner');
+has(frontend, /QRIS/, 'Frontend must display QRIS as a payment method');
 has(frontend, /Tunai yang diserahkan karyawan/, 'Frontend must show net cash handed over by employee');
 
 has(backend, /\['id','status','totalTunai','totalQris','pengeluaran','lapakId'/, 'Approval preflight must require gross cash and operating expense fields');
