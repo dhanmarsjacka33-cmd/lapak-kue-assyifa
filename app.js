@@ -903,15 +903,19 @@ function analisisControlBar(range, groupBy, selectedEntities, allEntities) {
 // ============================================
 function tabKatalog() {
   const isAdmin = S.user.role === 'admin';
-  if (!S.katalog.length) return skeletonList(3);
   let html = `<div class="row-between mb-3"><h3 class="card-title" style="margin:0">${ico('box')} Katalog (${S.katalog.length})</h3><div class="row" style="gap:4px"><button class="btn btn-ghost btn-sm" data-act="tab" data-tab="harga-tingkat">${ico('tag','ico-sm')}</button><button class="btn btn-primary btn-sm" data-act="add-katalog">+ Tambah</button></div></div>`;
+  html += `<div class="field mb-3"><input type="search" class="input" data-katalog-search placeholder="Cari nama produk, supplier, atau kategori..." autocomplete="off" aria-label="Cari produk katalog"></div>`;
+  if (!S.katalog.length) return html + '<div class="empty"><p>Katalog masih kosong.</p></div>';
+  html += `<p class="text-xs text-gray mb-2" data-katalog-count>Menampilkan ${S.katalog.length} dari ${S.katalog.length} produk</p>`;
   html += S.katalog.map(k => {
     const hasSupplier = k.supplierNama && String(k.supplierNama).trim() !== '';
     const subText = hasSupplier
       ? esc(k.supplierNama) + ' · ' + esc(k.kategori || '-')
       : '<span style="color:var(--red);font-weight:600">⚠ Belum ada supplier — klik Edit</span>';
-    return `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(k.nama)}</div><div class="list-item-sub">${subText}</div><div class="text-sm mt-2"><strong class="text-green">${fmtRp(k.hargaJual)}</strong>${isAdmin ? ` <span class="text-xs text-gray">· Beli ${fmtRp(k.hargaBeli)} · Margin ${fmtRp(k.margin)}</span>` : ''}</div></div><div class="list-item-actions"><button class="action-btn action-edit" data-act="edit-katalog" data-id="${esc(k.id)}">${ico('edit','ico-sm')}</button><button class="action-btn action-del" data-act="del-katalog" data-id="${esc(k.id)}">${ico('trash','ico-sm')}</button></div></div>`;
+    const searchText = [k.nama, k.supplierNama, k.kategori, k.id].filter(Boolean).join(' ').toLocaleLowerCase('id-ID');
+    return `<div class="list-item" data-katalog-row data-search="${esc(searchText)}"><div class="list-item-main"><div class="list-item-title">${esc(k.nama)}</div><div class="list-item-sub">${subText}</div><div class="text-sm mt-2"><strong class="text-green">${fmtRp(k.hargaJual)}</strong>${isAdmin ? ` <span class="text-xs text-gray">· Beli ${fmtRp(k.hargaBeli)} · Margin ${fmtRp(k.margin)}</span>` : ''}</div></div><div class="list-item-actions"><button class="action-btn action-edit" data-act="edit-katalog" data-id="${esc(k.id)}">${ico('edit','ico-sm')}</button><button class="action-btn action-del" data-act="del-katalog" data-id="${esc(k.id)}">${ico('trash','ico-sm')}</button></div></div>`;
   }).join('');
+  html += '<div class="empty" data-katalog-empty hidden><p>Produk tidak ditemukan.</p></div>';
   return html;
 }
 
@@ -1538,6 +1542,21 @@ function handleClick(e) {
 
 function handleInput(e) {
   const t = e.target;
+  if (t.dataset.katalogSearch !== undefined) {
+    const q = String(t.value || '').trim().toLocaleLowerCase('id-ID');
+    const rows = $('[data-katalog-row]');
+    let visible = 0;
+    rows.forEach(row => {
+      const match = !q || String(row.dataset.search || '').includes(q);
+      row.hidden = !match;
+      if (match) visible++;
+    });
+    const count = $('[data-katalog-count]');
+    if (count) count.textContent = 'Menampilkan ' + visible + ' dari ' + rows.length + ' produk';
+    const empty = $('[data-katalog-empty]');
+    if (empty) empty.hidden = visible !== 0;
+    return;
+  }
   if (t.dataset.dropSearch !== undefined) {
     const q = String(t.value || '').trim().toLocaleLowerCase('id-ID');
     $('[data-drop-row]').forEach(row => {
