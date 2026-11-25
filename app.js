@@ -817,6 +817,13 @@ function tabLaporan() {
         }).join('')}
     </div>
     <div class="card">
+      <div class="card-title">Pembelian Susulan (bukan omzet penjualan)</div>
+      <div class="row-between text-sm"><span>Total pembelian</span><strong>${fmtRp(L.ringkasan.totalPembelianSusulan || 0)}</strong></div>
+      <div class="row-between text-xs text-gray"><span>Masih menjadi utang</span><span>${fmtRp(L.ringkasan.utangPembelianSusulan || 0)}</span></div>
+      <div class="row-between text-xs text-gray"><span>Sudah dibayar</span><span>${fmtRp(L.ringkasan.dibayarPembelianSusulan || 0)}</span></div>
+      ${(L.pembelianSusulanPerSupplier || []).map(x => '<div class="row-between text-xs" style="padding:6px 0;border-top:1px solid #f8fafc"><span>' + esc(x.nama) + ' · ' + x.qty + ' pcs</span><strong>' + fmtRp(x.total) + '</strong></div>').join('')}
+    </div>
+    <div class="card">
       <div class="card-title">Performa Lapak</div>
       ${!L.perLapak.length ? '<p class="text-xs text-gray">Belum ada data.</p>' :
         L.perLapak.map(l => `
