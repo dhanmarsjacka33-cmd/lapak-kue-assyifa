@@ -711,3 +711,6 @@ input[type=radio]{accent-color:var(--amber);cursor:pointer}
 .menu-search:focus{border-color:var(--amber);background:var(--surface)}
 html[data-theme="dark"] .menu-search{background:var(--surface-2);border-color:#475569}
 .menu-item.hide{display:none}
+
+/* Keep catalog search filtering effective despite .list-item display:flex. */
+.list-item[hidden]{display:none!important}
