@@ -1477,7 +1477,7 @@ function apiGetStrukData(token, setoranId) {
   const details = getSheetData('SetoranDetail').filter(d => String(d.setoranId) === String(setoranId));
   const katMap = {}; getSheetData('Katalog').forEach(k => katMap[k.id] = k.nama);
   const lapak = getSheetData('Lapak').find(l => String(l.id) === String(setoran.lapakId)) || {};
-  return { success: true, id: setoran.id, tanggal: formatDateTime(setoran.tanggal), lapakNama: lapak.nama || setoran.lapakId, items: details.map(d => ({ nama: katMap[d.katalogId] || d.katalogId, qty: Number(d.qtyLaku) || 0, harga: Number(d.hargaJual) || 0, subtotal: Number(d.subtotal) || 0 })), totalSistem: Number(setoran.totalSistem) || 0, totalTunai: Number(setoran.totalTunai) || 0, totalQris: Number(setoran.totalQris) || 0, pengeluaran: Number(setoran.pengeluaran) || 0 };
+  return { success: true, id: setoran.id, tanggal: formatDateTime(setoran.tanggal), lapakNama: lapak.nama || setoran.lapakId, items: details.map(d => ({ nama: katMap[d.katalogId] || d.katalogId, qty: Number(d.qtyLaku) || 0, harga: Number(d.hargaJual) || 0, subtotal: Number(d.subtotal) || 0 })), totalSistem: Number(setoran.totalSistem) || 0, totalTunai: Number(setoran.totalTunai) || 0, totalQris: Number(setoran.totalQris) || 0, totalTransfer: Number(setoran.totalTransfer) || 0, pengeluaran: Number(setoran.pengeluaran) || 0 };
 }
 function apiGetStrukPesanan(token, id) {
   requireRole(token, ['admin']);
