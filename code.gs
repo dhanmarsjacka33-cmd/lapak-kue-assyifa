@@ -3704,11 +3704,12 @@ function apiGetRiwayatBayarSupplier(token, filter) {
   requireRole(token, ['admin']);
   filter = filter || {};
   const supMap = {}; getSheetData('Suppliers').forEach(s => supMap[s.id] = s.nama);
+  const kasMap = {}; getSheetData('Kas').forEach(k => kasMap[String(k.id)] = k);
   const grouped = {};
   getSheetData('Konsinyasi').forEach(k => {
     if (k.status !== 'Bayar') return;
     const key = String(k.kasId) + '_' + String(k.supplierId);
-    if (!grouped[key]) grouped[key] = { kasId: k.kasId, supplierId: k.supplierId, supplierNama: supMap[k.supplierId] || k.supplierId, bayarAt: k.bayarAt instanceof Date ? Utilities.formatDate(k.bayarAt, Session.getScriptTimeZone(), 'dd MMM yyyy HH:mm') : String(k.bayarAt || ''), bayarBy: k.bayarBy || '', total: 0, count: 0 };
+    if (!grouped[key]) grouped[key] = { kasId: k.kasId, supplierId: k.supplierId, supplierNama: supMap[k.supplierId] || k.supplierId, bayarAt: k.bayarAt instanceof Date ? Utilities.formatDate(k.bayarAt, Session.getScriptTimeZone(), 'dd MMM yyyy HH:mm') : String(k.bayarAt || ''), bayarBy: k.bayarBy || '', metode: (kasMap[String(k.kasId)] || {}).metode || '', total: 0, count: 0 };
     grouped[key].total += Number(k.utang) || 0;
     grouped[key].count++;
   });
