@@ -2106,13 +2106,12 @@ function apiSubmitRekap(token, payload) {
     const totalTitipanTunai = bayarTitipanHariIni.filter(b => String(b.metode || 'Tunai') === 'Tunai').reduce((sum,b) => sum + toPosNum(b.totalBayar),0);
     const totalTitipanQris = bayarTitipanHariIni.filter(b => String(b.metode || '') === 'QRIS').reduce((sum,b) => sum + toPosNum(b.totalBayar),0);
     const totalTitipanTransfer = bayarTitipanHariIni.filter(b => String(b.metode || '') === 'Transfer').reduce((sum,b) => sum + toPosNum(b.totalBayar),0);
-    // Setiap pembayaran supplier mengurangi kanal dana yang benar-benar dipakai.
-    const uangDisetor = totalTunai - totalTitipanTunai - totalPengeluaran;
-    const qrisBersih = totalQris - totalTitipanQris;
-    const transferBersih = totalTransfer - totalTitipanTransfer;
-    if (uangDisetor < 0) return { success:false, message:'Pembayaran titipan Tunai dan pengeluaran melebihi penerimaan tunai.' };
-    if (qrisBersih < 0) return { success:false, message:'Pembayaran titipan QRIS melebihi penerimaan QRIS.' };
-    if (transferBersih < 0) return { success:false, message:'Pembayaran titipan Transfer melebihi penerimaan Transfer.' };
+    // Metode pembayaran supplier hanya metadata. Pembayaran supplier tidak
+    // dipotong lagi dari setoran karyawan; dampak laba bersih dicatat di Kas Utama.
+    const uangDisetor = totalTunai - totalPengeluaran;
+    const qrisBersih = totalQris;
+    const transferBersih = totalTransfer;
+    if (uangDisetor < 0) return { success:false, message:'Pengeluaran operasional melebihi penerimaan tunai.' };
     const expectedSetoran = uangDisetor + qrisBersih + transferBersih;
     const unpaidDraft = getSheetData('Konsinyasi').filter(k => String(k.lapakId)===String(sess.lapakId) && String(k.catatan||'').indexOf(draftMarker)===0 && String(k.status)==='Pending');
     if (unpaidDraft.length) return {success:false,message:'Masih ada tagihan titip jual yang belum dibayar. Lunasi terlebih dahulu sebelum mengirim laporan.'};
