@@ -112,3 +112,6 @@ has(backend, /const qrisBersih = totalQris - totalTitipanQris/, 'QRIS supplier p
 has(backend, /const transferBersih = totalTransfer - totalTitipanTransfer/, 'Transfer supplier payments must reduce transfer handover');
 has(frontend, /const data = await api\('getKaryawanDashboard'/, 'Employee reload should use the combined dashboard response');
 if (/api\('getTitipanKaryawan'/.test(frontend.slice(frontend.indexOf('async function reloadKaryawan'), frontend.indexOf('async function karyawanSaveDrop')))) throw new Error('Employee reload must not fetch titipan a second time');
+
+has(frontend, /data-locked-total/, 'Live supplier invoice total must include locked rows after previous partial payments');
+has(frontend, /let total = Number\(wrap\.dataset\.lockedTotal\) \|\| 0/, 'Editing supplier quantities must preserve locked outstanding balances in the live total');
