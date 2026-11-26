@@ -144,3 +144,5 @@ has(backend, /originalUtang - \(paidAmountById\[id\] \|\| 0\)/, 'Supplier invoic
 has(backend, /Math\.min\(currentUtang, saldoTerhitung\)/, 'Reconciliation must avoid subtracting payments twice when Konsinyasi.utang is already a remaining balance');
 has(backend, /if \(saldo <= 0\) return/, 'Fully paid invoices must not reappear in the pending supplier list');
 has(backend, /remainingPayment = Math\.max\(0, Number\(b\.totalBayar\) \|\| 0\)/, 'Legacy payment records without per-invoice amounts must be reconciled conservatively');
+
+has(backend, /const reconciled=originalUtang>0\?Math\.min\(currentUtang,Math\.max\(0,originalUtang-\(paidAmountById\[String\(data\[i\]\[iId\]\)\]\|\|0\)\)\):currentUtang/, 'Payment endpoint must reconcile allocated amounts before accepting another supplier payment');
