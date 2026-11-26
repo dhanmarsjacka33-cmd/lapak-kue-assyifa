@@ -2652,23 +2652,29 @@ function apiApproveSetoran(token, idSetoran) {
     const kasData = kasSheet.getDataRange().getValues();
     const iSaldo = kasData[0].indexOf('saldo');
     let saldo = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
-    const newRows = [];
-    // Catat penerimaan bruto. QRIS langsung ke Owner, sedangkan tunai dipegang karyawan.
-    if (totalTunai > 0) { saldo += totalTunai; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Penjualan Tunai '+lapakId,tipe:'Masuk',kategori:'Penjualan Tunai',metode:'Tunai',nominal:totalTunai,saldo}); }
-    if (qris > 0) { saldo += qris; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Penerimaan QRIS '+lapakId,tipe:'Masuk',kategori:'Penjualan QRIS',metode:'QRIS',nominal:qris,saldo}); }
-    if (transfer > 0) { saldo += transfer; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Penerimaan Transfer '+lapakId,tipe:'Masuk',kategori:'Penjualan Transfer',metode:'Transfer',nominal:transfer,saldo}); }
-    // Pembayaran supplier adalah arus kas keluar tersendiri, bukan biaya operasional.
     const pembayaranSupplier = getSheetData('BayarTitipanKaryawan')
       .filter(b => String(b.setoranId) === String(idSetoran) && String(b.status || 'Active') === 'Active');
-    const titipanPerMetode = { Tunai:0, QRIS:0, Transfer:0 };
-    pembayaranSupplier.forEach(b => { const m=String(b.metode||'Tunai'); if (Object.prototype.hasOwnProperty.call(titipanPerMetode,m)) titipanPerMetode[m] += Number(b.totalBayar)||0; });
-    if (totalTunai - titipanPerMetode.Tunai - pengeluaranOperasional < 0 || qris - titipanPerMetode.QRIS < 0 || transfer - titipanPerMetode.Transfer < 0)
-      return { success:false, message:'Pembayaran supplier melebihi penerimaan pada salah satu metode. Setoran ditahan untuk pemeriksaan.' };
-    ['Tunai','QRIS','Transfer'].forEach(m => {
-      const amount=titipanPerMetode[m];
-      if(amount>0){ saldo-=amount; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Pembayaran titipan supplier '+lapakId+' ('+m+')',tipe:'Keluar',kategori:'Pembayaran Titipan Supplier',metode:m,nominal:amount,saldo}); }
-    });
-    if (pengeluaranOperasional > 0) { saldo -= pengeluaranOperasional; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Pengeluaran operasional lapak '+lapakId,tipe:'Keluar',kategori:'Operasional Lapak',nominal:pengeluaranOperasional,saldo}); }
+    const totalPembayaranSupplier = pembayaranSupplier.reduce((sum, b) => sum + (Number(b.totalBayar) || 0), 0);
+    // Kas Utama hanya menerima keuntungan bersih. Metode pembayaran supplier
+    // adalah metadata riwayat, bukan akun/sumber kas yang didebit.
+    const totalPenjualan = totalTunai + qris + transfer;
+    const keuntunganBersih = totalPenjualan - totalPembayaranSupplier - pengeluaranOperasional;
+    if (keuntunganBersih < 0)
+      return { success:false, message:'Pembayaran supplier dan pengeluaran operasional melebihi total penjualan. Setoran ditahan untuk pemeriksaan.' };
+    const newRows = [];
+    if (keuntunganBersih > 0) {
+      saldo += keuntunganBersih;
+      newRows.push({
+        id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),
+        tanggal:new Date(),
+        keterangan:'Keuntungan bersih penjualan '+lapakId,
+        tipe:'Masuk',
+        kategori:'Keuntungan Bersih',
+        metode:'Internal',
+        nominal:keuntunganBersih,
+        saldo
+      });
+    }
     const journal = beginWriteJournal(['Setoran','Kas']);
     try {
       journalSetValue(journal, setoranSheet, rowIdx, iStatus + 1, 'approved');
@@ -2688,7 +2694,7 @@ function apiApproveSetoran(token, idSetoran) {
     const user = getSheetData('Users').find(u => String(u.id) === String(userId));
     if (user && (user.email || user.username)) {
       const lapak = getSheetData('Lapak').find(l => String(l.id) === String(lapakId)) || {};
-      try { notifySetoranApproved({ id: idSetoran, tanggal, expectedSetoran: totalTunai + qris + transfer - pengeluaranOperasional - titipanPerMetode.Tunai - titipanPerMetode.QRIS - titipanPerMetode.Transfer }, lapak.nama || lapakId, user.email || '', user.username || ''); } catch (notifyError) { console.error('Notifikasi persetujuan gagal, transaksi tetap disetujui:', notifyError.message); }
+      try { notifySetoranApproved({ id: idSetoran, tanggal, expectedSetoran: keuntunganBersih }, lapak.nama || lapakId, user.email || '', user.username || ''); } catch (notifyError) { console.error('Notifikasi persetujuan gagal, transaksi tetap disetujui:', notifyError.message); }
     }
     return { success: true, message: 'Setoran disetujui.' };
   } finally { lock.releaseLock(); }
