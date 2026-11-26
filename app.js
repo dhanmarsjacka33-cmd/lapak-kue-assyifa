@@ -1621,9 +1621,10 @@ function handleInput(e) {
     if (wrap) {
       let total = Number(wrap.dataset.lockedTotal) || 0;
       wrap.querySelectorAll('[data-titipan-qty]').forEach(input => {
-        const qty = Math.max(0, parseInt(input.value, 10) || 0);
+        const qtySisa = Math.max(0, Math.min(Number(input.dataset.drop) || 0, parseInt(input.value, 10) || 0));
+        const qtyTagihan = Math.max(0, (Number(input.dataset.drop) || 0) - qtySisa);
         const price = Number(input.dataset.price) || 0;
-        const line = qty * price;
+        const line = qtyTagihan * price;
         total += line;
         const out = wrap.querySelector('[data-titipan-line="' + input.dataset.titipanQty + '"]');
         if (out) out.textContent = fmtRp(line);
@@ -2043,23 +2044,23 @@ function formBayarTitipan(supplierId) {
   if (!pending || !pending.items || !pending.items.length) return toast('Tidak ada utang pending untuk supplier ini.', 'error');
   const nominalMaks = Number(pending.total) || 0;
   const rows = pending.items.map(it => {
-    const qty = Number(it.qtyLaku) || 0, price = Number(it.hargaTitip) || 0, canAdjust = it.canAdjust !== false, currentDebt = Number(it.utang) || 0;
+    const qtyTagihan = Number(it.qtyLaku) || 0, qtyDrop = Number(it.qtyDrop) || qtyTagihan, qtySisa = Number(it.qtySisa) || 0, price = Number(it.hargaTitip) || 0, canAdjust = it.canAdjust !== false, currentDebt = Number(it.utang) || 0;
     return `<div class="card-flat" style="padding:10px;margin-bottom:8px">
       <div class="row-between" style="gap:8px">
         <div style="min-width:0;flex:1">
           <div class="text-sm font-semibold">${esc(it.nama)}</div>
-          <div class="text-xs text-gray">${fmtRp(price)} / pcs</div>
+          <div class="text-xs text-gray">${fmtRp(price)} / pcs · ${qtyDrop} pcs diterima</div>
         </div>
         <div style="width:104px">
-          <label class="text-xs text-gray">${canAdjust ? "Qty tagihan" : "Qty (terkunci)"}</label>
-          ${canAdjust ? `<input type="number" min="0" step="1" inputmode="numeric" class="input" style="padding:8px" data-titipan-qty="${esc(it.id)}" data-original="${qty}" data-price="${price}" value="${qty}">` : `<div class="input" style="padding:8px">${qty}</div>`}
+          <label class="text-xs text-gray">${canAdjust ? "Sisa kue" : "Sisa (terkunci)"}</label>
+          ${canAdjust ? `<input type="number" min="0" max="${qtyDrop}" step="1" inputmode="numeric" class="input" style="padding:8px" data-titipan-qty="${esc(it.id)}" data-original="${qtySisa}" data-drop="${qtyDrop}" data-price="${price}" value="${qtySisa}">` : `<div class="input" style="padding:8px">${qtySisa}</div>`}
         </div>
       </div>
-      <div class="row-between mt-2 text-sm"><span class="text-gray">Tagihan produk</span><strong data-titipan-line="${esc(it.id)}">${fmtRp(canAdjust ? qty*price : currentDebt)}</strong></div>
+      <div class="row-between mt-2 text-sm"><span class="text-gray">Qty ditagihkan · Tagihan</span><strong><span data-titipan-billqty="${esc(it.id)}">${qtyTagihan}</span> · <span data-titipan-line="${esc(it.id)}">${fmtRp(canAdjust ? qtyTagihan*price : currentDebt)}</span></strong></div>
     </div>`;
   }).join('');
   const body = `
-    <div class="alert alert-info" style="margin-bottom:10px">Cocokkan jumlah tagihan dengan stok fisik saat closing. Jika ada tambahan barang dari supplier menjelang tutup, sesuaikan jumlah yang menjadi tagihan di setiap produk. Nilai dihitung otomatis dari qty × harga titip.</div>
+    <div class="alert alert-info" style="margin-bottom:10px">Masukkan jumlah kue yang masih tersisa secara fisik. Sistem otomatis menghitung kue yang terjual/ditagihkan: jumlah diterima dikurangi sisa kue, lalu mengalikan dengan harga titip.</div>
     <div data-titipan-payment="1" data-locked-total="${pending.items.filter(it => it.canAdjust === false).reduce((sum,it) => sum + (Number(it.utang)||0),0)}">
       ${rows}
       <div class="card-flat" style="padding:12px;background:var(--amber-50);border:1px solid rgba(245,158,11,.3)">
@@ -2083,13 +2084,12 @@ function formBayarTitipan(supplierId) {
       { label: 'Batal', onClick: c => c() },
       { label: 'Konfirmasi & Bayar', className: 'btn-success', onClick: async (c, w) => {
         const wrap = w.querySelector('[data-titipan-payment]');
-        const adjustments = Array.from(wrap.querySelectorAll('[data-titipan-qty]')).map(input => ({
-          id: input.dataset.titipanQty,
-          qtyLaku: Number(input.value),
-          originalQty: Number(input.dataset.original)
-        })).filter(x => x.qtyLaku !== x.originalQty).map(({id,qtyLaku}) => ({id,qtyLaku}));
-        if (adjustments.some(x => !Number.isSafeInteger(x.qtyLaku) || x.qtyLaku < 0)) return toast('Qty tagihan harus bilangan bulat 0 atau lebih.', 'error');
-        const recalculated = Array.from(wrap.querySelectorAll('[data-titipan-qty]')).reduce((sum,input) => sum + Math.max(0,Number(input.value)||0)*(Number(input.dataset.price)||0),0) + pending.items.filter(it => it.canAdjust === false).reduce((sum,it) => sum + (Number(it.utang)||0),0);
+        const adjustments = Array.from(wrap.querySelectorAll('[data-titipan-qty]')).map(input => {
+          const qtySisa = Number(input.value), qtyDrop = Number(input.dataset.drop) || 0;
+          return {id:input.dataset.titipanQty,qtyLaku:qtyDrop-qtySisa,originalQty:qtyDrop-Number(input.dataset.original)};
+        }).filter(x => x.qtyLaku !== x.originalQty).map(({id,qtyLaku}) => ({id,qtyLaku}));
+        if (Array.from(wrap.querySelectorAll('[data-titipan-qty]')).some(input => !Number.isSafeInteger(Number(input.value)) || Number(input.value) < 0 || Number(input.value) > (Number(input.dataset.drop)||0))) return toast('Sisa kue harus bilangan bulat antara 0 dan jumlah kue yang diterima.', 'error');
+        const recalculated = Array.from(wrap.querySelectorAll('[data-titipan-qty]')).reduce((sum,input) => sum + Math.max(0,(Number(input.dataset.drop)||0)-(Number(input.value)||0))*(Number(input.dataset.price)||0),0) + pending.items.filter(it => it.canAdjust === false).reduce((sum,it) => sum + (Number(it.utang)||0),0);
         if (!Number.isSafeInteger(recalculated) || recalculated <= 0) return toast('Total tagihan harus lebih dari 0. Jika tidak ada barang terjual, koreksi stok melalui rekap.', 'error');
         const nominalBayar = Number((w.querySelector('[data-f="nominalBayar"]') || {}).value);
         if (!Number.isSafeInteger(nominalBayar) || nominalBayar <= 0 || nominalBayar > recalculated) return toast('Nominal pembayaran harus angka bulat lebih dari 0 dan tidak melebihi total tagihan setelah penyesuaian.', 'error');
