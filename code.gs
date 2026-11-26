@@ -951,6 +951,7 @@ function buildBootstrapData(user) {
     const setoran = getSheetData('Setoran');
     const kas = getSheetData('Kas');
     const pending = setoran.filter(s => s.status === 'pending');
+    const titipanTotals = buildTitipanTotalsBySetoran();
     const saldoKas = kas.length ? Number(kas[kas.length - 1].saldo) || 0 : 0;
     const todaySetoran = setoran.filter(s => formatDate(s.tanggal) === tgl);
     const todayPenjualan = todaySetoran.reduce((s, x) => s + (Number(x.totalSistem) || 0), 0);
@@ -960,8 +961,8 @@ function buildBootstrapData(user) {
     const unreadNotif = getSheetData('Notifikasi').filter(n => n.status === 'unread').length;
     const utangKonsinyasi = getSheetData('Konsinyasi').filter(k => k.status === 'Pending').reduce((s, k) => s + (Number(k.utang) || 0), 0);
     const todayPesanan = getSheetData('PesananPelanggan').filter(p => formatDate(p.tanggalAmbil) === tgl || formatDate(p.tanggal) === tgl);
-    result.dash = { kasBesar: saldoKas, pendingCount: pending.length, pendingSetoran: pending.map(mapSetoran), todayPenjualan, todayTunai, todayQris, todaySetoranCount: todaySetoran.length, recentKas, unreadNotif, utangKonsinyasi, todayPesananCount: todayPesanan.length };
-    result.setoran = setoran.map(mapSetoran).reverse().slice(0, 200);
+    result.dash = { kasBesar: saldoKas, pendingCount: pending.length, pendingSetoran: pending.map(s => mapSetoran(s, titipanTotals)), todayPenjualan, todayTunai, todayQris, todaySetoranCount: todaySetoran.length, recentKas, unreadNotif, utangKonsinyasi, todayPesananCount: todayPesanan.length };
+    result.setoran = setoran.map(s => mapSetoran(s, titipanTotals)).reverse().slice(0, 200);
     result.kas = kas.reverse().slice(0, 100).map(k => ({ id:k.id, tanggal:formatDateTime(k.tanggal), keterangan:k.keterangan || '', tipe:k.tipe || '', kategori:k.kategori || '', nominal:Number(k.nominal) || 0, saldo:Number(k.saldo) || 0 }));
     const now = new Date();
     const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -2522,10 +2523,19 @@ function apiBatalBayarTitipan(token, bayarId) {
 // ============================================================
 //  ADMIN DASHBOARD & SETORAN
 // ============================================================
-function mapSetoran(s) {
-  const payments = getSheetData('BayarTitipanKaryawan').filter(b => String(b.setoranId) === String(s.id) && String(b.status || 'Active') === 'Active');
-  const totalTitipanPerMetode = { Tunai:0, QRIS:0, Transfer:0 };
-  payments.forEach(b => { const m=String(b.metode||'Tunai'); if(Object.prototype.hasOwnProperty.call(totalTitipanPerMetode,m)) totalTitipanPerMetode[m] += Number(b.totalBayar)||0; });
+function buildTitipanTotalsBySetoran() {
+  const totals = {};
+  getSheetData('BayarTitipanKaryawan').forEach(b => {
+    if (String(b.status || 'Active') !== 'Active' || !b.setoranId) return;
+    const id = String(b.setoranId);
+    if (!totals[id]) totals[id] = { Tunai:0, QRIS:0, Transfer:0 };
+    const metode = String(b.metode || 'Tunai');
+    if (Object.prototype.hasOwnProperty.call(totals[id], metode)) totals[id][metode] += Number(b.totalBayar) || 0;
+  });
+  return totals;
+}
+function mapSetoran(s, totalsBySetoran) {
+  const totalTitipanPerMetode = (totalsBySetoran || {})[String(s.id)] || { Tunai:0, QRIS:0, Transfer:0 };
   const totalTitipan = totalTitipanPerMetode.Tunai + totalTitipanPerMetode.QRIS + totalTitipanPerMetode.Transfer;
   return { id:s.id, tanggal: formatDate(s.tanggal), lapakId:s.lapakId, totalTunai: Number(s.totalTunai) || 0, totalQris: Number(s.totalQris) || 0, totalTransfer: Number(s.totalTransfer) || 0, totalSistem: Number(s.totalSistem) || 0, pengeluaran: Number(s.pengeluaran) || 0, totalTitipan, totalTitipanTunai:totalTitipanPerMetode.Tunai, totalTitipanQris:totalTitipanPerMetode.QRIS, totalTitipanTransfer:totalTitipanPerMetode.Transfer, expectedSetoran: Number(s.expectedSetoran) || 0, uangDisetor: Number(s.uangDisetor) || 0, selisih: Number(s.selisih) || 0, status: s.status, catatan: s.catatan || '', locked: String(s.locked) === 'true' || s.locked === true, editHistory: s.editHistory || '' };
 }
@@ -2535,6 +2545,7 @@ function apiGetAdminDashboard(token) {
   const setoran = getSheetData('Setoran');
   const kas = getSheetData('Kas');
   const pending = setoran.filter(s => s.status === 'pending');
+  const titipanTotals = buildTitipanTotalsBySetoran();
   const saldoKas = kas.length ? Number(kas[kas.length - 1].saldo) || 0 : 0;
   const todaySetoran = setoran.filter(s => formatDate(s.tanggal) === tgl);
   const todayPenjualan = todaySetoran.reduce((s, x) => s + (Number(x.totalSistem) || 0), 0);
@@ -2545,12 +2556,13 @@ function apiGetAdminDashboard(token) {
   const utangKonsinyasi = getSheetData('Konsinyasi').filter(k => k.status === 'Pending').reduce((s, k) => s + (Number(k.utang) || 0), 0);
   const todayPesanan = getSheetData('PesananPelanggan').filter(p => formatDate(p.tanggalAmbil) === tgl || formatDate(p.tanggal) === tgl);
   const todayTransfer = todaySetoran.reduce((s, x) => s + (Number(x.totalTransfer) || 0), 0);
-  return { kasBesar:saldoKas, pendingCount:pending.length, pendingSetoran:pending.map(mapSetoran), todayPenjualan, todayTunai, todayQris, todayTransfer, todaySetoranCount: todaySetoran.length, recentKas, unreadNotif, utangKonsinyasi, todayPesananCount: todayPesanan.length };
+  return { kasBesar:saldoKas, pendingCount:pending.length, pendingSetoran:pending.map(s => mapSetoran(s, titipanTotals)), todayPenjualan, todayTunai, todayQris, todayTransfer, todaySetoranCount: todaySetoran.length, recentKas, unreadNotif, utangKonsinyasi, todayPesananCount: todayPesanan.length };
 }
 function apiGetSetoranList(token, filter) {
   requireRole(token, ['admin']);
   filter = filter || {};
-  let list = getSheetData('Setoran').map(mapSetoran);
+  const titipanTotals = buildTitipanTotalsBySetoran();
+  let list = getSheetData('Setoran').map(s => mapSetoran(s, titipanTotals));
   if (filter.status) list = list.filter(s => s.status === filter.status);
   if (filter.lapakId) list = list.filter(s => String(s.lapakId) === String(filter.lapakId));
   if (filter.dari) list = list.filter(s => s.tanggal >= filter.dari);
