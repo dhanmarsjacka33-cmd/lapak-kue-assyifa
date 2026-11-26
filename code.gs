@@ -2253,43 +2253,100 @@ function apiGetTitipanKaryawan(token) {
   const katMap = {};
   getSheetData('Katalog').forEach(k => { katMap[String(k.id)] = k.nama; });
 
-  // Invoice yang sudah pernah menerima pembayaran tidak boleh diubah qty-nya.
+  const konsinyasiRows = (getSheetData('Konsinyasi') || [])
+    .filter(k => String(k.lapakId) === String(lapakId));
+  const bayarSheet = getSheetData('BayarTitipanKaryawan') || [];
+  const activePayments = bayarSheet.filter(b =>
+    String(b.lapakId) === String(lapakId) &&
+    String(b.status || 'Active') === 'Active'
+  );
+
+  // Rekonsiliasi pembayaran per ID invoice. Kolom Konsinyasi.utang normalnya
+  // sudah berisi saldo setelah pembayaran; MIN mencegah saldo itu dikurangi
+  // untuk kedua kalinya, tetapi tetap memperbaiki data lama yang belum ter-update.
+  const paidAmountById = {};
   const paidIds = {};
-  (getSheetData('BayarTitipanKaryawan') || []).filter(b => String(b.lapakId) === String(lapakId) && String(b.status || 'Active') === 'Active').forEach(b => {
+  const konsinyasiById = {};
+  konsinyasiRows.forEach(k => { konsinyasiById[String(k.id)] = k; });
+  activePayments.forEach(b => {
     const raw = String(b.konsinyasiIds || '');
-    if (raw.trim().startsWith('[')) { try { JSON.parse(raw).forEach(x => { if (x && x.id) paidIds[String(x.id)] = true; }); } catch (e) {} }
-    else raw.split(',').map(x => x.trim()).filter(Boolean).forEach(id => { paidIds[id] = true; });
+    if (raw.trim().startsWith('[')) {
+      try {
+        JSON.parse(raw).forEach(x => {
+          if (!x || !x.id) return;
+          const id = String(x.id);
+          paidIds[id] = true;
+          const amount = Number(x.amount);
+          if (Number.isFinite(amount) && amount > 0) {
+            paidAmountById[id] = (paidAmountById[id] || 0) + amount;
+          }
+        });
+      } catch (e) {}
+    } else {
+      // Format lama hanya menyimpan daftar ID. Alokasikan totalBayar sesuai
+      // urutan invoice yang tersimpan, sama seperti urutan pembayaran lama.
+      const ids = raw.split(',').map(x => x.trim()).filter(Boolean);
+      let remainingPayment = Math.max(0, Number(b.totalBayar) || 0);
+      ids.forEach(id => {
+        paidIds[id] = true;
+        if (remainingPayment <= 0) return;
+        const invoice = konsinyasiById[id];
+        if (!invoice) return;
+        const original = (Number(invoice.qtyLaku) || 0) * (Number(invoice.hargaTitip) || 0);
+        const capacity = original > 0 ? Math.max(0, original - (paidAmountById[id] || 0)) : Math.max(0, Number(invoice.utang) || 0);
+        const allocated = Math.min(capacity, remainingPayment);
+        if (allocated > 0) {
+          paidAmountById[id] = (paidAmountById[id] || 0) + allocated;
+          remainingPayment -= allocated;
+        }
+      });
+    }
   });
 
-  // --- PENDING: semua konsinyasi yang belum dibayar di lapak ini ---
   const detailMap = {};
-  (getSheetData('SetoranDetail') || []).forEach(d => { detailMap[String(d.setoranId) + '|' + String(d.katalogId)] = d; });
-  const list = getSheetData('Konsinyasi').filter(k => String(k.lapakId) === String(lapakId) && k.status === 'Pending');
+  (getSheetData('SetoranDetail') || []).forEach(d => {
+    detailMap[String(d.setoranId) + '|' + String(d.katalogId)] = d;
+  });
+
   const grouped = {};
-  list.forEach(k => {
+  konsinyasiRows.forEach(k => {
+    if (String(k.status) !== 'Pending') return;
+    const id = String(k.id);
+    const currentUtang = Math.max(0, Number(k.utang) || 0);
+    const originalUtang = (Number(k.qtyLaku) || 0) * (Number(k.hargaTitip) || 0);
+    const saldoTerhitung = originalUtang > 0
+      ? Math.max(0, originalUtang - (paidAmountById[id] || 0))
+      : currentUtang;
+    const saldo = originalUtang > 0 ? Math.min(currentUtang, saldoTerhitung) : currentUtang;
+    // Invoice yang sudah lunas berdasarkan alokasi pembayaran tidak boleh
+    // tampil lagi sebagai tagihan, meskipun status Konsinyasi terlambat berubah.
+    if (saldo <= 0) return;
+
     const sid = String(k.supplierId);
-    if (!grouped[sid]) grouped[sid] = { supplierId: sid, supplierNama: supMap[sid] || sid, total: 0, count: 0, items: [] };
-    grouped[sid].total += Number(k.utang) || 0;
+    if (!grouped[sid]) grouped[sid] = {
+      supplierId: sid, supplierNama: supMap[sid] || sid, total: 0, count: 0, items: []
+    };
+    grouped[sid].total += saldo;
     grouped[sid].count++;
+    const detail = detailMap[String(k.setoranId) + '|' + String(k.katalogId)] || {};
     grouped[sid].items.push({
       id: k.id,
       tanggal: formatDate(k.tanggal),
       nama: katMap[String(k.katalogId)] || k.katalogId,
       qtyLaku: Number(k.qtyLaku) || 0,
-      qtyDrop: Number((detailMap[String(k.setoranId) + '|' + String(k.katalogId)] || {}).qtyDrop) || (Number(k.qtyLaku) || 0),
-      qtySisa: Number((detailMap[String(k.setoranId) + '|' + String(k.katalogId)] || {}).qtySisa) || 0,
+      qtyDrop: Number(detail.qtyDrop) || (Number(k.qtyLaku) || 0),
+      qtySisa: Number(detail.qtySisa) || 0,
       hargaTitip: Number(k.hargaTitip) || 0,
-      utang: Number(k.utang) || 0,
-      canAdjust: !paidIds[String(k.id)]
+      utang: saldo,
+      canAdjust: !paidIds[id]
     });
   });
   const pending = Object.values(grouped).sort((a, b) => b.total - a.total);
 
-  // --- SUDAH BAYAR HARI INI (status Active saja) ---
+  // Riwayat pembayaran aktif yang belum ditautkan ke setoran.
   const tgl = todayStr();
-  const bayarSheet = getSheetData('BayarTitipanKaryawan') || [];
-  const sudahBayar = bayarSheet
-    .filter(b => String(b.lapakId) === String(lapakId) && String(b.status || 'Active') === 'Active' && (formatDate(b.tanggal) === tgl || !b.setoranId))
+  const sudahBayar = activePayments
+    .filter(b => formatDate(b.tanggal) === tgl || !b.setoranId)
     .map(b => ({
       id: b.id,
       supplierId: b.supplierId,
@@ -2306,7 +2363,6 @@ function apiGetTitipanKaryawan(token) {
 
   return { pending, sudahBayar };
 }
-
 function apiKaryawanBayarSupplier(token, payload) {
   const sess = requireRole(token, ['karyawan']);
   const lock = LockService.getScriptLock();
@@ -2327,12 +2383,45 @@ function apiKaryawanBayarSupplier(token, payload) {
     const iId=h.indexOf('id'), iSupplier=h.indexOf('supplierId'), iLapak=h.indexOf('lapakId');
     const iStatus=h.indexOf('status'), iUtang=h.indexOf('utang'), iBayarAt=h.indexOf('bayarAt');
     const iBayarBy=h.indexOf('bayarBy'), iCatatan=h.indexOf('catatan');
+    const iQtyLaku=h.indexOf('qtyLaku'), iHargaTitip=h.indexOf('hargaTitip');
+    const iSetoran=h.indexOf('setoranId'), iKatalog=h.indexOf('katalogId');
+    const paidAmountById = {};
+    const activePayments = (getSheetData('BayarTitipanKaryawan') || []).filter(b =>
+      String(b.lapakId)===String(lapakId) && String(b.supplierId)===supplierId &&
+      String(b.status || 'Active')==='Active'
+    );
+    activePayments.forEach(b => {
+      const raw=String(b.konsinyasiIds || '');
+      if(raw.trim().startsWith('[')){
+        try {
+          JSON.parse(raw).forEach(x=>{
+            if(!x || !x.id) return;
+            const amount=Number(x.amount), id=String(x.id);
+            if(Number.isFinite(amount) && amount>0) paidAmountById[id]=(paidAmountById[id]||0)+amount;
+          });
+        } catch(e) {}
+      } else {
+        let remainingPayment=Math.max(0,Number(b.totalBayar)||0);
+        raw.split(',').map(x=>x.trim()).filter(Boolean).forEach(id=>{
+          if(remainingPayment<=0) return;
+          const invoiceRow=data.find((row,idx)=>idx>0&&String(row[iId])===id);
+          if(!invoiceRow) return;
+          const original=(Number(invoiceRow[iQtyLaku])||0)*(Number(invoiceRow[iHargaTitip])||0);
+          const capacity=original>0?Math.max(0,original-(paidAmountById[id]||0)):Math.max(0,Number(invoiceRow[iUtang])||0);
+          const allocated=Math.min(capacity,remainingPayment);
+          if(allocated>0){paidAmountById[id]=(paidAmountById[id]||0)+allocated;remainingPayment-=allocated;}
+        });
+      }
+    });
     const pendingRows=[];
     for (let i=1;i<data.length;i++) {
       if (String(data[i][iSupplier])!==supplierId || String(data[i][iLapak])!==String(lapakId) || String(data[i][iStatus])!=='Pending') continue;
-      const outstanding=Math.max(0,Number(data[i][iUtang])||0);
+      const currentUtang=Math.max(0,Number(data[i][iUtang])||0);
+      const originalUtang=(Number(data[i][iQtyLaku])||0)*(Number(data[i][iHargaTitip])||0);
+      const reconciled=originalUtang>0?Math.min(currentUtang,Math.max(0,originalUtang-(paidAmountById[String(data[i][iId])]||0))):currentUtang;
+      const outstanding=reconciled;
       if (!outstanding) continue;
-      pendingRows.push({row:i+1,id:String(data[i][iId]),outstanding,qtyLaku:Number(data[i][h.indexOf('qtyLaku')])||0,hargaTitip:Number(data[i][h.indexOf('hargaTitip')])||0,setoranId:String(data[i][h.indexOf('setoranId')]||''),katalogId:String(data[i][h.indexOf('katalogId')]||'')});
+      pendingRows.push({row:i+1,id:String(data[i][iId]),outstanding,qtyLaku:Number(data[i][iQtyLaku])||0,hargaTitip:Number(data[i][iHargaTitip])||0,setoranId:String(data[i][iSetoran]||''),katalogId:String(data[i][iKatalog]||'')});
     }
     if (!pendingRows.length) return {success:false,message:'Tidak ada utang pending untuk supplier ini.'};
 
