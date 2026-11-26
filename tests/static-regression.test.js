@@ -76,7 +76,7 @@ has(backend, /function buildTitipanTotalsBySetoran\s*\(/, 'Supplier payment tota
 has(backend, /function _clearSheetCache\(name\)[\s\S]*?delete __sheetCache\[name\]/, 'Sheet cache must support targeted invalidation');
 const submitLockPos = backend.indexOf('function apiSubmitRekap(');
 const submitRefreshPos = backend.indexOf("_clearSheetCache('BayarTitipanKaryawan')", submitLockPos);
-const submitPaymentReadPos = backend.indexOf("bayarTitipanHariIni = getSheetData('BayarTitipanKaryawan')", submitLockPos);
+const submitPaymentReadPos = backend.indexOf("bayarTitipanHariIni = getSheetData('BayarTitipanKaryawan')", submitRefreshPos);
 assert.ok(submitLockPos >= 0 && submitRefreshPos > submitLockPos && submitPaymentReadPos > submitRefreshPos, 'Supplier payment cache must be invalidated after lock and before refreshed read');
 has(backend, /pending\.map\(s => mapSetoran\(s, titipanTotals\)\)/, 'Admin dashboard must reuse the aggregated supplier payment totals');
 has(backend, /getSheetData\('Setoran'\)\.map\(s => mapSetoran\(s, titipanTotals\)\)/, 'Setoran list must reuse the aggregated supplier payment totals');
