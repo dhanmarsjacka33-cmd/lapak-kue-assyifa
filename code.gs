@@ -2305,15 +2305,42 @@ function apiKaryawanBayarSupplier(token, payload) {
     const iId=h.indexOf('id'), iSupplier=h.indexOf('supplierId'), iLapak=h.indexOf('lapakId');
     const iStatus=h.indexOf('status'), iUtang=h.indexOf('utang'), iBayarAt=h.indexOf('bayarAt');
     const iBayarBy=h.indexOf('bayarBy'), iCatatan=h.indexOf('catatan');
-    const pendingRows=[]; let totalUtang=0;
+    const pendingRows=[];
     for (let i=1;i<data.length;i++) {
       if (String(data[i][iSupplier])!==supplierId || String(data[i][iLapak])!==String(lapakId) || String(data[i][iStatus])!=='Pending') continue;
       const outstanding=Math.max(0,Number(data[i][iUtang])||0);
       if (!outstanding) continue;
-      pendingRows.push({row:i+1,id:String(data[i][iId]),outstanding});
-      totalUtang+=outstanding;
+      pendingRows.push({row:i+1,id:String(data[i][iId]),outstanding,qtyLaku:Number(data[i][h.indexOf('qtyLaku')])||0,hargaTitip:Number(data[i][h.indexOf('hargaTitip')])||0});
     }
-    if (totalUtang<=0) return {success:false,message:'Tidak ada utang pending untuk supplier ini.'};
+    if (!pendingRows.length) return {success:false,message:'Tidak ada utang pending untuk supplier ini.'};
+
+    // Penyesuaian jumlah tagihan harus dilakukan sebelum pembayaran pertama pada invoice tersebut.
+    const adjustments=Array.isArray(payload.adjustments)?payload.adjustments:[];
+    const adjustmentMap={};
+    adjustments.forEach(x=>{
+      const id=String(x && x.id || '').trim(), qty=Number(x && x.qtyLaku);
+      if(!id || !Number.isSafeInteger(qty) || qty<0) throw new Error('Penyesuaian qty tagihan tidak valid.');
+      if(adjustmentMap[id]!==undefined) throw new Error('Item penyesuaian duplikat: '+id);
+      adjustmentMap[id]=qty;
+    });
+    if(adjustments.length){
+      const paidRows=getSheetData('BayarTitipanKaryawan').filter(x=>String(x.lapakId)===String(lapakId)&&String(x.supplierId)===supplierId&&String(x.status||'Active')==='Active');
+      const paidIds={};
+      paidRows.forEach(x=>{
+        const raw=String(x.konsinyasiIds||'');
+        if(raw.trim().startsWith('[')){try{JSON.parse(raw).forEach(v=>{if(v&&v.id)paidIds[String(v.id)]=true;});}catch(e){}}
+        else raw.split(',').map(v=>v.trim()).filter(Boolean).forEach(id=>paidIds[id]=true);
+      });
+      for(const id of Object.keys(adjustmentMap)){
+        const row=pendingRows.find(x=>x.id===id);
+        if(!row) return {success:false,message:'Item tagihan tidak ditemukan pada supplier ini. Muat ulang data.'};
+        if(paidIds[id]) return {success:false,message:'Jumlah produk '+id+' tidak dapat diubah karena sudah pernah menerima pembayaran. Selesaikan atau batalkan pembayaran sebelumnya terlebih dahulu.'};
+        row.qtyLaku=adjustmentMap[id];
+        row.outstanding=row.qtyLaku*row.hargaTitip;
+      }
+    }
+    const totalUtang=pendingRows.reduce((sum,x)=>sum+x.outstanding,0);
+    if(totalUtang<=0) return {success:false,message:'Total tagihan setelah penyesuaian harus lebih dari 0.'};
     const nominalBayar=Number(payload.nominalBayar);
     if (!Number.isSafeInteger(nominalBayar)||nominalBayar<=0||nominalBayar>totalUtang)
       return {success:false,message:'Nominal pembayaran harus angka bulat lebih dari 0 dan tidak melebihi sisa utang '+fmtRpLocal(totalUtang)+'.'};
@@ -2345,6 +2372,12 @@ function apiKaryawanBayarSupplier(token, payload) {
     });
     const journal=beginWriteJournal(['Konsinyasi','BayarTitipanKaryawan']);
     try {
+      Object.keys(adjustmentMap).forEach(id=>{
+        const item=pendingRows.find(x=>x.id===id);
+        if(!item) return;
+        journalSetValue(journal,ks,item.row,h.indexOf('qtyLaku')+1,item.qtyLaku);
+        journalSetValue(journal,ks,item.row,iUtang+1,item.outstanding);
+      });
       allocations.forEach(item=>{
         journalSetValue(journal,ks,item.row,iUtang+1,item.remaining);
         if(item.remaining<=0){
