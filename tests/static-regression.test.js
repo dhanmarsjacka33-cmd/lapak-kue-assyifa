@@ -135,3 +135,12 @@ if (/api\('getTitipanKaryawan'/.test(frontend.slice(frontend.indexOf('async func
 
 has(frontend, /data-locked-total/, 'Live supplier invoice total must include locked rows after previous partial payments');
 has(frontend, /let total = Number\(wrap\.dataset\.lockedTotal\) \|\| 0/, 'Editing supplier quantities must preserve locked outstanding balances in the live total');
+
+
+// Supplier invoice reconciliation regressions: active payment allocations must
+// reduce the displayed balance exactly once and fully paid invoices must disappear.
+has(backend, /const paidAmountById = \{\}/, 'Employee supplier summary must aggregate active payments by invoice ID');
+has(backend, /originalUtang - \(paidAmountById\[id\] \|\| 0\)/, 'Supplier invoice balance must reconcile against exact payment allocations');
+has(backend, /Math\.min\(currentUtang, saldoTerhitung\)/, 'Reconciliation must avoid subtracting payments twice when Konsinyasi.utang is already a remaining balance');
+has(backend, /if \(saldo <= 0\) return/, 'Fully paid invoices must not reappear in the pending supplier list');
+has(backend, /remainingPayment = Math\.max\(0, Number\(b\.totalBayar\) \|\| 0\)/, 'Legacy payment records without per-invoice amounts must be reconciled conservatively');
