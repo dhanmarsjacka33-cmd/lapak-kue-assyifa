@@ -2259,6 +2259,8 @@ function apiGetTitipanKaryawan(token) {
   });
 
   // --- PENDING: semua konsinyasi yang belum dibayar di lapak ini ---
+  const detailMap = {};
+  (getSheetData('SetoranDetail') || []).forEach(d => { detailMap[String(d.setoranId) + '|' + String(d.katalogId)] = d; });
   const list = getSheetData('Konsinyasi').filter(k => String(k.lapakId) === String(lapakId) && k.status === 'Pending');
   const grouped = {};
   list.forEach(k => {
@@ -2271,6 +2273,8 @@ function apiGetTitipanKaryawan(token) {
       tanggal: formatDate(k.tanggal),
       nama: katMap[String(k.katalogId)] || k.katalogId,
       qtyLaku: Number(k.qtyLaku) || 0,
+      qtyDrop: Number((detailMap[String(k.setoranId) + '|' + String(k.katalogId)] || {}).qtyDrop) || (Number(k.qtyLaku) || 0),
+      qtySisa: Number((detailMap[String(k.setoranId) + '|' + String(k.katalogId)] || {}).qtySisa) || 0,
       hargaTitip: Number(k.hargaTitip) || 0,
       utang: Number(k.utang) || 0,
       canAdjust: !paidIds[String(k.id)]
@@ -2325,7 +2329,7 @@ function apiKaryawanBayarSupplier(token, payload) {
       if (String(data[i][iSupplier])!==supplierId || String(data[i][iLapak])!==String(lapakId) || String(data[i][iStatus])!=='Pending') continue;
       const outstanding=Math.max(0,Number(data[i][iUtang])||0);
       if (!outstanding) continue;
-      pendingRows.push({row:i+1,id:String(data[i][iId]),outstanding,qtyLaku:Number(data[i][h.indexOf('qtyLaku')])||0,hargaTitip:Number(data[i][h.indexOf('hargaTitip')])||0});
+      pendingRows.push({row:i+1,id:String(data[i][iId]),outstanding,qtyLaku:Number(data[i][h.indexOf('qtyLaku')])||0,hargaTitip:Number(data[i][h.indexOf('hargaTitip')])||0,setoranId:String(data[i][h.indexOf('setoranId')]||''),katalogId:String(data[i][h.indexOf('katalogId')]||'')});
     }
     if (!pendingRows.length) return {success:false,message:'Tidak ada utang pending untuk supplier ini.'};
 
@@ -2339,6 +2343,11 @@ function apiKaryawanBayarSupplier(token, payload) {
       adjustmentMap[id]=qty;
     });
     if(adjustments.length){
+      const detailSheet=ss.getSheetByName('SetoranDetail');
+      if(!detailSheet) return {success:false,message:'Data rincian setoran tidak ditemukan. Penyesuaian sisa kue dibatalkan.'};
+      const detailData=detailSheet.getDataRange().getValues(), detailHeaders=detailData[0].map(x=>String(x).trim());
+      const diSetoran=detailHeaders.indexOf('setoranId'), diKatalog=detailHeaders.indexOf('katalogId'), diDrop=detailHeaders.indexOf('qtyDrop'), diSisa=detailHeaders.indexOf('qtySisa'), diLaku=detailHeaders.indexOf('qtyLaku');
+      if([diSetoran,diKatalog,diDrop,diSisa,diLaku].some(i=>i<0)) return {success:false,message:'Kolom rincian stok tidak lengkap. Penyesuaian sisa kue dibatalkan.'};
       const paidRows=getSheetData('BayarTitipanKaryawan').filter(x=>String(x.lapakId)===String(lapakId)&&String(x.supplierId)===supplierId&&String(x.status||'Active')==='Active');
       const paidIds={};
       paidRows.forEach(x=>{
@@ -2350,8 +2359,14 @@ function apiKaryawanBayarSupplier(token, payload) {
         const row=pendingRows.find(x=>x.id===id);
         if(!row) return {success:false,message:'Item tagihan tidak ditemukan pada supplier ini. Muat ulang data.'};
         if(paidIds[id]) return {success:false,message:'Jumlah produk '+id+' tidak dapat diubah karena sudah pernah menerima pembayaran. Selesaikan atau batalkan pembayaran sebelumnya terlebih dahulu.'};
+        const detailIndex=detailData.findIndex((d,i)=>i>0&&String(d[diSetoran])===row.setoranId&&String(d[diKatalog])===row.katalogId);
+        if(detailIndex<1) return {success:false,message:'Rincian stok untuk '+id+' tidak ditemukan. Muat ulang data.'};
+        const qtyDrop=Number(detailData[detailIndex][diDrop])||0, qtySisa=qtyDrop-adjustmentMap[id];
+        if(!Number.isSafeInteger(qtyDrop)||qtyDrop<0||adjustmentMap[id]>qtyDrop) return {success:false,message:'Jumlah kue terjual melebihi jumlah yang diterima untuk '+id+'.'};
         row.qtyLaku=adjustmentMap[id];
         row.outstanding=row.qtyLaku*row.hargaTitip;
+        row.detailRow=detailIndex+1;
+        row.qtySisa=qtySisa;
       }
     }
     const totalUtang=pendingRows.reduce((sum,x)=>sum+x.outstanding,0);
@@ -2392,6 +2407,11 @@ function apiKaryawanBayarSupplier(token, payload) {
         if(!item) return;
         journalSetValue(journal,ks,item.row,h.indexOf('qtyLaku')+1,item.qtyLaku);
         journalSetValue(journal,ks,item.row,iUtang+1,item.outstanding);
+        if(item.detailRow){
+          const detailSheet=ss.getSheetByName('SetoranDetail'), detailHeaders=detailSheet.getRange(1,1,1,detailSheet.getLastColumn()).getValues()[0].map(x=>String(x).trim());
+          journalSetValue(journal,detailSheet,item.detailRow,detailHeaders.indexOf('qtySisa')+1,item.qtySisa);
+          journalSetValue(journal,detailSheet,item.detailRow,detailHeaders.indexOf('qtyLaku')+1,item.qtyLaku);
+        }
         if(item.qtyLaku<=0) journalSetValue(journal,ks,item.row,iStatus+1,'Cancelled');
       });
       allocations.forEach(item=>{
