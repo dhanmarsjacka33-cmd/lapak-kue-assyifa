@@ -670,9 +670,10 @@ function summaryHTML() {
   const tunai = tunaiEl ? (parseInt(tunaiEl.value, 10) || 0) : 0;
   const qris = qrisEl ? (parseInt(qrisEl.value, 10) || 0) : 0;
   const transfer = transferEl ? (parseInt(transferEl.value, 10) || 0) : 0;
-  const tunaiDiserahkan = tunai - pengeluaran - totalTitipanTunai;
-  const qrisDiserahkan = qris - totalTitipanQris;
-  const transferDiserahkan = transfer - totalTitipanTransfer;
+  // Pembayaran supplier adalah metadata metode, bukan pengurang setoran.
+  const tunaiDiserahkan = tunai - pengeluaran;
+  const qrisDiserahkan = qris;
+  const transferDiserahkan = transfer;
   const expected = tunaiDiserahkan + qrisDiserahkan + transferDiserahkan;
   const selisih = total - (tunai + qris + transfer);
   return `<div style="flex:1">
