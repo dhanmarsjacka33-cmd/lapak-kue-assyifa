@@ -2035,7 +2035,7 @@ function formBayarTitipan(supplierId) {
   if (!pending || !pending.items || !pending.items.length) return toast('Tidak ada utang pending untuk supplier ini.', 'error');
   const nominalMaks = Number(pending.total) || 0;
   const rows = pending.items.map(it => {
-    const qty = Number(it.qtyLaku) || 0, price = Number(it.hargaTitip) || 0;
+    const qty = Number(it.qtyLaku) || 0, price = Number(it.hargaTitip) || 0, canAdjust = it.canAdjust !== false, currentDebt = Number(it.utang) || 0;
     return `<div class="card-flat" style="padding:10px;margin-bottom:8px">
       <div class="row-between" style="gap:8px">
         <div style="min-width:0;flex:1">
@@ -2043,11 +2043,11 @@ function formBayarTitipan(supplierId) {
           <div class="text-xs text-gray">${fmtRp(price)} / pcs</div>
         </div>
         <div style="width:104px">
-          <label class="text-xs text-gray">Qty tagihan</label>
-          <input type="number" min="0" step="1" inputmode="numeric" class="input" style="padding:8px" data-titipan-qty="${esc(it.id)}" data-original="${qty}" data-price="${price}" value="${qty}">
+          <label class="text-xs text-gray">${canAdjust ? "Qty tagihan" : "Qty (terkunci)"}</label>
+          ${canAdjust ? `<input type="number" min="0" step="1" inputmode="numeric" class="input" style="padding:8px" data-titipan-qty="${esc(it.id)}" data-original="${qty}" data-price="${price}" value="${qty}">` : `<div class="input" style="padding:8px">${qty}</div>`}
         </div>
       </div>
-      <div class="row-between mt-2 text-sm"><span class="text-gray">Tagihan produk</span><strong data-titipan-line="${esc(it.id)}">${fmtRp(qty*price)}</strong></div>
+      <div class="row-between mt-2 text-sm"><span class="text-gray">Tagihan produk</span><strong data-titipan-line="${esc(it.id)}">${fmtRp(canAdjust ? qty*price : currentDebt)}</strong></div>
     </div>`;
   }).join('');
   const body = `
@@ -2081,7 +2081,7 @@ function formBayarTitipan(supplierId) {
           originalQty: Number(input.dataset.original)
         })).filter(x => x.qtyLaku !== x.originalQty).map(({id,qtyLaku}) => ({id,qtyLaku}));
         if (adjustments.some(x => !Number.isSafeInteger(x.qtyLaku) || x.qtyLaku < 0)) return toast('Qty tagihan harus bilangan bulat 0 atau lebih.', 'error');
-        const recalculated = Array.from(wrap.querySelectorAll('[data-titipan-qty]')).reduce((sum,input) => sum + Math.max(0,Number(input.value)||0)*(Number(input.dataset.price)||0),0);
+        const recalculated = Array.from(wrap.querySelectorAll('[data-titipan-qty]')).reduce((sum,input) => sum + Math.max(0,Number(input.value)||0)*(Number(input.dataset.price)||0),0); + pending.items.filter(it => it.canAdjust === false).reduce((sum,it) => sum + (Number(it.utang)||0),0);
         if (!Number.isSafeInteger(recalculated) || recalculated <= 0) return toast('Total tagihan harus lebih dari 0. Jika tidak ada barang terjual, koreksi stok melalui rekap.', 'error');
         const nominalBayar = Number((w.querySelector('[data-f="nominalBayar"]') || {}).value);
         if (!Number.isSafeInteger(nominalBayar) || nominalBayar <= 0 || nominalBayar > recalculated) return toast('Nominal pembayaran harus angka bulat lebih dari 0 dan tidak melebihi total tagihan setelah penyesuaian.', 'error');
