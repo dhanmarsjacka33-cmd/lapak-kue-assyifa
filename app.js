@@ -1608,6 +1608,30 @@ function handleInput(e) {
     });
     return;
   }
+  if (t.dataset.titipanQty !== undefined) {
+    const wrap = t.closest('[data-titipan-payment]');
+    if (wrap) {
+      let total = 0;
+      wrap.querySelectorAll('[data-titipan-qty]').forEach(input => {
+        const qty = Math.max(0, parseInt(input.value, 10) || 0);
+        const price = Number(input.dataset.price) || 0;
+        const line = qty * price;
+        total += line;
+        const out = wrap.querySelector('[data-titipan-line="' + input.dataset.titipanQty + '"]');
+        if (out) out.textContent = fmtRp(line);
+      });
+      const totalEl = wrap.querySelector('[data-titipan-total]');
+      if (totalEl) totalEl.textContent = fmtRp(total);
+      const payInput = wrap.querySelector('[data-f="nominalBayar"]');
+      if (payInput) {
+        const oldTotal = Number(payInput.dataset.previousTotal) || 0;
+        if (Number(payInput.value) === oldTotal) payInput.value = total;
+        payInput.max = total;
+        payInput.dataset.previousTotal = String(total);
+      }
+    }
+    return;
+  }
   if (t.dataset.rekapItem) {
     const kat = t.dataset.rekapItem;
     const max = Number(t.dataset.max);
@@ -2010,37 +2034,64 @@ function formBayarTitipan(supplierId) {
   const pending = (tk.pending || []).find(x => String(x.supplierId) === String(supplierId));
   if (!pending || !pending.items || !pending.items.length) return toast('Tidak ada utang pending untuk supplier ini.', 'error');
   const nominalMaks = Number(pending.total) || 0;
+  const rows = pending.items.map(it => {
+    const qty = Number(it.qtyLaku) || 0, price = Number(it.hargaTitip) || 0;
+    return `<div class="card-flat" style="padding:10px;margin-bottom:8px">
+      <div class="row-between" style="gap:8px">
+        <div style="min-width:0;flex:1">
+          <div class="text-sm font-semibold">${esc(it.nama)}</div>
+          <div class="text-xs text-gray">${fmtRp(price)} / pcs</div>
+        </div>
+        <div style="width:104px">
+          <label class="text-xs text-gray">Qty tagihan</label>
+          <input type="number" min="0" step="1" inputmode="numeric" class="input" style="padding:8px" data-titipan-qty="${esc(it.id)}" data-original="${qty}" data-price="${price}" value="${qty}">
+        </div>
+      </div>
+      <div class="row-between mt-2 text-sm"><span class="text-gray">Tagihan produk</span><strong data-titipan-line="${esc(it.id)}">${fmtRp(qty*price)}</strong></div>
+    </div>`;
+  }).join('');
   const body = `
-    <div class="card-flat" style="padding:12px;margin-bottom:12px;background:var(--amber-50);border:1px solid rgba(245,158,11,.3)">
-      <div class="text-xs text-gray">Sisa utang ${esc(pending.supplierNama)}</div>
-      <div class="text-lg font-bold" style="color:var(--red)">${fmtRp(nominalMaks)}</div>
-      <div class="text-xs text-gray mt-1">${pending.count} transaksi belum lunas</div>
-    </div>
-    <div class="field">
-      <label>Nominal yang dibayarkan (bisa diedit)</label>
-      <input type="number" min="1" max="${nominalMaks}" step="1" inputmode="numeric" class="input" data-f="nominalBayar" value="${nominalMaks}">
-      <p class="text-xs text-gray mt-1">Isi sesuai uang yang benar-benar dibayarkan. Sisa utang tetap tercatat jika pembayaran sebagian.</p>
+    <div class="alert alert-info" style="margin-bottom:10px">Cocokkan jumlah tagihan dengan stok fisik saat closing. Jika ada tambahan barang dari supplier menjelang tutup, sesuaikan jumlah yang menjadi tagihan di setiap produk. Nilai dihitung otomatis dari qty × harga titip.</div>
+    <div data-titipan-payment="1">
+      ${rows}
+      <div class="card-flat" style="padding:12px;background:var(--amber-50);border:1px solid rgba(245,158,11,.3)">
+        <div class="row-between"><span class="text-sm">Total tagihan setelah penyesuaian</span><strong class="text-lg" data-titipan-total>${fmtRp(nominalMaks)}</strong></div>
+        <div class="text-xs text-gray mt-1">${pending.count} produk/transaksi pending</div>
+      </div>
+      <div class="field mt-3">
+        <label>Nominal yang dibayarkan sekarang (bisa diedit)</label>
+        <input type="number" min="1" max="${nominalMaks}" step="1" inputmode="numeric" class="input" data-f="nominalBayar" data-previous-total="${nominalMaks}" value="${nominalMaks}">
+        <p class="text-xs text-gray mt-1">Boleh membayar sebagian. Sisa utang tetap tercatat.</p>
+      </div>
     </div>
     <div class="form-grid" style="margin-bottom:8px">
       <div class="field" style="margin-bottom:0"><label>No. Nota</label><input type="text" class="input" data-f="noNota" placeholder="Opsional"></div>
       <div class="field" style="margin-bottom:0"><label>Metode</label><input class="input" value="Tunai — dari uang penjualan lapak" disabled></div>
     </div>
-    <div class="field"><label>Catatan (opsional)</label><textarea class="textarea" data-f="catatan" placeholder="Catatan pembayaran" style="min-height:60px"></textarea></div>
-    <div class="alert alert-info" style="margin-bottom:0">Pembayaran sebagian akan mengurangi sisa utang supplier. Sisanya dapat dibayar nanti.</div>`;
+    <div class="field"><label>Catatan (opsional)</label><textarea class="textarea" data-f="catatan" placeholder="Contoh: tambahan barang 5 pcs sebelum closing" style="min-height:60px"></textarea></div>`;
   modal({
-    title: 'Bayar ' + esc(pending.supplierNama), body,
+    title: 'Periksa tagihan ' + esc(pending.supplierNama), body,
     actions: [
       { label: 'Batal', onClick: c => c() },
-      { label: 'Bayar', className: 'btn-success', onClick: async (c, w) => {
+      { label: 'Konfirmasi & Bayar', className: 'btn-success', onClick: async (c, w) => {
+        const wrap = w.querySelector('[data-titipan-payment]');
+        const adjustments = Array.from(wrap.querySelectorAll('[data-titipan-qty]')).map(input => ({
+          id: input.dataset.titipanQty,
+          qtyLaku: Number(input.value),
+          originalQty: Number(input.dataset.original)
+        })).filter(x => x.qtyLaku !== x.originalQty).map(({id,qtyLaku}) => ({id,qtyLaku}));
+        if (adjustments.some(x => !Number.isSafeInteger(x.qtyLaku) || x.qtyLaku < 0)) return toast('Qty tagihan harus bilangan bulat 0 atau lebih.', 'error');
+        const recalculated = Array.from(wrap.querySelectorAll('[data-titipan-qty]')).reduce((sum,input) => sum + Math.max(0,Number(input.value)||0)*(Number(input.dataset.price)||0),0);
+        if (!Number.isSafeInteger(recalculated) || recalculated <= 0) return toast('Total tagihan harus lebih dari 0. Jika tidak ada barang terjual, koreksi stok melalui rekap.', 'error');
         const nominalBayar = Number((w.querySelector('[data-f="nominalBayar"]') || {}).value);
-        if (!Number.isSafeInteger(nominalBayar) || nominalBayar <= 0 || nominalBayar > nominalMaks) return toast('Nominal harus angka bulat lebih dari 0 dan tidak melebihi sisa utang.', 'error');
+        if (!Number.isSafeInteger(nominalBayar) || nominalBayar <= 0 || nominalBayar > recalculated) return toast('Nominal pembayaran harus angka bulat lebih dari 0 dan tidak melebihi total tagihan setelah penyesuaian.', 'error');
         if (S.submitting) return;
         S.submitting = true; c(); showLoader();
         try {
           const r = await api('bayarTitipanKaryawan', { token:S.token, payload:{
-            supplierId:pending.supplierId, nominalBayar,
-            // Older Apps Script deployments do not understand nominalBayar. Send all IDs only for full payment; use a nonmatching sentinel for partial payments so an old backend safely refuses instead of paying the full balance.
-            konsinyasiIds: nominalBayar === nominalMaks ? pending.items.map(it => it.id) : ['__PARTIAL_PAYMENT_REQUIRES_UPDATED_BACKEND__'],
+            supplierId:pending.supplierId, nominalBayar, adjustments,
+            // Older Apps Script versions must reject quantity adjustments rather than charge an outdated amount.
+            konsinyasiIds: (adjustments.length || nominalBayar === recalculated) ? (adjustments.length ? ['__STOCK_ADJUSTMENT_REQUIRES_UPDATED_BACKEND__'] : pending.items.map(it => it.id)) : ['__PARTIAL_PAYMENT_REQUIRES_UPDATED_BACKEND__'],
             noNota:(w.querySelector('[data-f="noNota"]') || {}).value || '',
             catatan:(w.querySelector('[data-f="catatan"]') || {}).value || '',
             metode:'Tunai'
