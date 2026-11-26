@@ -1,11 +1,11 @@
 /* Kue As-Syifa POS — Service Worker v4 */
-const CACHE_VERSION = 'kueassyifa-v13';
+const CACHE_VERSION = 'kueassyifa-v14';
 const CACHE_STATIC = CACHE_VERSION + '-static';
 const CACHE_DYNAMIC = CACHE_VERSION + '-dynamic';
 
 const STATIC_ASSETS = [
   './', './index.html', './manifest.json',
-  './styles.css?v=6.8', './app.js?v=7.4', './config.js'
+  './styles.css?v=6.8', './app.js?v=7.5', './config.js'
 ];
 
 self.addEventListener('install', e => {
