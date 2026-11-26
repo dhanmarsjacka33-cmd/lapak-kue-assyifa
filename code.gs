@@ -22,7 +22,7 @@ const SESSION_CACHE = CacheService.getScriptCache();
 const ATTEMPT_CACHE = CacheService.getScriptCache();
 const DATA_CACHE = CacheService.getScriptCache();
 let __sheetCache = {};
-function _clearSheetCache() { __sheetCache = {}; }
+function _clearSheetCache(name) { if (name) { delete __sheetCache[name]; return; } __sheetCache = {}; }
 
 // ============================================================
 //  ENTRY
@@ -2100,6 +2100,8 @@ function apiSubmitRekap(token, payload) {
   try {
     // Refresh pembayaran setelah lock diperoleh agar pembayaran supplier yang terjadi
     // bersamaan dengan submit tidak tertinggal dari perhitungan maupun tautan setoran.
+    // Cache lokal eksekusi harus dibuang agar pembacaan ini benar-benar membaca sheet terbaru.
+    _clearSheetCache('BayarTitipanKaryawan');
     bayarTitipanHariIni = getSheetData('BayarTitipanKaryawan').filter(b => String(b.lapakId) === String(sess.lapakId) && (!b.setoranId || b.setoranId === '') && String(b.status || 'Active') === 'Active');
     const totalTitipanTunai = bayarTitipanHariIni.filter(b => String(b.metode || 'Tunai') === 'Tunai').reduce((sum,b) => sum + toPosNum(b.totalBayar),0);
     const totalTitipanQris = bayarTitipanHariIni.filter(b => String(b.metode || '') === 'QRIS').reduce((sum,b) => sum + toPosNum(b.totalBayar),0);
