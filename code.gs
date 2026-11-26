@@ -2450,6 +2450,16 @@ function apiKaryawanBayarSupplier(token, payload) {
       for(const id of Object.keys(adjustmentMap)){
         const row=pendingRows.find(x=>x.id===id);
         if(!row) return {success:false,message:'Item tagihan tidak ditemukan pada supplier ini. Muat ulang data.'};
+        // Jika ada invoice saudara untuk draft supplier/produk/periode yang sama yang sudah dibayar,
+        // jangan izinkan karyawan mengubah invoice pending duplikat. Koreksi wajib melalui admin.
+        const targetRow = data[row.row - 1];
+        const draftKey = iCatatan >= 0 ? String(targetRow[iCatatan] || '') : '';
+        const paidSibling = draftKey && data.some((raw, idx) =>
+          idx > 0 && idx + 1 !== row.row &&
+          String(raw[iCatatan] || '') === draftKey &&
+          paidIds[String(raw[iId])]
+        );
+        if(paidSibling) return {success:false,message:'Ditemukan invoice lain untuk transaksi supplier/produk yang sama yang sudah menerima pembayaran. Jangan ubah atau bayar tagihan ini. Ajukan koreksi kepada admin agar pembayaran lama tetap diperhitungkan.'};
         if(paidIds[id]) return {success:false,message:'Jumlah produk '+id+' tidak dapat diubah karena sudah pernah menerima pembayaran. Selesaikan atau batalkan pembayaran sebelumnya terlebih dahulu.'};
         const detailIndex=detailData.findIndex((d,i)=>i>0&&String(d[diSetoran])===row.setoranId&&String(d[diKatalog])===row.katalogId);
         if(detailIndex<1) return {success:false,message:'Rincian stok untuk '+id+' tidak ditemukan. Muat ulang data.'};
