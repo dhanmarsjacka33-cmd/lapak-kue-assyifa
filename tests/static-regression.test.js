@@ -71,7 +71,7 @@ console.log('PASS: syntax and static regression checks');
 
 // Accounting regression guards: QRIS is received directly by Owner; supplier payments
 // reduce the employee's cash handover and are posted separately from operating expenses.
-has(backend, /const totalTitipan = bayarTitipanHariIni\.filter\(b => String\(b\.metode \|\| 'Tunai'\) === 'Tunai'\)\.reduce/, 'Submit must total cash supplier payments linked to the settlement');
+has(backend, /const totalTitipanTunai = bayarTitipanHariIni\.filter\(b => String\(b\.metode \|\| 'Tunai'\) === 'Tunai'\)\.reduce/, 'Submit must total cash supplier payments linked to the settlement');
 has(backend, /if \(uangDisetor < 0\)/, 'Submit must reject cash outflows greater than cash sales');
 has(backend, /!\['Tunai','QRIS','Transfer'\]\.includes\(metode\)/, 'Supplier payments must support Tunai, QRIS and Transfer');
 has(backend, /if\(tunaiDiserahkan<0\)/, 'Admin edits must reject negative cash handovers');
@@ -89,6 +89,7 @@ if (/data-f="uangDisetor"/.test(frontend)) throw new Error('Admin edit form must
 has(backend, /formatDate\(b\.tanggal\) === tgl \|\| !b\.setoranId/, 'Employee summary must include older unlinked supplier payments');
 has(backend, /tanggal: formatDate\(b\.tanggal\)/, 'Supplier payment history must expose payment date');
 has(frontend, /filter\(x => !x\.setoranId\)/, 'Cash handover preview must deduct only unlinked supplier payments');
+has(frontend, /const tunaiDiserahkan = tunai - pengeluaran - totalTitipanTunai/, 'Cash handover preview must deduct only supplier payments made in cash');
 has(frontend, /Belum masuk setoran — dipotong pada rekap berikutnya/, 'Carry-over payments must be identified in the employee UI');
 
 has(backend, /const nominalBayar=Number\(payload\.nominalBayar\)/, 'Employee supplier payment must accept an editable partial payment amount');
@@ -110,3 +111,4 @@ has(frontend, /totalTitipanTransfer/, 'Employee settlement preview must separate
 has(backend, /const qrisBersih = totalQris - totalTitipanQris/, 'QRIS supplier payments must reduce QRIS handover');
 has(backend, /const transferBersih = totalTransfer - totalTitipanTransfer/, 'Transfer supplier payments must reduce transfer handover');
 has(frontend, /const data = await api\('getKaryawanDashboard'/, 'Employee reload should use the combined dashboard response');
+if (/api\('getTitipanKaryawan'/.test(frontend.slice(frontend.indexOf('async function reloadKaryawan'), frontend.indexOf('async function karyawanSaveDrop')))) throw new Error('Employee reload must not fetch titipan a second time');
