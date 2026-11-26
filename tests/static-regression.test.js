@@ -125,6 +125,8 @@ has(backend, /qtyDrop.*adjustmentMap\[id\]|adjustmentMap\[id\].*qtyDrop/, 'Backe
 has(backend, /diSisa/, 'Backend must persist remaining cake quantities to SetoranDetail');
 has(backend, /row\.qtyLaku\*row\.hargaTitip/, 'Backend must recalculate payable debt from adjusted sold quantity and supplier price');
 has(backend, /paidIds\[id\]/, 'Backend must prevent changing quantities on invoices with previous payments');
+has(backend, /const paidSibling = draftKey && data\.some/, 'Employee adjustment must stop when a duplicate sibling invoice already has a payment');
+has(backend, /Ajukan koreksi kepada admin agar pembayaran lama tetap diperhitungkan/, 'Duplicate paid invoice correction must be routed to admin');
 
 has(frontend, /totalTitipanQris/, 'Employee settlement preview must separate supplier QRIS payments');
 has(frontend, /totalTitipanTransfer/, 'Employee settlement preview must separate supplier transfer payments');
