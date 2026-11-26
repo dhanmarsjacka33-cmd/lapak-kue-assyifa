@@ -515,7 +515,7 @@ function renderTitipanSection() {
           <div style="min-width:0;flex:1">
             <div style="font-weight:600">${esc(b.supplierNama)}</div>
             <div class="text-xs text-gray">${esc(b.tanggal || '')} · ${esc(b.metode)}${b.noNota ? ' · Nota ' + esc(b.noNota) : ''}${b.createdAt ? ' · ' + esc(b.createdAt) : ''}</div>
-            <div class="text-xs ${b.setoranId ? 'text-gray' : 'text-amber'}">${b.setoranId ? 'Sudah masuk setoran' : 'Belum masuk setoran — dipotong pada rekap berikutnya'}</div>
+            <div class="text-xs ${b.setoranId ? 'text-gray' : 'text-amber'}">${b.setoranId ? 'Sudah masuk setoran' : 'Belum tertaut ke laporan setoran'}</div>
           </div>
           <div class="text-right" style="flex-shrink:0">
             <div class="text-sm font-bold text-green">${fmtRp(b.total)}</div>
