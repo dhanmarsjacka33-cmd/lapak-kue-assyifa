@@ -1823,7 +1823,6 @@ async function tryAutoLogin() {
     applyBootstrap(res);
     if (S.user.role === 'karyawan') await initKaryawan();
     render();
-    setTimeout(preloadCommon, 100);
   } catch (e) {
     if (String(e.message).includes('UNAUTHORIZED') || !MEM.get('katalog')) {
       localStorage.removeItem('tk'); S.token = null; render(); return;
