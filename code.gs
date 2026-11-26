@@ -2400,7 +2400,7 @@ function apiKaryawanBayarSupplier(token, payload) {
         case 'noNota':return noNota; case 'metode':return metode; case 'status':return 'Active'; default:return '';
       }
     });
-    const journal=beginWriteJournal(['Konsinyasi','BayarTitipanKaryawan']);
+    const journal=beginWriteJournal(['Konsinyasi','BayarTitipanKaryawan','SetoranDetail']);
     try {
       Object.keys(adjustmentMap).forEach(id=>{
         const item=pendingRows.find(x=>x.id===id);
