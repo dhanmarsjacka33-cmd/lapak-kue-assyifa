@@ -951,7 +951,7 @@ function buildBootstrapData(user) {
     const setoran = getSheetData('Setoran');
     const kas = getSheetData('Kas');
     const pending = setoran.filter(s => s.status === 'pending');
-  const titipanTotals = buildTitipanTotalsBySetoran();    const titipanTotals = buildTitipanTotalsBySetoran();
+    const titipanTotals = buildTitipanTotalsBySetoran();
     const saldoKas = kas.length ? Number(kas[kas.length - 1].saldo) || 0 : 0;
     const todaySetoran = setoran.filter(s => formatDate(s.tanggal) === tgl);
     const todayPenjualan = todaySetoran.reduce((s, x) => s + (Number(x.totalSistem) || 0), 0);
@@ -2545,6 +2545,7 @@ function apiGetAdminDashboard(token) {
   const setoran = getSheetData('Setoran');
   const kas = getSheetData('Kas');
   const pending = setoran.filter(s => s.status === 'pending');
+  const titipanTotals = buildTitipanTotalsBySetoran();
   const saldoKas = kas.length ? Number(kas[kas.length - 1].saldo) || 0 : 0;
   const todaySetoran = setoran.filter(s => formatDate(s.tanggal) === tgl);
   const todayPenjualan = todaySetoran.reduce((s, x) => s + (Number(x.totalSistem) || 0), 0);
