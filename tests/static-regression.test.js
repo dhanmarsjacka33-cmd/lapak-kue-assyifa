@@ -97,3 +97,10 @@ has(backend, /journalSetValue\(journal,ks,item\.row,iUtang\+1,item\.remaining\)/
 has(backend, /current\+allocationMap\[itemId\]/, 'Cancelling a partial payment must restore the allocated debt amount');
 has(frontend, /data-f="nominalBayar"/, 'Employee supplier payment form must allow editing payment amount');
 has(frontend, /__PARTIAL_PAYMENT_REQUIRES_UPDATED_BACKEND__/, 'Legacy backend must safely reject partial payments rather than charge the full supplier debt');
+
+has(frontend, /data-titipan-qty/, 'Supplier payment form must allow editing payable quantity for each product');
+has(frontend, /data-titipan-total/, 'Supplier payment form must show recalculated payable total from product quantities');
+has(frontend, /adjustments/, 'Supplier payment request must submit per-product quantity adjustments');
+has(backend, /payload\.adjustments/, 'Backend must validate supplier invoice quantity adjustments');
+has(backend, /row\.qtyLaku\*row\.hargaTitip/, 'Backend must recalculate payable debt from adjusted sold quantity and supplier price');
+has(backend, /paidIds\[id\]/, 'Backend must prevent changing quantities on invoices with previous payments');
