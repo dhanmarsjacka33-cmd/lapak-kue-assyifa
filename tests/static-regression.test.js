@@ -76,8 +76,10 @@ has(backend, /if \(uangDisetor < 0\)/, 'Submit must reject cash outflows greater
 has(backend, /!\['Tunai','QRIS','Transfer'\]\.includes\(metode\)/, 'Supplier payments must support Tunai, QRIS and Transfer');
 has(backend, /if\(tunaiDiserahkan<0\)/, 'Admin edits must reject negative cash handovers');
 has(backend, /totalTunai - totalTitipanTunai - totalPengeluaran/, 'Employee cash handover must deduct only cash supplier payments and operating expenses');
-has(backend, /kategori:'Pembayaran Titipan Supplier',metode:m,nominal:amount/, 'Supplier payments must post as distinct cash outflows under the selected method');
-has(backend, /kategori:'Operasional Lapak',nominal:pengeluaranOperasional/, 'Operating expenses must post as a separate cash outflow');
+has(backend, /const keuntunganBersih = totalPenjualan - totalPembayaranSupplier - pengeluaranOperasional/, 'Main cash must receive net profit after supplier payments and operating expenses');
+has(backend, /kategori:'Keuntungan Bersih'/, 'Approval must post net profit as a single cash inflow');
+if (/kategori:'Pembayaran Titipan Supplier'/.test(backend)) throw new Error('Supplier payments must not create main-cash outflow entries');
+has(backend, /totalPenjualan - totalPembayaranSupplier - pengeluaranOperasional/, 'Operating expenses must be deducted in net-profit calculation, not posted as a separate cash movement');
 has(frontend, /data-f="metode"/, 'Supplier payment form must allow choosing the actual payment method');
 has(frontend, /QRIS/, 'Frontend must display QRIS as a payment method');
 has(frontend, /Tunai yang diserahkan karyawan/, 'Frontend must show net cash handed over by employee');
@@ -112,8 +114,8 @@ has(backend, /paidIds\[id\]/, 'Backend must prevent changing quantities on invoi
 
 has(frontend, /totalTitipanQris/, 'Employee settlement preview must separate supplier QRIS payments');
 has(frontend, /totalTitipanTransfer/, 'Employee settlement preview must separate supplier transfer payments');
-has(backend, /const qrisBersih = totalQris - totalTitipanQris/, 'QRIS supplier payments must reduce QRIS handover');
-has(backend, /const transferBersih = totalTransfer - totalTitipanTransfer/, 'Transfer supplier payments must reduce transfer handover');
+has(backend, /const qrisBersih = totalQris - totalTitipanQris/, 'Employee QRIS reconciliation remains separate from main-cash accounting');
+has(backend, /const transferBersih = totalTransfer - totalTitipanTransfer/, 'Employee transfer reconciliation remains separate from main-cash accounting');
 has(frontend, /const data = await api\('getKaryawanDashboard'/, 'Employee reload should use the combined dashboard response');
 if (/api\('getTitipanKaryawan'/.test(frontend.slice(frontend.indexOf('async function reloadKaryawan'), frontend.indexOf('async function karyawanSaveDrop')))) throw new Error('Employee reload must not fetch titipan a second time');
 
