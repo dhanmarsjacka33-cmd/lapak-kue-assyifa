@@ -2244,6 +2244,14 @@ function apiGetTitipanKaryawan(token) {
   const katMap = {};
   getSheetData('Katalog').forEach(k => { katMap[String(k.id)] = k.nama; });
 
+  // Invoice yang sudah pernah menerima pembayaran tidak boleh diubah qty-nya.
+  const paidIds = {};
+  (getSheetData('BayarTitipanKaryawan') || []).filter(b => String(b.lapakId) === String(lapakId) && String(b.status || 'Active') === 'Active').forEach(b => {
+    const raw = String(b.konsinyasiIds || '');
+    if (raw.trim().startsWith('[')) { try { JSON.parse(raw).forEach(x => { if (x && x.id) paidIds[String(x.id)] = true; }); } catch (e) {} }
+    else raw.split(',').map(x => x.trim()).filter(Boolean).forEach(id => { paidIds[id] = true; });
+  });
+
   // --- PENDING: semua konsinyasi yang belum dibayar di lapak ini ---
   const list = getSheetData('Konsinyasi').filter(k => String(k.lapakId) === String(lapakId) && k.status === 'Pending');
   const grouped = {};
@@ -2258,7 +2266,8 @@ function apiGetTitipanKaryawan(token) {
       nama: katMap[String(k.katalogId)] || k.katalogId,
       qtyLaku: Number(k.qtyLaku) || 0,
       hargaTitip: Number(k.hargaTitip) || 0,
-      utang: Number(k.utang) || 0
+      utang: Number(k.utang) || 0,
+      canAdjust: !paidIds[String(k.id)]
     });
   });
   const pending = Object.values(grouped).sort((a, b) => b.total - a.total);
@@ -2377,6 +2386,7 @@ function apiKaryawanBayarSupplier(token, payload) {
         if(!item) return;
         journalSetValue(journal,ks,item.row,h.indexOf('qtyLaku')+1,item.qtyLaku);
         journalSetValue(journal,ks,item.row,iUtang+1,item.outstanding);
+        if(item.qtyLaku<=0) journalSetValue(journal,ks,item.row,iStatus+1,'Cancelled');
       });
       allocations.forEach(item=>{
         journalSetValue(journal,ks,item.row,iUtang+1,item.remaining);
