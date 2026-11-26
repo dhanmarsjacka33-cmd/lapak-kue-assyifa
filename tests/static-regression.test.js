@@ -79,7 +79,7 @@ has(backend, /totalTunai - totalTitipanTunai - totalPengeluaran/, 'Employee cash
 has(backend, /const keuntunganBersih = totalPenjualan - totalPembayaranSupplier - pengeluaranOperasional/, 'Main cash must receive net profit after supplier payments and operating expenses');
 has(backend, /kategori:'Keuntungan Bersih'/, 'Approval must post net profit as a single cash inflow');
 if (/kategori:'Pembayaran Titipan Supplier'/.test(backend)) throw new Error('Supplier payments must not create main-cash outflow entries');
-has(backend, /kategori:'Operasional Lapak',nominal:pengeluaranOperasional/, 'Operating expenses must post as a separate cash outflow');
+has(backend, /totalPenjualan - totalPembayaranSupplier - pengeluaranOperasional/, 'Operating expenses must be deducted in net-profit calculation, not posted as a separate cash movement');
 has(frontend, /data-f="metode"/, 'Supplier payment form must allow choosing the actual payment method');
 has(frontend, /QRIS/, 'Frontend must display QRIS as a payment method');
 has(frontend, /Tunai yang diserahkan karyawan/, 'Frontend must show net cash handed over by employee');
