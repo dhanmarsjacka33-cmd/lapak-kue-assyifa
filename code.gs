@@ -2383,12 +2383,45 @@ function apiKaryawanBayarSupplier(token, payload) {
     const iId=h.indexOf('id'), iSupplier=h.indexOf('supplierId'), iLapak=h.indexOf('lapakId');
     const iStatus=h.indexOf('status'), iUtang=h.indexOf('utang'), iBayarAt=h.indexOf('bayarAt');
     const iBayarBy=h.indexOf('bayarBy'), iCatatan=h.indexOf('catatan');
+    const iQtyLaku=h.indexOf('qtyLaku'), iHargaTitip=h.indexOf('hargaTitip');
+    const iSetoran=h.indexOf('setoranId'), iKatalog=h.indexOf('katalogId');
+    const paidAmountById = {};
+    const activePayments = (getSheetData('BayarTitipanKaryawan') || []).filter(b =>
+      String(b.lapakId)===String(lapakId) && String(b.supplierId)===supplierId &&
+      String(b.status || 'Active')==='Active'
+    );
+    activePayments.forEach(b => {
+      const raw=String(b.konsinyasiIds || '');
+      if(raw.trim().startsWith('[')){
+        try {
+          JSON.parse(raw).forEach(x=>{
+            if(!x || !x.id) return;
+            const amount=Number(x.amount), id=String(x.id);
+            if(Number.isFinite(amount) && amount>0) paidAmountById[id]=(paidAmountById[id]||0)+amount;
+          });
+        } catch(e) {}
+      } else {
+        let remainingPayment=Math.max(0,Number(b.totalBayar)||0);
+        raw.split(',').map(x=>x.trim()).filter(Boolean).forEach(id=>{
+          if(remainingPayment<=0) return;
+          const invoiceRow=data.find((row,idx)=>idx>0&&String(row[iId])===id);
+          if(!invoiceRow) return;
+          const original=(Number(invoiceRow[iQtyLaku])||0)*(Number(invoiceRow[iHargaTitip])||0);
+          const capacity=original>0?Math.max(0,original-(paidAmountById[id]||0)):Math.max(0,Number(invoiceRow[iUtang])||0);
+          const allocated=Math.min(capacity,remainingPayment);
+          if(allocated>0){paidAmountById[id]=(paidAmountById[id]||0)+allocated;remainingPayment-=allocated;}
+        });
+      }
+    });
     const pendingRows=[];
     for (let i=1;i<data.length;i++) {
       if (String(data[i][iSupplier])!==supplierId || String(data[i][iLapak])!==String(lapakId) || String(data[i][iStatus])!=='Pending') continue;
-      const outstanding=Math.max(0,Number(data[i][iUtang])||0);
+      const currentUtang=Math.max(0,Number(data[i][iUtang])||0);
+      const originalUtang=(Number(data[i][iQtyLaku])||0)*(Number(data[i][iHargaTitip])||0);
+      const reconciled=originalUtang>0?Math.min(currentUtang,Math.max(0,originalUtang-(paidAmountById[String(data[i][iId])]||0))):currentUtang;
+      const outstanding=reconciled;
       if (!outstanding) continue;
-      pendingRows.push({row:i+1,id:String(data[i][iId]),outstanding,qtyLaku:Number(data[i][h.indexOf('qtyLaku')])||0,hargaTitip:Number(data[i][h.indexOf('hargaTitip')])||0,setoranId:String(data[i][h.indexOf('setoranId')]||''),katalogId:String(data[i][h.indexOf('katalogId')]||'')});
+      pendingRows.push({row:i+1,id:String(data[i][iId]),outstanding,qtyLaku:Number(data[i][iQtyLaku])||0,hargaTitip:Number(data[i][iHargaTitip])||0,setoranId:String(data[i][iSetoran]||''),katalogId:String(data[i][iKatalog]||'')});
     }
     if (!pendingRows.length) return {success:false,message:'Tidak ada utang pending untuk supplier ini.'};
 
