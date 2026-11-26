@@ -2849,10 +2849,10 @@ function apiEditSetoran(token, idSetoran, updates) {
         });
         const it=h.indexOf('totalTunai'), iq=h.indexOf('totalQris'), itr=h.indexOf('totalTransfer'), is=h.indexOf('totalSistem'), ip=h.indexOf('pengeluaran'), ie=h.indexOf('expectedSetoran'), iu=h.indexOf('uangDisetor'), il=h.indexOf('selisih');
         const nt=Number(sheet.getRange(row,it+1).getValue())||0, nq=Number(sheet.getRange(row,iq+1).getValue())||0, ntr=itr>=0?Number(sheet.getRange(row,itr+1).getValue())||0:0, ns=Number(sheet.getRange(row,is+1).getValue())||0, np=Number(sheet.getRange(row,ip+1).getValue())||0;
-        const titipan=getSheetData('BayarTitipanKaryawan').filter(b=>String(b.setoranId)===String(idSetoran)&&String(b.status||'Active')==='Active'&&String(b.metode||'Tunai')==='Tunai').reduce((sum,b)=>sum+(Number(b.totalBayar)||0),0);
-        const tunaiDiserahkan=nt-np-titipan;
-        if(tunaiDiserahkan<0) throw new Error('Pembayaran titipan dan pengeluaran melebihi penerimaan tunai.');
-        if(ie>=0) journalSetValue(journal,sheet,row,ie+1,tunaiDiserahkan+nq);
+        // Pembayaran supplier hanya metadata; setoran tidak dipotong ulang.
+        const tunaiDiserahkan=nt-np;
+        if(tunaiDiserahkan<0) throw new Error('Pengeluaran operasional melebihi penerimaan tunai.');
+        if(ie>=0) journalSetValue(journal,sheet,row,ie+1,tunaiDiserahkan+nq+ntr);
         if(iu>=0) journalSetValue(journal,sheet,row,iu+1,tunaiDiserahkan);
         journalSetValue(journal,sheet,row,il+1,ns-(nt+nq+ntr));
         if(iEdit>=0){const prev=sheet.getRange(row,iEdit+1).getValue(), entry=formatDateTime(new Date())+' by '+sess.username+': '+JSON.stringify(changes);journalSetValue(journal,sheet,row,iEdit+1,(prev?prev+' || ':'')+entry);}
