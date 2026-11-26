@@ -106,9 +106,9 @@ if (/data-f="uangDisetor"/.test(frontend)) throw new Error('Admin edit form must
 // Carry-over visibility must match the backend's all-unlinked-payment calculation.
 has(backend, /formatDate\(b\.tanggal\) === tgl \|\| !b\.setoranId/, 'Employee summary must include older unlinked supplier payments');
 has(backend, /tanggal: formatDate\(b\.tanggal\)/, 'Supplier payment history must expose payment date');
-has(frontend, /filter\(x => !x\.setoranId\)/, 'Cash handover preview must deduct only unlinked supplier payments');
+has(frontend, /filter\(x => !x\.setoranId\)/, 'Employee summary must identify supplier payments not yet linked to a settlement');
 has(frontend, /const tunaiDiserahkan = tunai - pengeluaran/, 'Cash handover preview deducts operating expenses only');
-has(frontend, /Belum masuk setoran — dipotong pada rekap berikutnya/, 'Carry-over payments must be identified in the employee UI');
+has(frontend, /Belum tertaut ke laporan setoran/, 'Unlinked supplier payments must be labeled as informational history, not a future deduction');
 
 has(backend, /const nominalBayar=Number\(payload\.nominalBayar\)/, 'Employee supplier payment must accept an editable partial payment amount');
 has(backend, /JSON\.stringify\(allocations\.map\(x=>\(\{id:x\.id,amount:x\.amount\}\)\)\)/, 'Partial supplier payment must persist exact per-invoice allocations');
