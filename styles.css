@@ -714,3 +714,38 @@ html[data-theme="dark"] .menu-search{background:var(--surface-2);border-color:#4
 
 /* Keep catalog search filtering effective despite .list-item display:flex. */
 .list-item[hidden]{display:none!important}
+
+
+/* ============ DESKTOP & ACCESSIBILITY OPTIMIZATION ============ */
+@media (min-width: 768px) {
+  body { background: #e2e8f0; }
+  #app {
+    width: min(100%, 1440px);
+    max-width: 1440px;
+    margin: 0 auto;
+    box-shadow: 0 0 48px rgba(15,23,42,.08);
+  }
+  .page { min-height: 100dvh; }
+  .page-body {
+    width: 100%;
+    max-width: 1360px;
+    margin: 0 auto;
+    padding: 24px 28px 48px;
+  }
+  .topbar { padding: 14px 28px; }
+  .tabbar { max-width: 1440px; padding-left: 24px; padding-right: 24px; }
+  .modal { max-width: 720px; }
+  .menu-sheet { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+}
+@media (min-width: 1200px) {
+  .page-body { padding-left: 36px; padding-right: 36px; }
+  .menu-sheet { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

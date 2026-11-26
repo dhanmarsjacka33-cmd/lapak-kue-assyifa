@@ -1714,7 +1714,6 @@ async function doLogin(form) {
     if (res.bootstrap) applyBootstrap(res.bootstrap);
     if (res.user.role === 'karyawan') await initKaryawan();
     render();
-    setTimeout(preloadCommon, 100);
   } catch (err) {
     const msg = String(err.message || 'Login gagal.');
     if (errBox) { errBox.className = 'alert alert-danger'; errBox.textContent = msg; errBox.classList.remove('hide'); }
@@ -1824,7 +1823,6 @@ async function tryAutoLogin() {
     applyBootstrap(res);
     if (S.user.role === 'karyawan') await initKaryawan();
     render();
-    setTimeout(preloadCommon, 100);
   } catch (e) {
     if (String(e.message).includes('UNAUTHORIZED') || !MEM.get('katalog')) {
       localStorage.removeItem('tk'); S.token = null; render(); return;
@@ -1852,14 +1850,6 @@ async function bootstrap() {
     }
   }
   finally { hideLoader(); render(); }
-}
-
-async function preloadCommon() {
-  if (!S.token || S.user.role !== 'admin') return;
-  const tasks = [];
-  if (!S.belanja.length) tasks.push(apiCached('getBelanja', { token: S.token, filter: {} }, 'belanja', 24 * 60 * 60 * 1000, { persist: true }).then(d => S.belanja = d).catch(() => {}));
-  if (!S.jadwal.length) tasks.push(apiCached('getJadwal', { token: S.token, days: 30 }, 'jadwal', 24 * 60 * 60 * 1000, { persist: true }).then(d => S.jadwal = d).catch(() => {}));
-  await Promise.all(tasks);
 }
 
 function toggleDarkMode() {
@@ -2219,7 +2209,7 @@ async function loadTabData(tab) {
       }));
     }
     await Promise.all(tasks);
-    if (tab === 'analisis-performa') setTimeout(renderAnalisisCharts, 80);
+    if (tab === 'analisis-performa') setTimeout(() => ensureChartJs().then(renderAnalisisCharts).catch(() => toast('Grafik gagal dimuat. Periksa koneksi internet.', 'error')), 80);
   } catch (e) { if (e.name !== 'AbortError') toast(e.message, 'error'); }
   finally { hideLoader(); }
 }
@@ -2261,7 +2251,7 @@ async function loadAnalisisPerforma() {
     S.analisisPerforma = await apiCached('getAnalisisPerforma', { token: S.token, ...payload }, 'analisis_' + JSON.stringify(payload), 24 * 60 * 60 * 1000, { persist: true });
     if (!ids.length && S.analisisPerforma.selectedIds) S.analisisSelectedIds = S.analisisPerforma.selectedIds;
   } catch (e) { toast(e.message, 'error'); }
-  finally { hideLoader(); render(); setTimeout(renderAnalisisCharts, 80); }
+  finally { hideLoader(); render(); setTimeout(() => ensureChartJs().then(renderAnalisisCharts).catch(() => toast('Grafik gagal dimuat. Periksa koneksi internet.', 'error')), 80); }
 }
 
 function toggleAnalisisPick(id) {
@@ -2271,7 +2261,22 @@ function toggleAnalisisPick(id) {
   else cur.splice(idx, 1);
   S.analisisSelectedIds = cur;
   render();
-  setTimeout(renderAnalisisCharts, 80);
+  setTimeout(() => ensureChartJs().then(renderAnalisisCharts).catch(() => toast('Grafik gagal dimuat. Periksa koneksi internet.', 'error')), 80);
+}
+
+let chartJsPromise = null;
+function ensureChartJs() {
+  if (window.Chart) return Promise.resolve(window.Chart);
+  if (chartJsPromise) return chartJsPromise;
+  chartJsPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
+    script.async = true;
+    script.onload = () => window.Chart ? resolve(window.Chart) : reject(new Error('Chart.js tidak tersedia'));
+    script.onerror = () => { chartJsPromise = null; reject(new Error('Gagal memuat Chart.js')); };
+    document.head.appendChild(script);
+  });
+  return chartJsPromise;
 }
 
 function renderAnalisisCharts() {
