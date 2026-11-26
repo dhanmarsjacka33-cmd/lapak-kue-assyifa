@@ -1619,7 +1619,7 @@ function handleInput(e) {
   if (t.dataset.titipanQty !== undefined) {
     const wrap = t.closest('[data-titipan-payment]');
     if (wrap) {
-      let total = 0;
+      let total = Number(wrap.dataset.lockedTotal) || 0;
       wrap.querySelectorAll('[data-titipan-qty]').forEach(input => {
         const qty = Math.max(0, parseInt(input.value, 10) || 0);
         const price = Number(input.dataset.price) || 0;
@@ -2060,7 +2060,7 @@ function formBayarTitipan(supplierId) {
   }).join('');
   const body = `
     <div class="alert alert-info" style="margin-bottom:10px">Cocokkan jumlah tagihan dengan stok fisik saat closing. Jika ada tambahan barang dari supplier menjelang tutup, sesuaikan jumlah yang menjadi tagihan di setiap produk. Nilai dihitung otomatis dari qty × harga titip.</div>
-    <div data-titipan-payment="1">
+    <div data-titipan-payment="1" data-locked-total="${pending.items.filter(it => it.canAdjust === false).reduce((sum,it) => sum + (Number(it.utang)||0),0)}">
       ${rows}
       <div class="card-flat" style="padding:12px;background:var(--amber-50);border:1px solid rgba(245,158,11,.3)">
         <div class="row-between"><span class="text-sm">Total tagihan setelah penyesuaian</span><strong class="text-lg" data-titipan-total>${fmtRp(nominalMaks)}</strong></div>
