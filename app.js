@@ -680,9 +680,9 @@ function summaryHTML() {
     <div class="row-between text-xs"><span>Penjualan</span><strong>${fmtRp(total)}</strong></div>
     <div class="row-between text-xs"><span>Tunai dipegang karyawan</span><span>${fmtRp(tunai)}</span></div>
     <div class="row-between text-xs"><span>QRIS</span><span>${fmtRp(qris)}</span></div><div class="row-between text-xs"><span>Transfer</span><span>${fmtRp(transfer)}</span></div>
-    ${totalTitipanTunai > 0 ? `<div class="row-between text-xs text-gray"><span>Titipan dibayar Tunai</span><span>- ${fmtRp(totalTitipanTunai)}</span></div>` : ''}
-    ${totalTitipanQris > 0 ? `<div class="row-between text-xs text-gray"><span>Titipan dibayar QRIS</span><span>- ${fmtRp(totalTitipanQris)}</span></div>` : ''}
-    ${totalTitipanTransfer > 0 ? `<div class="row-between text-xs text-gray"><span>Titipan dibayar Transfer</span><span>- ${fmtRp(totalTitipanTransfer)}</span></div>` : ''}
+    ${totalTitipanTunai > 0 ? `<div class="row-between text-xs text-gray"><span>Titipan dibayar Tunai (informasi)</span><span>${fmtRp(totalTitipanTunai)}</span></div>` : ''}
+    ${totalTitipanQris > 0 ? `<div class="row-between text-xs text-gray"><span>Titipan dibayar QRIS (informasi)</span><span>${fmtRp(totalTitipanQris)}</span></div>` : ''}
+    ${totalTitipanTransfer > 0 ? `<div class="row-between text-xs text-gray"><span>Titipan dibayar Transfer (informasi)</span><span>${fmtRp(totalTitipanTransfer)}</span></div>` : ''}
     <div class="row-between text-xs text-red"><span>Pengeluaran operasional</span><span>- ${fmtRp(pengeluaran)}</span></div>
     <div class="row-between text-xs text-green font-bold mt-2"><span>Tunai yang diserahkan karyawan</span><span>${fmtRp(tunaiDiserahkan)}</span></div>
     <div class="row-between text-xs text-green font-bold"><span>Total penerimaan Owner</span><span>${fmtRp(expected)}</span></div>
