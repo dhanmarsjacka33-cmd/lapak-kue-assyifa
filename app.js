@@ -742,6 +742,7 @@ function tabKas() {
 // ============================================
 function tabSetoran() {
   const f = S._setoranFilter || {};
+  if (S.setoran === null) return skeletonList(4);
   const list = S.setoran || [];
   const pending = list.filter(s => s.status === 'pending');
   const done = list.filter(s => s.status !== 'pending');
@@ -883,6 +884,13 @@ function tabAnalisisPerforma() {
   const entities = A.entities || [];
   const selectedIds = S.analisisSelectedIds.length > 0 ? S.analisisSelectedIds : (A.selectedIds || []);
   const selectedEntities = entities.filter(e => selectedIds.indexOf(e.id) !== -1);
+  if (!entities.length) return `<h3 class="card-title">${ico('pie-chart')} Analisis Performa</h3>
+    ${analisisControlBar(range, groupBy, [], entities)}
+    <div class="grid-3 mb-3"><div class="kpi"><div class="kpi-label">Total Omzet</div><div class="kpi-value text-green" style="font-size:13px">${fmtRp(A.summary.totalOmzet)}</div></div><div class="kpi"><div class="kpi-label">Total Qty</div><div class="kpi-value text-amber">${A.summary.totalQty}</div></div><div class="kpi"><div class="kpi-label">Rata²/Hari</div><div class="kpi-value text-blue" style="font-size:13px">${fmtRp(A.summary.avgOmzetPerHari)}</div></div></div>
+    <div class="card"><div class="card-title">${ico('trending-up')} Tren Omzet Harian</div><div class="empty">${ico('trending-up','ico')}<p>Grafik akan muncul setelah ada transaksi pada rentang tanggal ini.</p></div></div>
+    <div class="card"><div class="card-title">${ico('bar')} Ranking (Top 10)</div><div class="empty"><p>Belum ada data untuk menentukan ranking.</p></div></div>
+    <div class="card"><div class="card-title">${ico('pie-chart')} Kontribusi Omzet</div><div class="empty"><p>Kontribusi omzet akan tampil setelah ada data.</p></div></div>
+    <div class="card"><div class="card-title">${ico('list')} Detail per ${groupBy === 'item' ? 'Kue' : 'Supplier'}</div><div class="empty"><p>Belum ada transaksi pada rentang tanggal ini.</p></div></div>`;
   return `<h3 class="card-title">${ico('pie-chart')} Analisis Performa</h3>
     ${analisisControlBar(range, groupBy, selectedEntities, entities)}
     <div class="grid-3 mb-3"><div class="kpi"><div class="kpi-label">Total Omzet</div><div class="kpi-value text-green" style="font-size:13px">${fmtRp(A.summary.totalOmzet)}</div></div><div class="kpi"><div class="kpi-label">Total Qty</div><div class="kpi-value text-amber">${A.summary.totalQty}</div></div><div class="kpi"><div class="kpi-label">Rata²/Hari</div><div class="kpi-value text-blue" style="font-size:13px">${fmtRp(A.summary.avgOmzetPerHari)}</div></div></div>
@@ -1082,6 +1090,7 @@ function tabPesanan() {
   const list = S.pesanan || [];
   const statusCls = { Draft:'badge-gray', Ordered:'badge-blue', Received:'badge-success', Cancelled:'badge-danger' };
   let html = `<div class="row-between mb-3"><h3 class="card-title" style="margin:0">${ico('cart')} Pesanan Supplier</h3><button class="btn btn-primary btn-sm" data-act="add-pesanan">+ Tambah</button></div>`;
+  if (S.pesanan === null) return html + skeletonList(4);
   html += list.slice(0, 30).map(p => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(p.item)} <span class="badge ${statusCls[p.status] || 'badge-gray'}">${esc(p.status)}</span></div><div class="list-item-sub">${esc(p.supplierNama)} · ${esc(p.tanggal)}</div><div class="text-sm mt-2">${p.qty} × ${fmtRp(p.hargaSatuan)} = <strong>${fmtRp(p.subtotal)}</strong></div></div><div class="list-item-actions"><button class="action-btn action-edit" data-act="edit-pesanan" data-id="${esc(p.id)}">${ico('edit','ico-sm')}</button><button class="action-btn action-del" data-act="del-pesanan" data-id="${esc(p.id)}">${ico('trash','ico-sm')}</button></div></div>`).join('');
   if (!list.length) html += '<div class="empty"><p>Belum ada pesanan</p></div>';
   return html;
@@ -1319,6 +1328,7 @@ function tabPesananPelanggan() {
       <div class="form-grid"><div class="field"><label>Dari Tanggal</label><input type="date" data-pes-filter-dari value="${f.dari || ''}" class="input field-sm"></div><div class="field"><label>Sampai</label><input type="date" data-pes-filter-sampai value="${f.sampai || ''}" class="input field-sm"></div></div>
       <div class="row" style="gap:6px"><button class="btn btn-primary btn-block btn-sm" data-act="apply-pesanan-filter">Terapkan</button><button class="btn ${showDone ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="toggle-pesanan-done" data-show="${showDone ? '0' : '1'}" style="flex:0 0 auto">${showDone ? '✓ Selesai' : 'Semua'}</button>${f.dari || f.sampai ? `<button class="btn btn-ghost btn-sm" data-act="clear-pesanan-filter" style="flex:0 0 auto">${ico('x','ico-sm')}</button>` : ''}</div>
     </div>`;
+  if (S.pesananPelanggan === null) return html + skeletonList(4);
   if (!filtered.length) {
     html += '<div class="empty">' + ico('shopping-bag','ico') + '<p>Belum ada pesanan.</p></div>';
   } else {
@@ -2134,7 +2144,9 @@ async function loadTabData(tab) {
   const signal = getAbort(tab);
   const cacheTtl = 24 * 60 * 60 * 1000;
   const cached = (action, payload, key) => apiCached(action, payload, key, cacheTtl, { signal, persist: true });
-  showLoader();
+  // Daftar Setoran/Pesanan memakai skeleton lokal; jangan tutupi konten dengan overlay global.
+  const useGlobalLoader = tab !== 'setoran' && tab !== 'pesanan';
+  if (useGlobalLoader) showLoader();
   try {
     const tasks = [];
     const sf = {
@@ -2209,9 +2221,9 @@ async function loadTabData(tab) {
       }));
     }
     await Promise.all(tasks);
-    if (tab === 'analisis-performa') setTimeout(() => ensureChartJs().then(renderAnalisisCharts).catch(() => toast('Grafik gagal dimuat. Periksa koneksi internet.', 'error')), 80);
+    if (tab === 'analisis-performa' && S.analisisPerforma && (S.analisisPerforma.entities || []).length) setTimeout(() => ensureChartJs().then(renderAnalisisCharts).catch(() => toast('Grafik gagal dimuat. Periksa koneksi internet.', 'error')), 80);
   } catch (e) { if (e.name !== 'AbortError') toast(e.message, 'error'); }
-  finally { hideLoader(); }
+  finally { if (useGlobalLoader) hideLoader(); }
 }
 
 // ============================================
@@ -2840,14 +2852,14 @@ function formPesanan(id) {
       { key:'status', label:'Status', type:'select', value: item ? item.status : 'Draft', options: ['Draft','Ordered','Received','Cancelled'].map(s => ({ v:s, l:s, selected: item && item.status === s })) },
       { key:'keterangan', label:'Keterangan', type:'textarea', value: item ? item.keterangan : '' }
     ],
-    onSubmit: async (data, c) => { data.id = item ? item.id : null; c(); showLoader(); try { const r = await api('savePesanan', { token: S.token, item: data }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) S.pesanan = await api('getPesanan', { token: S.token, filter: {} }); } catch (e) { toast(e.message, 'error'); } finally { hideLoader(); render(); } }
+    onSubmit: async (data, c) => { data.id = item ? item.id : null; c(); showLoader(); try { const r = await api('savePesanan', { token: S.token, item: data }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) { MEM.clear('pesanan'); S.pesanan = await api('getPesanan', { token: S.token, filter: {} }); } } catch (e) { toast(e.message, 'error'); } finally { hideLoader(); render(); } }
   });
 }
 async function delPesanan(id) {
   if (!(await confirmDlg('Hapus pesanan?', ''))) return;
   const oldList = (S.pesanan || []).slice();
   S.pesanan = (S.pesanan || []).filter(p => String(p.id) !== String(id)); render();
-  try { await api('deletePesanan', { token: S.token, id }); toast('Pesanan dihapus', 'success'); }
+  try { await api('deletePesanan', { token: S.token, id }); MEM.clear('pesanan'); toast('Pesanan dihapus', 'success'); }
   catch (e) { S.pesanan = oldList; render(); toast(e.message, 'error'); }
 }
 
