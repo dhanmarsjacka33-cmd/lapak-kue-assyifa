@@ -661,19 +661,27 @@ function summaryHTML() {
   let pengeluaran = 0;
   $$('[data-peng-row]').forEach(r => { const el = r.querySelector('[data-peng-nom]'); if (el) pengeluaran += parseInt(el.value, 10) || 0; });
   const tk = S.titipanKaryawan || {};
-  const totalTitipan = (tk.sudahBayar || []).filter(x => !x.setoranId).reduce((s, x) => s + (x.total || 0), 0);
+  const pembayaranTitipan = (tk.sudahBayar || []).filter(x => !x.setoranId);
+  const totalTitipanTunai = pembayaranTitipan.filter(x => (x.metode || 'Tunai') === 'Tunai').reduce((s,x) => s + (x.total || 0),0);
+  const totalTitipanQris = pembayaranTitipan.filter(x => x.metode === 'QRIS').reduce((s,x) => s + (x.total || 0),0);
+  const totalTitipanTransfer = pembayaranTitipan.filter(x => x.metode === 'Transfer').reduce((s,x) => s + (x.total || 0),0);
+  const totalTitipan = totalTitipanTunai + totalTitipanQris + totalTitipanTransfer;
   const tunaiEl = $('input[name="tunai"]'), qrisEl = $('input[name="qris"]'), transferEl = $('input[name="transfer"]');
   const tunai = tunaiEl ? (parseInt(tunaiEl.value, 10) || 0) : 0;
   const qris = qrisEl ? (parseInt(qrisEl.value, 10) || 0) : 0;
   const transfer = transferEl ? (parseInt(transferEl.value, 10) || 0) : 0;
-  const tunaiDiserahkan = tunai - pengeluaran - totalTitipan;
-  const expected = tunaiDiserahkan + qris + transfer;
+  const tunaiDiserahkan = tunai - pengeluaran - totalTitipanTunai;
+  const qrisDiserahkan = qris - totalTitipanQris;
+  const transferDiserahkan = transfer - totalTitipanTransfer;
+  const expected = tunaiDiserahkan + qrisDiserahkan + transferDiserahkan;
   const selisih = total - (tunai + qris + transfer);
   return `<div style="flex:1">
     <div class="row-between text-xs"><span>Penjualan</span><strong>${fmtRp(total)}</strong></div>
     <div class="row-between text-xs"><span>Tunai dipegang karyawan</span><span>${fmtRp(tunai)}</span></div>
     <div class="row-between text-xs"><span>QRIS</span><span>${fmtRp(qris)}</span></div><div class="row-between text-xs"><span>Transfer</span><span>${fmtRp(transfer)}</span></div>
-    ${totalTitipan > 0 ? `<div class="row-between text-xs text-gray"><span>Pembayaran titipan supplier (arus kas keluar)</span><span>- ${fmtRp(totalTitipan)}</span></div>` : ''}
+    ${totalTitipanTunai > 0 ? `<div class="row-between text-xs text-gray"><span>Titipan dibayar Tunai</span><span>- ${fmtRp(totalTitipanTunai)}</span></div>` : ''}
+    ${totalTitipanQris > 0 ? `<div class="row-between text-xs text-gray"><span>Titipan dibayar QRIS</span><span>- ${fmtRp(totalTitipanQris)}</span></div>` : ''}
+    ${totalTitipanTransfer > 0 ? `<div class="row-between text-xs text-gray"><span>Titipan dibayar Transfer</span><span>- ${fmtRp(totalTitipanTransfer)}</span></div>` : ''}
     <div class="row-between text-xs text-red"><span>Pengeluaran operasional</span><span>- ${fmtRp(pengeluaran)}</span></div>
     <div class="row-between text-xs text-green font-bold mt-2"><span>Tunai yang diserahkan karyawan</span><span>${fmtRp(tunaiDiserahkan)}</span></div>
     <div class="row-between text-xs text-green font-bold"><span>Total penerimaan Owner</span><span>${fmtRp(expected)}</span></div>
@@ -1870,13 +1878,13 @@ async function karyawanAction(action) {
 }
 
 async function reloadKaryawan() {
-  const results = await Promise.all([
-    api('getKaryawanDashboard', { token: S.token }),
-    api('absensiHariIni', { token: S.token }).catch(() => ({ status: 'belum' })),
-    api('getTitipanKaryawan', { token: S.token }).catch(() => ({ pending: [], sudahBayar: [] }))
-  ]);
-  S.karyawan = results[0]; S.absensiHariIni = results[1]; S.titipanKaryawan = results[2];
-  if (S.karyawan.distribusi) S.karyawan.distribusi.forEach(x => { if (S.rekap[x.katalogId] === undefined) S.rekap[x.katalogId] = 0; });
+  // Dashboard sudah menggabungkan absensi dan titipan; satu request menghindari
+  // pemanggilan endpoint/Spreadsheet berulang saat login dan refresh.
+  const data = await api('getKaryawanDashboard', { token: S.token });
+  S.karyawan = data;
+  S.absensiHariIni = data.absensiKaryawan || { status: 'belum' };
+  S.titipanKaryawan = { pending: data.titipanPending || [], sudahBayar: data.bayarTitipanHariIni || [] };
+  if (data.distribusi) data.distribusi.forEach(x => { if (S.rekap[x.katalogId] === undefined) S.rekap[x.katalogId] = 0; });
 }
 
 async function karyawanSaveDrop() {
@@ -2066,7 +2074,7 @@ function formBayarTitipan(supplierId) {
     </div>
     <div class="form-grid" style="margin-bottom:8px">
       <div class="field" style="margin-bottom:0"><label>No. Nota</label><input type="text" class="input" data-f="noNota" placeholder="Opsional"></div>
-      <div class="field" style="margin-bottom:0"><label>Metode</label><input class="input" value="Tunai — dari uang penjualan lapak" disabled></div>
+      <div class="field" style="margin-bottom:0"><label>Metode pembayaran supplier</label><select class="input" data-f="metode"><option value="Tunai">Tunai</option><option value="QRIS">QRIS</option><option value="Transfer">Transfer</option></select><p class="text-xs text-gray mt-1">Pilih sumber dana yang benar-benar digunakan untuk membayar supplier.</p></div>
     </div>
     <div class="field"><label>Catatan (opsional)</label><textarea class="textarea" data-f="catatan" placeholder="Contoh: tambahan barang 5 pcs sebelum closing" style="min-height:60px"></textarea></div>`;
   modal({
@@ -2081,7 +2089,7 @@ function formBayarTitipan(supplierId) {
           originalQty: Number(input.dataset.original)
         })).filter(x => x.qtyLaku !== x.originalQty).map(({id,qtyLaku}) => ({id,qtyLaku}));
         if (adjustments.some(x => !Number.isSafeInteger(x.qtyLaku) || x.qtyLaku < 0)) return toast('Qty tagihan harus bilangan bulat 0 atau lebih.', 'error');
-        const recalculated = Array.from(wrap.querySelectorAll('[data-titipan-qty]')).reduce((sum,input) => sum + Math.max(0,Number(input.value)||0)*(Number(input.dataset.price)||0),0); + pending.items.filter(it => it.canAdjust === false).reduce((sum,it) => sum + (Number(it.utang)||0),0);
+        const recalculated = Array.from(wrap.querySelectorAll('[data-titipan-qty]')).reduce((sum,input) => sum + Math.max(0,Number(input.value)||0)*(Number(input.dataset.price)||0),0) + pending.items.filter(it => it.canAdjust === false).reduce((sum,it) => sum + (Number(it.utang)||0),0);
         if (!Number.isSafeInteger(recalculated) || recalculated <= 0) return toast('Total tagihan harus lebih dari 0. Jika tidak ada barang terjual, koreksi stok melalui rekap.', 'error');
         const nominalBayar = Number((w.querySelector('[data-f="nominalBayar"]') || {}).value);
         if (!Number.isSafeInteger(nominalBayar) || nominalBayar <= 0 || nominalBayar > recalculated) return toast('Nominal pembayaran harus angka bulat lebih dari 0 dan tidak melebihi total tagihan setelah penyesuaian.', 'error');
@@ -2094,7 +2102,7 @@ function formBayarTitipan(supplierId) {
             konsinyasiIds: (adjustments.length || nominalBayar === recalculated) ? (adjustments.length ? ['__STOCK_ADJUSTMENT_REQUIRES_UPDATED_BACKEND__'] : pending.items.map(it => it.id)) : ['__PARTIAL_PAYMENT_REQUIRES_UPDATED_BACKEND__'],
             noNota:(w.querySelector('[data-f="noNota"]') || {}).value || '',
             catatan:(w.querySelector('[data-f="catatan"]') || {}).value || '',
-            metode:'Tunai'
+            metode:(w.querySelector('[data-f="metode"]') || {}).value || 'Tunai'
           }});
           toast(r.message || 'Pembayaran berhasil!', r.success === false ? 'error' : 'success');
           if (r.success) await reloadKaryawan();

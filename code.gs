@@ -2100,11 +2100,17 @@ function apiSubmitRekap(token, payload) {
     // Refresh pembayaran setelah lock diperoleh agar pembayaran supplier yang terjadi
     // bersamaan dengan submit tidak tertinggal dari perhitungan maupun tautan setoran.
     bayarTitipanHariIni = getSheetData('BayarTitipanKaryawan').filter(b => String(b.lapakId) === String(sess.lapakId) && (!b.setoranId || b.setoranId === '') && String(b.status || 'Active') === 'Active');
-    const totalTitipan = bayarTitipanHariIni.filter(b => String(b.metode || 'Tunai') === 'Tunai').reduce((sum, b) => sum + toPosNum(b.totalBayar), 0);
-    // QRIS langsung diterima Owner; karyawan hanya menyerahkan sisa uang tunai.
-    const uangDisetor = totalTunai - totalTitipan - totalPengeluaran;
-    if (uangDisetor < 0) return { success:false, message:'Pembayaran titipan dan pengeluaran melebihi penerimaan tunai. Periksa kembali transaksi tunai.' };
-    const expectedSetoran = uangDisetor + totalQris + totalTransfer;
+    const totalTitipanTunai = bayarTitipanHariIni.filter(b => String(b.metode || 'Tunai') === 'Tunai').reduce((sum,b) => sum + toPosNum(b.totalBayar),0);
+    const totalTitipanQris = bayarTitipanHariIni.filter(b => String(b.metode || '') === 'QRIS').reduce((sum,b) => sum + toPosNum(b.totalBayar),0);
+    const totalTitipanTransfer = bayarTitipanHariIni.filter(b => String(b.metode || '') === 'Transfer').reduce((sum,b) => sum + toPosNum(b.totalBayar),0);
+    // Setiap pembayaran supplier mengurangi kanal dana yang benar-benar dipakai.
+    const uangDisetor = totalTunai - totalTitipanTunai - totalPengeluaran;
+    const qrisBersih = totalQris - totalTitipanQris;
+    const transferBersih = totalTransfer - totalTitipanTransfer;
+    if (uangDisetor < 0) return { success:false, message:'Pembayaran titipan Tunai dan pengeluaran melebihi penerimaan tunai.' };
+    if (qrisBersih < 0) return { success:false, message:'Pembayaran titipan QRIS melebihi penerimaan QRIS.' };
+    if (transferBersih < 0) return { success:false, message:'Pembayaran titipan Transfer melebihi penerimaan Transfer.' };
+    const expectedSetoran = uangDisetor + qrisBersih + transferBersih;
     const unpaidDraft = getSheetData('Konsinyasi').filter(k => String(k.lapakId)===String(sess.lapakId) && String(k.catatan||'').indexOf(draftMarker)===0 && String(k.status)==='Pending');
     if (unpaidDraft.length) return {success:false,message:'Masih ada tagihan titip jual yang belum dibayar. Lunasi terlebih dahulu sebelum mengirim laporan.'};
     if (getSheetData('Setoran').some(x => formatDate(x.tanggal)===tgl && String(x.lapakId)===String(sess.lapakId))) return {success:false,message:'Laporan hari ini sudah dikirim.'};
@@ -2353,8 +2359,8 @@ function apiKaryawanBayarSupplier(token, payload) {
     const nominalBayar=Number(payload.nominalBayar);
     if (!Number.isSafeInteger(nominalBayar)||nominalBayar<=0||nominalBayar>totalUtang)
       return {success:false,message:'Nominal pembayaran harus angka bulat lebih dari 0 dan tidak melebihi sisa utang '+fmtRpLocal(totalUtang)+'.'};
-    const metode=String(payload.metode||'Tunai');
-    if (metode !== 'Tunai') return {success:false,message:'Pembayaran titipan lapak harus dicatat Tunai karena dibayarkan dari uang penjualan yang dipegang karyawan.'};
+    const metode=String(payload.metode||'Tunai').trim();
+    if (!['Tunai','QRIS','Transfer'].includes(metode)) return {success:false,message:'Metode pembayaran harus Tunai, QRIS, atau Transfer.'};
 
     // Alokasikan ke tagihan tertua. Kolom utang menyimpan sisa saldo yang belum dibayar.
     let sisaBayar=nominalBayar; const allocations=[];
@@ -2497,10 +2503,11 @@ function apiBatalBayarTitipan(token, bayarId) {
 //  ADMIN DASHBOARD & SETORAN
 // ============================================================
 function mapSetoran(s) {
-  const totalTitipan = getSheetData('BayarTitipanKaryawan')
-    .filter(b => String(b.setoranId) === String(s.id) && String(b.status || 'Active') === 'Active' && String(b.metode || 'Tunai') === 'Tunai')
-    .reduce((sum, b) => sum + (Number(b.totalBayar) || 0), 0);
-  return { id:s.id, tanggal: formatDate(s.tanggal), lapakId:s.lapakId, totalTunai: Number(s.totalTunai) || 0, totalQris: Number(s.totalQris) || 0, totalTransfer: Number(s.totalTransfer) || 0, totalSistem: Number(s.totalSistem) || 0, pengeluaran: Number(s.pengeluaran) || 0, totalTitipan, expectedSetoran: Number(s.expectedSetoran) || 0, uangDisetor: Number(s.uangDisetor) || 0, selisih: Number(s.selisih) || 0, status: s.status, catatan: s.catatan || '', locked: String(s.locked) === 'true' || s.locked === true, editHistory: s.editHistory || '' };
+  const payments = getSheetData('BayarTitipanKaryawan').filter(b => String(b.setoranId) === String(s.id) && String(b.status || 'Active') === 'Active');
+  const totalTitipanPerMetode = { Tunai:0, QRIS:0, Transfer:0 };
+  payments.forEach(b => { const m=String(b.metode||'Tunai'); if(Object.prototype.hasOwnProperty.call(totalTitipanPerMetode,m)) totalTitipanPerMetode[m] += Number(b.totalBayar)||0; });
+  const totalTitipan = totalTitipanPerMetode.Tunai + totalTitipanPerMetode.QRIS + totalTitipanPerMetode.Transfer;
+  return { id:s.id, tanggal: formatDate(s.tanggal), lapakId:s.lapakId, totalTunai: Number(s.totalTunai) || 0, totalQris: Number(s.totalQris) || 0, totalTransfer: Number(s.totalTransfer) || 0, totalSistem: Number(s.totalSistem) || 0, pengeluaran: Number(s.pengeluaran) || 0, totalTitipan, totalTitipanTunai:totalTitipanPerMetode.Tunai, totalTitipanQris:totalTitipanPerMetode.QRIS, totalTitipanTransfer:totalTitipanPerMetode.Transfer, expectedSetoran: Number(s.expectedSetoran) || 0, uangDisetor: Number(s.uangDisetor) || 0, selisih: Number(s.selisih) || 0, status: s.status, catatan: s.catatan || '', locked: String(s.locked) === 'true' || s.locked === true, editHistory: s.editHistory || '' };
 }
 function apiGetAdminDashboard(token) {
   requireRole(token, ['admin']);
@@ -2631,11 +2638,16 @@ function apiApproveSetoran(token, idSetoran) {
     if (qris > 0) { saldo += qris; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Penerimaan QRIS '+lapakId,tipe:'Masuk',kategori:'Penjualan QRIS',metode:'QRIS',nominal:qris,saldo}); }
     if (transfer > 0) { saldo += transfer; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Penerimaan Transfer '+lapakId,tipe:'Masuk',kategori:'Penjualan Transfer',metode:'Transfer',nominal:transfer,saldo}); }
     // Pembayaran supplier adalah arus kas keluar tersendiri, bukan biaya operasional.
-    const totalTitipan = getSheetData('BayarTitipanKaryawan')
-      .filter(b => String(b.setoranId) === String(idSetoran) && String(b.status || 'Active') === 'Active' && String(b.metode || 'Tunai') === 'Tunai')
-      .reduce((sum, b) => sum + (Number(b.totalBayar) || 0), 0);
-    if (totalTunai - totalTitipan - pengeluaranOperasional < 0) return { success:false, message:'Pembayaran titipan dan pengeluaran melebihi penerimaan tunai. Setoran ditahan untuk pemeriksaan.' };
-    if (totalTitipan > 0) { saldo -= totalTitipan; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Pembayaran titipan supplier '+lapakId,tipe:'Keluar',kategori:'Pembayaran Titipan Supplier',nominal:totalTitipan,saldo}); }
+    const pembayaranSupplier = getSheetData('BayarTitipanKaryawan')
+      .filter(b => String(b.setoranId) === String(idSetoran) && String(b.status || 'Active') === 'Active');
+    const titipanPerMetode = { Tunai:0, QRIS:0, Transfer:0 };
+    pembayaranSupplier.forEach(b => { const m=String(b.metode||'Tunai'); if (Object.prototype.hasOwnProperty.call(titipanPerMetode,m)) titipanPerMetode[m] += Number(b.totalBayar)||0; });
+    if (totalTunai - titipanPerMetode.Tunai - pengeluaranOperasional < 0 || qris - titipanPerMetode.QRIS < 0 || transfer - titipanPerMetode.Transfer < 0)
+      return { success:false, message:'Pembayaran supplier melebihi penerimaan pada salah satu metode. Setoran ditahan untuk pemeriksaan.' };
+    ['Tunai','QRIS','Transfer'].forEach(m => {
+      const amount=titipanPerMetode[m];
+      if(amount>0){ saldo-=amount; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Pembayaran titipan supplier '+lapakId+' ('+m+')',tipe:'Keluar',kategori:'Pembayaran Titipan Supplier',metode:m,nominal:amount,saldo}); }
+    });
     if (pengeluaranOperasional > 0) { saldo -= pengeluaranOperasional; newRows.push({id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:'Pengeluaran operasional lapak '+lapakId,tipe:'Keluar',kategori:'Operasional Lapak',nominal:pengeluaranOperasional,saldo}); }
     const journal = beginWriteJournal(['Setoran','Kas']);
     try {
@@ -2656,7 +2668,7 @@ function apiApproveSetoran(token, idSetoran) {
     const user = getSheetData('Users').find(u => String(u.id) === String(userId));
     if (user && (user.email || user.username)) {
       const lapak = getSheetData('Lapak').find(l => String(l.id) === String(lapakId)) || {};
-      try { notifySetoranApproved({ id: idSetoran, tanggal, expectedSetoran: totalTunai + qris + transfer - pengeluaranOperasional - totalTitipan }, lapak.nama || lapakId, user.email || '', user.username || ''); } catch (notifyError) { console.error('Notifikasi persetujuan gagal, transaksi tetap disetujui:', notifyError.message); }
+      try { notifySetoranApproved({ id: idSetoran, tanggal, expectedSetoran: totalTunai + qris + transfer - pengeluaranOperasional - titipanPerMetode.Tunai - titipanPerMetode.QRIS - titipanPerMetode.Transfer }, lapak.nama || lapakId, user.email || '', user.username || ''); } catch (notifyError) { console.error('Notifikasi persetujuan gagal, transaksi tetap disetujui:', notifyError.message); }
     }
     return { success: true, message: 'Setoran disetujui.' };
   } finally { lock.releaseLock(); }
