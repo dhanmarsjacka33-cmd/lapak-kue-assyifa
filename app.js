@@ -1628,6 +1628,8 @@ function handleInput(e) {
         total += line;
         const out = wrap.querySelector('[data-titipan-line="' + input.dataset.titipanQty + '"]');
         if (out) out.textContent = fmtRp(line);
+        const billQty = wrap.querySelector('[data-titipan-billqty="' + input.dataset.titipanQty + '"]');
+        if (billQty) billQty.textContent = qtyTagihan;
       });
       const totalEl = wrap.querySelector('[data-titipan-total]');
       if (totalEl) totalEl.textContent = fmtRp(total);
