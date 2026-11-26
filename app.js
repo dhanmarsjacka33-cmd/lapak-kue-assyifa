@@ -2144,7 +2144,9 @@ async function loadTabData(tab) {
   const signal = getAbort(tab);
   const cacheTtl = 24 * 60 * 60 * 1000;
   const cached = (action, payload, key) => apiCached(action, payload, key, cacheTtl, { signal, persist: true });
-  showLoader();
+  // Daftar Setoran/Pesanan memakai skeleton lokal; jangan tutupi konten dengan overlay global.
+  const useGlobalLoader = tab !== 'setoran' && tab !== 'pesanan';
+  if (useGlobalLoader) showLoader();
   try {
     const tasks = [];
     const sf = {
@@ -2221,7 +2223,7 @@ async function loadTabData(tab) {
     await Promise.all(tasks);
     if (tab === 'analisis-performa' && S.analisisPerforma && (S.analisisPerforma.entities || []).length) setTimeout(() => ensureChartJs().then(renderAnalisisCharts).catch(() => toast('Grafik gagal dimuat. Periksa koneksi internet.', 'error')), 80);
   } catch (e) { if (e.name !== 'AbortError') toast(e.message, 'error'); }
-  finally { hideLoader(); }
+  finally { if (useGlobalLoader) hideLoader(); }
 }
 
 // ============================================
@@ -2850,14 +2852,14 @@ function formPesanan(id) {
       { key:'status', label:'Status', type:'select', value: item ? item.status : 'Draft', options: ['Draft','Ordered','Received','Cancelled'].map(s => ({ v:s, l:s, selected: item && item.status === s })) },
       { key:'keterangan', label:'Keterangan', type:'textarea', value: item ? item.keterangan : '' }
     ],
-    onSubmit: async (data, c) => { data.id = item ? item.id : null; c(); showLoader(); try { const r = await api('savePesanan', { token: S.token, item: data }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) S.pesanan = await api('getPesanan', { token: S.token, filter: {} }); } catch (e) { toast(e.message, 'error'); } finally { hideLoader(); render(); } }
+    onSubmit: async (data, c) => { data.id = item ? item.id : null; c(); showLoader(); try { const r = await api('savePesanan', { token: S.token, item: data }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) { MEM.clear('pesanan'); S.pesanan = await api('getPesanan', { token: S.token, filter: {} }); } } catch (e) { toast(e.message, 'error'); } finally { hideLoader(); render(); } }
   });
 }
 async function delPesanan(id) {
   if (!(await confirmDlg('Hapus pesanan?', ''))) return;
   const oldList = (S.pesanan || []).slice();
   S.pesanan = (S.pesanan || []).filter(p => String(p.id) !== String(id)); render();
-  try { await api('deletePesanan', { token: S.token, id }); toast('Pesanan dihapus', 'success'); }
+  try { await api('deletePesanan', { token: S.token, id }); MEM.clear('pesanan'); toast('Pesanan dihapus', 'success'); }
   catch (e) { S.pesanan = oldList; render(); toast(e.message, 'error'); }
 }
 
