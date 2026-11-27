@@ -3370,7 +3370,7 @@ async function adminReviewSupplierCorrection(id,approve) {
   finally{hideLoader();render();}
 }
 
-function formBayarSupplier(supplierId) {
+async function formBayarSupplier(supplierId) {
   if (!supplierId) return toast('Supplier wajib', 'error');
   showLoader();
   try {
