@@ -1276,9 +1276,32 @@ function tabKonsinyasi() {
     <div class="row mt-2" style="gap:8px"><button class="btn btn-danger btn-sm" data-act="reject-supplier-correction" data-id="${esc(r.id)}" style="flex:1">Tolak</button><button class="btn btn-success btn-sm" data-act="approve-supplier-correction" data-id="${esc(r.id)}" style="flex:1">Setujui koreksi</button></div>
   </div>`).join('');
   html+='</div>';
+  const processedCorrections=(finance.requests||[]).filter(x=>x.status!=='Pending').slice(0,12);
+  if(processedCorrections.length){
+    html+=`<div class="card"><strong class="card-title">${ico('history','ico-sm')} Riwayat Keputusan Koreksi</strong>`;
+    html+=processedCorrections.map(r=>`<div style="padding:8px 0;border-top:1px solid var(--border)">
+      <div class="row-between"><strong class="text-sm">${esc(r.nama)} · ${esc(r.supplierNama)}</strong><span class="badge ${r.status==='Approved'?'badge-success':r.status==='Rejected'?'badge-danger':'badge-gray'}">${esc(r.status)}</span></div>
+      <div class="text-xs text-gray">${esc(r.lapakNama)} · ${esc(r.requestedByName)} · ${esc(r.reviewedAt||r.createdAt)}</div>
+      <div class="text-xs text-gray">Qty ${r.oldQtyLaku} → ${r.requestedQtyLaku} · ${fmtRp(r.oldObligation)} → ${fmtRp(r.newObligation)}</div>
+      ${r.reviewNote?`<div class="text-xs mt-1">${esc(r.reviewNote)}</div>`:''}
+    </div>`).join('');
+    html+='</div>';
+  }
   if((finance.credits||[]).length){
     html+=`<div class="card"><strong class="card-title">${ico('wallet','ico-sm')} Saldo Lebih Supplier</strong><p class="text-xs text-gray mb-2">Saldo ini otomatis digunakan untuk invoice berikutnya dari supplier yang sama.</p>`;
     html+=(finance.credits||[]).map(x=>`<div class="row-between text-sm" style="padding:7px 0;border-top:1px solid var(--border)"><span>${esc(x.supplierNama)}</span><strong class="text-green">${fmtRp(x.balance)}</strong></div>`).join('');
+    html+='</div>';
+  }
+  if((finance.ledger||[]).length){
+    html+=`<div class="card"><strong class="card-title">${ico('list','ico-sm')} Riwayat Saldo Lebih Supplier</strong>`;
+    html+=(finance.ledger||[]).slice(0,20).map(e=>`<div class="row-between text-xs" style="padding:7px 0;border-top:1px solid var(--border);gap:8px">
+      <div style="min-width:0;flex:1">
+        <strong>${esc(e.supplierNama)}</strong>
+        <div class="text-gray">${esc(e.createdAt)} · ${e.eventType==='CREDIT'?'Saldo lebih dibuat':'Saldo lebih dipakai'}</div>
+        <div class="text-gray">${esc(e.notes||'')}</div>
+      </div>
+      <strong class="${e.eventType==='CREDIT'?'text-green':'text-gray'}">${e.eventType==='CREDIT'?'+':'−'}${fmtRp(e.amount)}</strong>
+    </div>`).join('');
     html+='</div>';
   }
   html += `<h3 class="card-title">${ico('list')} Tagihan per Supplier</h3><div class="field mb-2"><input type="search" class="input" data-bill-supplier-search placeholder="Cari supplier..." autocomplete="off"></div>`;
