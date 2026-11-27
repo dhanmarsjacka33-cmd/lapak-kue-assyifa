@@ -496,6 +496,15 @@ function renderTitipanSection() {
             <div class="text-sm font-bold text-red">${fmtRp(s.total)}</div>
           </div>
         </div>
+        <div class="mb-2">${(s.items||[]).map(it => `
+          <div class="row-between text-xs" style="padding:7px 0;border-top:1px solid rgba(245,158,11,.15);gap:8px">
+            <div style="min-width:0;flex:1">
+              <strong>${esc(it.nama)}</strong>
+              <div class="text-gray">${it.qtyLaku} pcs · ${fmtRp(it.hargaTitip)} · ${fmtRp(it.utang)}</div>
+              ${it.correctionRequestStatus ? `<span class="badge ${it.correctionRequestStatus==='Pending'?'badge-warn':it.correctionRequestStatus==='Approved'?'badge-success':'badge-gray'}">Koreksi: ${esc(it.correctionRequestStatus)}</span>` : ''}
+            </div>
+            ${it.setoranId && it.correctionRequestStatus!=='Pending' ? `<button class="btn btn-ghost btn-sm" data-act="request-supplier-correction" data-id="${esc(it.id)}">Ajukan koreksi</button>` : ''}
+          </div>`).join('')}</div>
         <button class="btn btn-success btn-block btn-sm" data-act="bayar-titipan" data-id="${esc(s.supplierId)}">
           ${ico('money','ico-sm')} Bayar ke ${esc(s.supplierNama)}
         </button>
@@ -1234,14 +1243,31 @@ function tabDashboardProfit() {
 //  TAB: KONSINYASI
 // ============================================
 function tabKonsinyasi() {
-  const saldo = S.saldoSupplier || [], list = S.konsinyasi || [];
-  const totalUtang = saldo.reduce((s, x) => s + (x.pending || 0), 0);
+  const saldo = S.saldoSupplier || [], list = S.konsinyasi || [], finance=S.supplierFinance||{requests:[],credits:[],ledger:[]};
+  const totalUtang = saldo.reduce((sum,x)=>sum+(x.pendingSetelahKredit!==undefined?x.pendingSetelahKredit:x.pending||0),0);
+  const corrections=(finance.requests||[]).filter(x=>x.status==='Pending');
   let html = `<h3 class="card-title">${ico('truck')} Titip Jual</h3>
-    <div class="hero hero-amber"><div class="hero-label">Total Tagihan Gabungan Semua Lapak</div><div class="hero-value">${fmtRp(totalUtang)}</div><div class="hero-sub">Satu pembayaran untuk setiap supplier, mencakup semua lapak</div></div>
-    <h3 class="card-title">${ico('list')} Tagihan per Supplier</h3><div class="field mb-2"><input type="search" class="input" data-bill-supplier-search placeholder="Cari supplier..." autocomplete="off"></div>`;
-  const withPending = saldo.filter(s => s.pending > 0);
-  if (!withPending.length) html += '<div class="empty"><p>Tidak ada utang pending.</p></div>';
-  else html += withPending.map(s => `<div class="card" data-bill-supplier-row data-search="${esc(String(s.nama||'').toLocaleLowerCase('id-ID'))}"><div class="row-between mb-3"><div style="min-width:0;flex:1"><strong>${esc(s.nama)}</strong><div class="text-xs text-gray mt-1">${s.tipeTransaksi === 'TitipJual' ? '<span class="badge badge-warn" style="font-size:9px">TITIP</span>' : '<span class="badge badge-gray" style="font-size:9px">BELI</span>'} ${s.pendingCount} transaksi</div></div><div class="text-sm font-bold text-red">${fmtRp(s.pending)}</div></div><div class="row" style="gap:8px"><button class="btn btn-ghost btn-sm" data-act="detail-konsinyasi" data-id="${esc(s.supplierId)}" style="flex:1">Detail</button><button class="btn btn-success btn-sm" data-act="bayar-supplier" data-id="${esc(s.supplierId)}" style="flex:1">Bayar</button></div></div>`).join('');
+    <div class="hero hero-amber"><div class="hero-label">Total Tagihan Setelah Kredit Supplier</div><div class="hero-value">${fmtRp(totalUtang)}</div><div class="hero-sub">Tagihan seluruh lapak dikurangi saldo lebih milik masing-masing supplier</div></div>`;
+  html += `<div class="card"><div class="row-between mb-2"><strong class="card-title" style="margin:0">${ico('clipboard-check','ico-sm')} Permintaan Koreksi Invoice</strong><span class="badge ${corrections.length?'badge-warn':'badge-success'}">${corrections.length} menunggu</span></div>`;
+  if(!corrections.length)html+='<p class="text-xs text-gray">Tidak ada permintaan koreksi yang menunggu.</p>';
+  else html+=corrections.map(r=>`<div style="padding:10px 0;border-top:1px solid var(--border)">
+    <div class="row-between"><strong class="text-sm">${esc(r.nama)} · ${esc(r.supplierNama)}</strong><span class="badge badge-warn">Menunggu</span></div>
+    <div class="text-xs text-gray">${esc(r.lapakNama)} · ${esc(r.requestedByName)} · ${esc(r.createdAt)}</div>
+    <div class="text-sm mt-2">Qty: <strong>${r.oldQtyLaku} → ${r.requestedQtyLaku} pcs</strong></div>
+    <div class="text-xs text-gray">Kewajiban: ${fmtRp(r.oldObligation)} → ${fmtRp(r.newObligation)} · Harga titip ${fmtRp(r.hargaTitip)}</div>
+    <div class="text-xs mt-1">Alasan: ${esc(r.reason)}</div>
+    <div class="row mt-2" style="gap:8px"><button class="btn btn-danger btn-sm" data-act="reject-supplier-correction" data-id="${esc(r.id)}" style="flex:1">Tolak</button><button class="btn btn-success btn-sm" data-act="approve-supplier-correction" data-id="${esc(r.id)}" style="flex:1">Setujui koreksi</button></div>
+  </div>`).join('');
+  html+='</div>';
+  if((finance.credits||[]).length){
+    html+=`<div class="card"><strong class="card-title">${ico('wallet','ico-sm')} Saldo Lebih Supplier</strong><p class="text-xs text-gray mb-2">Saldo ini otomatis digunakan untuk invoice berikutnya dari supplier yang sama.</p>`;
+    html+=(finance.credits||[]).map(x=>`<div class="row-between text-sm" style="padding:7px 0;border-top:1px solid var(--border)"><span>${esc(x.supplierNama)}</span><strong class="text-green">${fmtRp(x.balance)}</strong></div>`).join('');
+    html+='</div>';
+  }
+  html += `<h3 class="card-title">${ico('list')} Tagihan per Supplier</h3><div class="field mb-2"><input type="search" class="input" data-bill-supplier-search placeholder="Cari supplier..." autocomplete="off"></div>`;
+  const withPending = saldo.filter(s => s.pending > 0 || s.saldoLebih > 0);
+  if (!withPending.length) html += '<div class="empty"><p>Tidak ada utang pending atau saldo lebih.</p></div>';
+  else html += withPending.map(s => `<div class="card" data-bill-supplier-row data-search="${esc(String(s.nama||'').toLocaleLowerCase('id-ID'))}"><div class="row-between mb-3"><div style="min-width:0;flex:1"><strong>${esc(s.nama)}</strong><div class="text-xs text-gray mt-1">${s.tipeTransaksi === 'TitipJual' ? '<span class="badge badge-warn" style="font-size:9px">TITIP</span>' : '<span class="badge badge-gray" style="font-size:9px">BELI</span>'} ${s.pendingCount} transaksi</div>${s.saldoLebih>0?`<div class="text-xs text-green">Saldo lebih: ${fmtRp(s.saldoLebih)}</div>`:''}</div><div class="text-right"><div class="text-sm font-bold text-red">${fmtRp(s.pendingSetelahKredit!==undefined?s.pendingSetelahKredit:s.pending)}</div><div class="text-xs text-gray">Tagihan neto</div></div></div><div class="row" style="gap:8px"><button class="btn btn-ghost btn-sm" data-act="detail-konsinyasi" data-id="${esc(s.supplierId)}" style="flex:1">Detail</button>${s.pending>0?`<button class="btn btn-success btn-sm" data-act="bayar-supplier" data-id="${esc(s.supplierId)}" style="flex:1">Bayar / Terapkan Kredit</button>`:''}</div></div>`).join('');
   html += '<div class="empty" data-bill-supplier-empty hidden><p>Supplier tidak ditemukan.</p></div>';
   html += `<div class="divider"></div><h3 class="card-title">${ico('file')} Riwayat Transaksi</h3>`;
   if (!list.length) html += '<div class="empty"><p>Belum ada transaksi.</p></div>';
