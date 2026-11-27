@@ -2016,7 +2016,7 @@ function apiSaveRekapDraft(token, payload) {
         const additionObjects = additions.map(row => { const obj = {}; h.forEach((name, index) => { if (name) obj[name] = row[index]; }); return obj; });
         appendObjectsByHeaders(ks, additionObjects);
       }
-      applySupplierCreditsToPendingInvoices_('',sess.username,journal);
+      // Jangan terapkan kredit pada draft yang belum dikirim; karyawan masih bebas mengoreksi stok sebelum submit.
     } catch (writeError) {
       try { rollbackWriteJournal(journal); }
       catch (rollbackError) { console.error('Gagal rollback draft rekap:', rollbackError.message); return { success:false, message:'Penyimpanan draft gagal dan pemulihan otomatis tidak sepenuhnya berhasil. Hentikan proses dan minta admin memeriksa data. Detail: ' + writeError.message + ' | ' + rollbackError.message }; }
