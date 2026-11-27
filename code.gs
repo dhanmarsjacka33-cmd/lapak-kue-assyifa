@@ -2036,6 +2036,9 @@ function apiSubmitRekap(token, payload) {
   if (tgl !== todayStr()) return { success: false, message: 'Hanya bisa submit untuk hari ini.' };
   if (nowHour() >= CONFIG.TIME_LOCK_HOUR) return { success: false, message: 'Input terkunci setelah jam ' + CONFIG.TIME_LOCK_HOUR + ':00.' };
   if (isPeriodeLocked(tgl)) return { success: false, message: 'Periode ini terkunci.' };
+  ensureSupplierFinanceSheets_();
+  const pendingCorrections = getSheetData('SupplierCorrectionRequests').filter(r=>String(r.lapakId)===String(sess.lapakId)&&String(r.status)==='Pending');
+  if(pendingCorrections.length) return {success:false,message:'Masih ada '+pendingCorrections.length+' permintaan koreksi invoice yang menunggu keputusan admin. Selesaikan terlebih dahulu sebelum mengirim laporan berikutnya.'};
   const draftMarker = 'DRAFT_REKAP|' + tgl + '|' + sess.lapakId + '|';
   const konsinyasiDraft = getSheetData('Konsinyasi').filter(k => String(k.lapakId)===String(sess.lapakId) && String(k.catatan||'').indexOf(draftMarker)===0 && String(k.status)==='Pending');
   if (konsinyasiDraft.length) return {success:false,message:'Masih ada tagihan titip jual yang belum dibayar. Lunasi terlebih dahulu sebelum mengirim laporan.'};
@@ -2779,6 +2782,9 @@ function apiApproveSetoran(token, idSetoran) {
       }
     }
     if (rowIdx === -1) return { success: false, message: 'Setoran tidak ditemukan.' };
+    ensureSupplierFinanceSheets_();
+    const pendingCorrections = getSheetData('SupplierCorrectionRequests').filter(r=>String(r.setoranId)===String(idSetoran)&&String(r.status)==='Pending');
+    if (pendingCorrections.length) return {success:false,message:'Setoran belum dapat disetujui karena ada '+pendingCorrections.length+' permintaan koreksi invoice yang menunggu keputusan admin.'};
     const kasData = kasSheet.getDataRange().getValues();
     const iSaldo = kasData[0].indexOf('saldo');
     let saldo = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
