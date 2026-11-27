@@ -198,7 +198,7 @@ const testingHtml = fs.readFileSync('index.testing.html', 'utf8');
 const serviceWorker = fs.readFileSync('sw.js', 'utf8');
 has(indexHtml, /app\.js\?v=7\.7/, 'Main app must request the new frontend asset version');
 has(testingHtml, /app\.js\?v=7\.7/, 'Testing page must request the new frontend asset version');
-has(serviceWorker, /kueassyifa-v15/, 'Service worker cache must be invalidated for the new release');
+has(serviceWorker, /kueassyifa-v16/, 'Service worker cache must be invalidated for the new release');
 has(serviceWorker, /app\.js\?v=7\.7/, 'Service worker static asset list must preload the new frontend version');
 
 // Once an invoice is linked to a submitted setoran, employee adjustment must be locked in UI and API.
