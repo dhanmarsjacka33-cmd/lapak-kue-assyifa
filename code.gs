@@ -4081,6 +4081,198 @@ function apiGetRiwayatBayarSupplier(token, filter) {
   if (filter.supplierId) list = list.filter(x => String(x.supplierId) === String(filter.supplierId));
   return list;
 }
+function ensureSupplierFinanceSheets_() {
+  const ss=SpreadsheetApp.getActiveSpreadsheet();
+  const schemas=[
+    {name:'SupplierCorrectionRequests',headers:['id','requestKey','createdAt','requestedBy','requestedByName','lapakId','supplierId','katalogId','konsinyasiId','setoranId','oldQtyLaku','requestedQtyLaku','hargaTitip','oldObligation','newObligation','reason','status','reviewedBy','reviewedAt','reviewNote','appliedAt','paidAmount','creditCreated']},
+    {name:'SupplierCreditLedger',headers:['id','createdAt','supplierId','eventType','amount','correctionId','sourceInvoiceId','referenceInvoiceId','createdBy','notes','requestKey']}
+  ];
+  schemas.forEach(def=>{
+    let sh=ss.getSheetByName(def.name);
+    if(!sh){sh=ss.insertSheet(def.name);sh.getRange(1,1,1,def.headers.length).setValues([def.headers]);sh.setFrozenRows(1);sh.getRange(1,1,1,def.headers.length).setFontWeight('bold').setBackground('#fef3c7');return;}
+    if(sh.getLastColumn()<1){sh.getRange(1,1,1,def.headers.length).setValues([def.headers]);sh.setFrozenRows(1);return;}
+    const h=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0].map(x=>String(x).trim());
+    def.headers.forEach(name=>{if(h.indexOf(name)>=0)return;const col=sh.getLastColumn()+1;sh.getRange(1,col).setValue(name).setFontWeight('bold').setBackground('#fef3c7');h.push(name);});
+  });
+  return {requests:ss.getSheetByName('SupplierCorrectionRequests'),credits:ss.getSheetByName('SupplierCreditLedger')};
+}
+function getSupplierCreditBalanceMap_() {
+  ensureSupplierFinanceSheets_();
+  const map={};
+  getSheetData('SupplierCreditLedger').forEach(r=>{
+    const sid=String(r.supplierId||'');if(!sid)return;
+    if(!map[sid])map[sid]={supplierId:sid,credited:0,used:0,balance:0,events:0};
+    const n=Math.max(0,Number(r.amount)||0);
+    if(r.eventType==='CREDIT')map[sid].credited+=n;
+    else if(r.eventType==='APPLY')map[sid].used+=n;
+    map[sid].events++;
+  });
+  Object.keys(map).forEach(sid=>map[sid].balance=Math.max(0,map[sid].credited-map[sid].used));
+  return map;
+}
+function applySupplierCreditsToPendingInvoices_(supplierId,actor,parentJournal) {
+  const sheets=ensureSupplierFinanceSheets_(),own=!parentJournal;
+  const journal=parentJournal||beginWriteJournal(['Konsinyasi','SupplierCreditLedger']);
+  const sh=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Konsinyasi'),ledger=sheets.credits;
+  const h=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0].map(x=>String(x).trim()),ix=n=>h.indexOf(n);
+  if(['id','supplierId','tanggal','utang','status'].some(n=>ix(n)<0))throw new Error('Struktur Konsinyasi tidak lengkap untuk penggunaan saldo lebih.');
+  const rows=sh.getDataRange().getValues(),balances=getSupplierCreditBalanceMap_();
+  const supplierIds=supplierId?[String(supplierId)]:Object.keys(balances),events=[],used=[];
+  try{
+    supplierIds.forEach(sid=>{
+      let credit=(balances[sid]||{balance:0}).balance;if(credit<=0)return;
+      const pending=[];
+      for(let i=1;i<rows.length;i++)if(String(rows[i][ix('supplierId')])===sid&&String(rows[i][ix('status')])==='Pending'){
+        const due=Math.max(0,Number(rows[i][ix('utang')])||0);if(due>0)pending.push({row:i+1,id:String(rows[i][ix('id')]),due,date:new Date(rows[i][ix('tanggal')]).getTime()||0});
+      }
+      pending.sort((a,b)=>a.date-b.date||a.row-b.row);
+      pending.forEach(item=>{
+        if(credit<=0)return;
+        const amount=Math.min(item.due,credit),remaining=item.due-amount;if(amount<=0)return;
+        journalSetValue(journal,sh,item.row,ix('utang')+1,remaining);
+        if(remaining===0){
+          journalSetValue(journal,sh,item.row,ix('status')+1,'Bayar');
+          if(ix('bayarAt')>=0)journalSetValue(journal,sh,item.row,ix('bayarAt')+1,new Date());
+          if(ix('bayarBy')>=0)journalSetValue(journal,sh,item.row,ix('bayarBy')+1,'Saldo Lebih Supplier');
+        }
+        if(ix('catatan')>=0){const old=String(rows[item.row-1][ix('catatan')]||'');journalSetValue(journal,sh,item.row,ix('catatan')+1,(old?old+' | ':'')+'KREDIT_SUPPLIER '+fmtRpLocal(amount));}
+        const id='SCA'+Utilities.getUuid().slice(0,8).toUpperCase();
+        events.push({id,createdAt:new Date(),supplierId:sid,eventType:'APPLY',amount,correctionId:'',sourceInvoiceId:'',referenceInvoiceId:item.id,createdBy:actor||'system',notes:'Saldo lebih otomatis dipakai pada invoice '+item.id,requestKey:'APPLY:'+id});
+        used.push({invoiceId:item.id,amount,remaining});credit-=amount;
+      });
+    });
+    if(events.length)appendObjectsByHeaders(ledger,events);
+    if(own)_clearSheetCache();
+    return {total:used.reduce((sum,x)=>sum+x.amount,0),items:used};
+  }catch(e){
+    if(own){try{rollbackWriteJournal(journal);}catch(re){throw new Error('Kredit gagal diterapkan dan rollback perlu diperiksa: '+e.message+' | '+re.message);}_clearSheetCache();}
+    throw e;
+  }
+}
+function apiSubmitSupplierCorrection(token,payload) {
+  const sess=requireRole(token,['karyawan']);payload=payload||{};
+  const invoiceId=String(payload.invoiceId||'').trim(),qty=Number(payload.qtyLaku),reason=String(payload.reason||'').trim();
+  if(!invoiceId)return {success:false,message:'Invoice wajib dipilih.'};
+  if(!Number.isSafeInteger(qty)||qty<0)return {success:false,message:'Jumlah terjual harus bilangan bulat dan tidak boleh negatif.'};
+  if(reason.length<5)return {success:false,message:'Alasan koreksi minimal 5 karakter.'};
+  const lock=LockService.getScriptLock();if(!lock.tryLock(CONFIG.LOCK_TIMEOUT))return {success:false,message:'Sistem sibuk. Coba lagi.'};
+  try{
+    const sheets=ensureSupplierFinanceSheets_(),records=getSheetData('SupplierCorrectionRequests');
+    const key=String(payload.requestKey||'').replace(/[^A-Za-z0-9_-]/g,'').slice(0,48);
+    if(key){const dup=records.find(x=>String(x.requestKey||'')===key);if(dup)return {success:true,message:'Permintaan sudah tercatat.',id:dup.id,duplicate:true};}
+    if(records.some(x=>String(x.konsinyasiId)===invoiceId&&String(x.status)==='Pending'))return {success:false,message:'Invoice ini sudah memiliki permintaan yang menunggu admin.'};
+    const inv=getSheetData('Konsinyasi').find(x=>String(x.id)===invoiceId);
+    if(!inv)return {success:false,message:'Invoice tidak ditemukan.'};
+    if(String(inv.lapakId)!==String(sess.lapakId))return {success:false,message:'Invoice bukan milik lapak Anda.'};
+    if(!inv.setoranId)return {success:false,message:'Invoice belum terhubung ke laporan yang dikirim.'};
+    if(String(inv.status)==='Cancelled')return {success:false,message:'Invoice yang dibatalkan tidak dapat dikoreksi.'};
+    const detail=getSheetData('SetoranDetail').filter(x=>String(x.setoranId)===String(inv.setoranId)&&String(x.katalogId)===String(inv.katalogId));
+    if(detail.length!==1)return {success:false,message:'Rincian laporan tidak ditemukan atau ganda. Hubungi admin.'};
+    const drop=Number(detail[0].qtyDrop)||0;if(qty>drop)return {success:false,message:'Jumlah terjual maksimal '+drop+' pcs.'};
+    const oldQty=Number(inv.qtyLaku)||0,price=Number(inv.hargaTitip)||0;
+    if(qty===oldQty)return {success:false,message:'Jumlah baru sama dengan jumlah saat ini.'};
+    const id='SCR'+Utilities.getUuid().slice(0,8).toUpperCase();
+    appendObjectsByHeaders(sheets.requests,[{id,requestKey:key||id,createdAt:new Date(),requestedBy:sess.id,requestedByName:sess.name||sess.username,lapakId:sess.lapakId,supplierId:String(inv.supplierId),katalogId:String(inv.katalogId),konsinyasiId:invoiceId,setoranId:String(inv.setoranId),oldQtyLaku:oldQty,requestedQtyLaku:qty,hargaTitip:price,oldObligation:oldQty*price,newObligation:qty*price,reason,status:'Pending',reviewedBy:'',reviewedAt:'',reviewNote:'',appliedAt:'',paidAmount:'',creditCreated:0}]);
+    _clearSheetCache();logAction(sess.username,'AJUKAN_KOREKSI_INVOICE_SUPPLIER',{id,invoiceId,oldQty,requestedQty:qty,reason});
+    return {success:true,message:'Permintaan koreksi dikirim. Menunggu persetujuan admin.',id};
+  }finally{lock.releaseLock();}
+}
+function apiGetSupplierFinanceOverview(token) {
+  requireRole(token,['admin']);ensureSupplierFinanceSheets_();
+  const suppliers={},catalog={},lapaks={},users={};
+  getSheetData('Suppliers').forEach(x=>suppliers[String(x.id)]=x.nama);
+  getSheetData('Katalog').forEach(x=>catalog[String(x.id)]=x.nama);
+  getSheetData('Lapak').forEach(x=>lapaks[String(x.id)]=x.nama);
+  getSheetData('Users').forEach(x=>users[String(x.id)]=x.name||x.username);
+  const requests=getSheetData('SupplierCorrectionRequests').map(r=>({
+    id:String(r.id),createdAt:formatDateTime(r.createdAt),requestedBy:r.requestedBy,requestedByName:r.requestedByName||users[String(r.requestedBy)]||r.requestedBy,
+    lapakId:r.lapakId,lapakNama:lapaks[String(r.lapakId)]||r.lapakId,supplierId:r.supplierId,supplierNama:suppliers[String(r.supplierId)]||r.supplierId,
+    katalogId:r.katalogId,nama:catalog[String(r.katalogId)]||r.katalogId,konsinyasiId:r.konsinyasiId,setoranId:r.setoranId,
+    oldQtyLaku:Number(r.oldQtyLaku)||0,requestedQtyLaku:Number(r.requestedQtyLaku)||0,hargaTitip:Number(r.hargaTitip)||0,
+    oldObligation:Number(r.oldObligation)||0,newObligation:Number(r.newObligation)||0,reason:r.reason||'',status:r.status||'Pending',
+    reviewedBy:r.reviewedBy||'',reviewedAt:formatDateTime(r.reviewedAt),reviewNote:r.reviewNote||'',paidAmount:Number(r.paidAmount)||0,creditCreated:Number(r.creditCreated)||0
+  })).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+  const creditMap=getSupplierCreditBalanceMap_();
+  const credits=Object.keys(creditMap).map(sid=>({supplierId:sid,supplierNama:suppliers[sid]||sid,credited:creditMap[sid].credited,used:creditMap[sid].used,balance:creditMap[sid].balance,events:creditMap[sid].events})).filter(x=>x.balance>0).sort((a,b)=>b.balance-a.balance);
+  const ledger=getSheetData('SupplierCreditLedger').slice(-50).reverse().map(x=>({id:x.id,createdAt:formatDateTime(x.createdAt),supplierId:x.supplierId,supplierNama:suppliers[String(x.supplierId)]||x.supplierId,eventType:x.eventType,amount:Number(x.amount)||0,referenceInvoiceId:x.referenceInvoiceId||'',correctionId:x.correctionId||'',createdBy:x.createdBy||'',notes:x.notes||''}));
+  return {requests,credits,ledger,pendingCount:requests.filter(x=>x.status==='Pending').length};
+}
+function apiApproveSupplierCorrection(token,requestId,reviewNote) {
+  const sess=requireRole(token,['admin']),lock=LockService.getScriptLock();
+  if(!lock.tryLock(CONFIG.LOCK_TIMEOUT))return {success:false,message:'Sistem sibuk. Coba lagi.'};
+  try{
+    const sheets=ensureSupplierFinanceSheets_(),ss=SpreadsheetApp.getActiveSpreadsheet(),requestSheet=sheets.requests,creditSheet=sheets.credits;
+    const rd=requestSheet.getDataRange().getValues(),rh=rd[0].map(x=>String(x).trim()),ri=n=>rh.indexOf(n);
+    const rindex=rd.findIndex((row,i)=>i>0&&String(row[ri('id')])===String(requestId));
+    if(rindex<1)return {success:false,message:'Permintaan tidak ditemukan.'};
+    const req=rd[rindex],rrow=rindex+1;if(String(req[ri('status')])!=='Pending')return {success:false,message:'Permintaan sudah diproses.'};
+    const ks=ss.getSheetByName('Konsinyasi'),ds=ss.getSheetByName('SetoranDetail'),ssheet=ss.getSheetByName('Setoran'),stocks=ss.getSheetByName('KartuStok');
+    if(!hasHeaders(ks,['id','supplierId','lapakId','katalogId','qtyLaku','hargaTitip','utang','status','setoranId','catatan','bayarAt','bayarBy'])||!hasHeaders(ds,['id','setoranId','katalogId','qtyDrop','qtySisa','qtyLaku','hargaJual','subtotal'])||!hasHeaders(ssheet,['id','totalSistem','totalTunai','totalQris','selisih'])||!hasHeaders(stocks,['id','tanggal','katalogId','lapakId','tipe','masuk','keluar','saldo','refId','keterangan']))return {success:false,message:'Struktur sheet koreksi belum lengkap. Tidak ada perubahan.'};
+    const kd=ks.getDataRange().getValues(),kh=kd[0].map(x=>String(x).trim()),ki=n=>kh.indexOf(n);
+    const kindex=kd.findIndex((row,i)=>i>0&&String(row[ki('id')])===String(req[ri('konsinyasiId')]));
+    if(kindex<1)return {success:false,message:'Invoice sumber tidak ditemukan.'};
+    const krow=kd[kindex],krowNum=kindex+1,oldQty=Number(krow[ki('qtyLaku')])||0,price=Number(krow[ki('hargaTitip')])||0,oldGross=oldQty*price;
+    if(oldQty!==(Number(req[ri('oldQtyLaku')])||0)||oldGross!==(Number(req[ri('oldObligation')])||0)){
+      const journal=beginWriteJournal(['SupplierCorrectionRequests']);journalSetValue(journal,requestSheet,rrow,ri('status')+1,'Stale');journalSetValue(journal,requestSheet,rrow,ri('reviewedBy')+1,sess.username);journalSetValue(journal,requestSheet,rrow,ri('reviewedAt')+1,new Date());journalSetValue(journal,requestSheet,rrow,ri('reviewNote')+1,'Invoice berubah sejak permintaan dibuat. Ajukan ulang dengan data terbaru.');_clearSheetCache();
+      return {success:false,message:'Invoice berubah sejak permintaan dibuat. Permintaan ditandai Stale dan harus diajukan ulang.'};
+    }
+    const setoranId=String(krow[ki('setoranId')]||''),supplierId=String(krow[ki('supplierId')]||''),katalogId=String(krow[ki('katalogId')]||''),lapakId=String(krow[ki('lapakId')]||'');
+    if(!setoranId||setoranId!==String(req[ri('setoranId')]))return {success:false,message:'Referensi setoran tidak cocok.'};
+    if(isPeriodeLocked(formatDate(krow[ki('tanggal')])))return {success:false,message:'Periode terkunci. Buka kunci periode terlebih dahulu.'};
+    const dd=ds.getDataRange().getValues(),dh=dd[0].map(x=>String(x).trim()),di=n=>dh.indexOf(n),dindexes=[];
+    for(let i=1;i<dd.length;i++)if(String(dd[i][di('setoranId')])===setoranId&&String(dd[i][di('katalogId')])===katalogId)dindexes.push(i);
+    if(dindexes.length!==1)return {success:false,message:'Rincian setoran tidak unik. Koreksi dibatalkan.'};
+    const didx=dindexes[0],drow=dd[didx],drop=Number(drow[di('qtyDrop')])||0,newQty=Number(req[ri('requestedQtyLaku')]);
+    if(!Number.isSafeInteger(newQty)||newQty<0||newQty>drop)return {success:false,message:'Jumlah koreksi tidak valid terhadap jumlah drop.'};
+    const sd=ssheet.getDataRange().getValues(),sh=sd[0].map(x=>String(x).trim()),si=n=>sh.indexOf(n),sindex=sd.findIndex((row,i)=>i>0&&String(row[si('id')])===setoranId);
+    if(sindex<1)return {success:false,message:'Setoran sumber tidak ditemukan.'};
+    const oldDue=Math.max(0,Number(krow[ki('utang')])||0),paid=String(krow[ki('status')])==='Bayar'?oldGross:Math.max(0,oldGross-oldDue);
+    const newGross=newQty*price,newDue=Math.max(0,newGross-paid),credit=Math.max(0,paid-newGross),newStatus=newDue>0?'Pending':'Bayar';
+    const st=stocks.getDataRange().getValues(),sth=st[0].map(x=>String(x).trim()),sx=n=>sth.indexOf(n),stockIdxs=[];
+    for(let i=1;i<st.length;i++)if(String(st[i][sx('refId')])===setoranId&&String(st[i][sx('katalogId')])===katalogId&&String(st[i][sx('lapakId')])===lapakId&&String(st[i][sx('tipe')])==='Terjual')stockIdxs.push(i);
+    if(stockIdxs.length!==1)return {success:false,message:'Ledger stok penjualan tidak unik. Koreksi dibatalkan.'};
+    const stockIdx=stockIdxs[0],newSubtotal=newQty*(Number(drow[di('hargaJual')])||0);
+    const journal=beginWriteJournal(['SupplierCorrectionRequests','SupplierCreditLedger','Konsinyasi','SetoranDetail','Setoran','KartuStok']);
+    try{
+      journalSetValue(journal,ks,krowNum,ki('qtyLaku')+1,newQty);journalSetValue(journal,ks,krowNum,ki('utang')+1,newDue);journalSetValue(journal,ks,krowNum,ki('status')+1,newStatus);
+      journalSetValue(journal,ks,krowNum,ki('bayarAt')+1,newStatus==='Bayar'?new Date():'');journalSetValue(journal,ks,krowNum,ki('bayarBy')+1,newStatus==='Bayar'?'Pembayaran terdahulu':'');
+      const oldNote=String(krow[ki('catatan')]||''),audit='KOREKSI '+requestId+' oleh '+sess.username+': qty '+oldQty+'→'+newQty+'; kewajiban '+oldGross+'→'+newGross;
+      journalSetValue(journal,ks,krowNum,ki('catatan')+1,(oldNote?oldNote+' | ':'')+audit);
+      journalSetValue(journal,ds,didx+1,di('qtyLaku')+1,newQty);journalSetValue(journal,ds,didx+1,di('qtySisa')+1,drop-newQty);journalSetValue(journal,ds,didx+1,di('subtotal')+1,newSubtotal);
+      const newSales=dd.slice(1).reduce((sum,row,index)=>sum+(index===didx?newSubtotal:(Number(row[di('subtotal')])||0)),0);
+      journalSetValue(journal,ssheet,sindex+1,si('totalSistem')+1,newSales);
+      const received=(Number(sd[sindex][si('totalTunai')])||0)+(Number(sd[sindex][si('totalQris')])||0)+(si('totalTransfer')>=0?(Number(sd[sindex][si('totalTransfer')])||0):0);
+      journalSetValue(journal,ssheet,sindex+1,si('selisih')+1,newSales-received);
+      journalSetValue(journal,stocks,stockIdx+1,sx('keluar')+1,newQty);
+      let running=0;for(let i=1;i<st.length;i++)if(String(st[i][sx('katalogId')])===katalogId){running+=(Number(st[i][sx('masuk')])||0)-(Number(st[i][sx('keluar')])||0);journalSetValue(journal,stocks,i+1,sx('saldo')+1,running);}
+      if(credit>0)appendObjectsByHeaders(creditSheet,[{id:'SCL'+Utilities.getUuid().slice(0,8).toUpperCase(),createdAt:new Date(),supplierId,eventType:'CREDIT',amount:credit,correctionId:requestId,sourceInvoiceId:String(krow[ki('id')]),referenceInvoiceId:'',createdBy:sess.username,notes:'Saldo lebih dari koreksi invoice '+requestId,requestKey:'CORR:'+requestId}]);
+      journalSetValue(journal,requestSheet,rrow,ri('status')+1,'Approved');journalSetValue(journal,requestSheet,rrow,ri('reviewedBy')+1,sess.username);journalSetValue(journal,requestSheet,rrow,ri('reviewedAt')+1,new Date());journalSetValue(journal,requestSheet,rrow,ri('reviewNote')+1,String(reviewNote||'Disetujui admin'));journalSetValue(journal,requestSheet,rrow,ri('appliedAt')+1,new Date());journalSetValue(journal,requestSheet,rrow,ri('paidAmount')+1,paid);journalSetValue(journal,requestSheet,rrow,ri('creditCreated')+1,credit);
+      _clearSheetCache();
+      const applied=applySupplierCreditsToPendingInvoices_(supplierId,sess.username,journal);
+      journalSetValue(journal,requestSheet,rrow,ri('reviewNote')+1,String(reviewNote||'Disetujui admin')+(applied.total>0?' · Kredit otomatis dipakai '+fmtRpLocal(applied.total):''));
+      logAction(sess.username,'APPROVE_KOREKSI_INVOICE_SUPPLIER',{requestId,invoiceId:String(krow[ki('id')]),oldQty,newQty,oldGross,newGross,paid,credit,creditUsed:applied.total});
+      _clearSheetCache();
+      return {success:true,message:'Koreksi disetujui. Tagihan baru '+fmtRpLocal(newGross)+', sisa '+fmtRpLocal(newDue)+', saldo lebih dibuat '+fmtRpLocal(credit)+', kredit langsung dipakai '+fmtRpLocal(applied.total)+'.',creditCreated:credit,creditUsed:applied.total};
+    }catch(e){
+      try{rollbackWriteJournal(journal);}catch(re){return {success:false,message:'Koreksi gagal dan rollback perlu diperiksa. Hentikan transaksi dan hubungi admin: '+e.message+' | '+re.message};}
+      _clearSheetCache();return {success:false,message:'Koreksi gagal. Semua perubahan dibatalkan: '+e.message};
+    }
+  }finally{lock.releaseLock();}
+}
+function apiRejectSupplierCorrection(token,requestId,reviewNote) {
+  const sess=requireRole(token,['admin']),lock=LockService.getScriptLock();
+  if(!lock.tryLock(CONFIG.LOCK_TIMEOUT))return {success:false,message:'Sistem sibuk. Coba lagi.'};
+  try{
+    const sheet=ensureSupplierFinanceSheets_().requests,data=sheet.getDataRange().getValues(),h=data[0].map(x=>String(x).trim()),ix=n=>h.indexOf(n);
+    const index=data.findIndex((row,i)=>i>0&&String(row[ix('id')])===String(requestId));
+    if(index<1)return {success:false,message:'Permintaan koreksi tidak ditemukan.'};
+    if(String(data[index][ix('status')])!=='Pending')return {success:false,message:'Permintaan sudah diproses.'};
+    const journal=beginWriteJournal(['SupplierCorrectionRequests']);
+    journalSetValue(journal,sheet,index+1,ix('status')+1,'Rejected');journalSetValue(journal,sheet,index+1,ix('reviewedBy')+1,sess.username);journalSetValue(journal,sheet,index+1,ix('reviewedAt')+1,new Date());journalSetValue(journal,sheet,index+1,ix('reviewNote')+1,String(reviewNote||'Ditolak admin'));
+    _clearSheetCache();logAction(sess.username,'REJECT_KOREKSI_INVOICE_SUPPLIER',{requestId,reviewNote:String(reviewNote||'')});
+    return {success:true,message:'Permintaan ditolak. Invoice dan saldo supplier tidak diubah.'};
+  }finally{lock.releaseLock();}
+}
 function apiGetKonsinyasiDetailSupplier(token, supplierId) {
   requireRole(token, ['admin']);
   if (!supplierId) return { success: false, message: 'Supplier wajib.' };
