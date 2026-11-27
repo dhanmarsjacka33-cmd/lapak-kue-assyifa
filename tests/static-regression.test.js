@@ -211,7 +211,7 @@ has(backend, /SupplierCorrectionRequests/, 'Database must provide a non-destruct
 has(backend, /SupplierCreditLedger/, 'Database must provide an append-only supplier credit ledger');
 has(backend, /function ensureSupplierFinanceSheets_\(\)/, 'Supplier finance sheets must be created or extended safely when the features are used');
 has(backend, /function apiSubmitSupplierCorrection\(token,payload\)/, 'Employee must be able to submit an invoice correction request');
-has(backend, /String\(invoice\.lapakId\)!==String\(sess\.lapakId\)/, 'Employee correction requests must be restricted to their active lapak');
+has(backend, /String\(inv\.lapakId\)!==String\(sess\.lapakId\)/, 'Employee correction requests must be restricted to their active lapak');
 has(backend, /records\.some\(x=>String\(x\.konsinyasiId\)===invoiceId&&String\(x\.status\)==='Pending'\)/, 'Duplicate pending correction requests for the same invoice must be rejected');
 has(backend, /function apiGetSupplierFinanceOverview\(token\)/, 'Admin must be able to view correction requests and supplier credits');
 has(backend, /function apiApproveSupplierCorrection\(token,requestId,reviewNote\)/, 'Admin approval endpoint must exist');
@@ -236,3 +236,8 @@ has(frontend, /approve-supplier-correction/, 'Admin must have an approve action'
 has(frontend, /reject-supplier-correction/, 'Admin must have a reject action');
 has(frontend, /getSupplierFinanceOverview/, 'Admin supplier invoice view must load current correction queue and credit balance');
 has(frontend, /Saldo Lebih Supplier/, 'Admin supplier view must show overpayment credit balances');
+
+has(backend, /const correctionCandidates = konsinyasiRows/, 'Employees must receive a list of already-paid invoices eligible for correction requests');
+has(backend, /String\(r\.setoranId\)===String\(idSetoran\).*String\(r\.status\)==='Pending'/, 'Admin must not approve a setoran while a correction request for that setoran is pending');
+has(backend, /String\(r\.lapakId\)===String\(sess\.lapakId\).*String\(r\.status\)==='Pending'/, 'Employee must not submit another report for a lapak with unresolved correction requests');
+has(frontend, /Invoice yang sudah lunas — masih dapat dikoreksi melalui admin/, 'Employee must be able to find paid invoices and request admin correction');
