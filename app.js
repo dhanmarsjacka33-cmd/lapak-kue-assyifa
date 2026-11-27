@@ -1598,6 +1598,9 @@ function handleClick(e) {
   if (a === 'bayar-supplier') return formBayarSupplier(id);
   if (a === 'edit-konsinyasi') return formEditKonsinyasi(id);
   if (a === 'detail-konsinyasi') return showDetailKonsinyasi(id);
+  if (a === 'request-supplier-correction') return formAjukanKoreksiSupplier(id);
+  if (a === 'approve-supplier-correction') return adminReviewSupplierCorrection(id, true);
+  if (a === 'reject-supplier-correction') return adminReviewSupplierCorrection(id, false);
 
   if (a === 'analytics-range') { S.analyticsRange = parseInt(btn.dataset.range, 10); return loadAnalytics(); }
   if (a === 'analisis-mode') { S.analisisGroupBy = btn.dataset.mode; S.analisisSelectedIds = []; return loadAnalisisPerforma(); }
@@ -2258,7 +2261,13 @@ async function loadTabData(tab) {
       const supEl = $('[data-kons-supplier]'), statEl = $('[data-kons-status]');
       const supplierId = supEl ? supEl.value : '', status = statEl ? statEl.value : '';
       S.konsinyasiFilter = { supplierId, status };
-      tasks.push(Promise.all([cached('getKonsinyasi', { token: S.token, filter: { supplierId, status } }, 'konsinyasi_' + JSON.stringify({ supplierId, status })).then(d => S.konsinyasi = d), cached('getSaldoSupplier', { token: S.token }, 'saldoSupplier').then(d => S.saldoSupplier = d)]));
+      // Financial approval queues and credit balances must be fresh; do not use the
+      // 24-hour persistent cache used by ordinary read-only lists.
+      tasks.push(Promise.all([
+        api('getKonsinyasi',{token:S.token,filter:{supplierId,status}}).then(d=>S.konsinyasi=d),
+        api('getSaldoSupplier',{token:S.token}).then(d=>S.saldoSupplier=d),
+        api('getSupplierFinanceOverview',{token:S.token}).then(d=>S.supplierFinance=d)
+      ]));
     }
     if (tab === 'analytics') { const range = S.analyticsRange || 30; tasks.push(cached('getAnalytics', { token: S.token, range }, 'analytics_' + range).then(d => S.analytics = d)); }
     if (tab === 'analisis-performa') { const range = S.analisisRange || 30, groupBy = S.analisisGroupBy || 'item', ids = S.analisisSelectedIds || []; tasks.push(cached('getAnalisisPerforma', { token: S.token, range, groupBy, ids }, 'analisis_' + JSON.stringify({ range, groupBy, ids })).then(d => { S.analisisPerforma = d; if (!ids.length && d.selectedIds) S.analisisSelectedIds = d.selectedIds; })); }
@@ -3320,7 +3329,48 @@ async function bayarPayrollBulk() {
 }
 
 // KONSINYASI
-async function formBayarSupplier(supplierId) {
+async function formAjukanKoreksiSupplier(invoiceId) {
+  const tk=S.titipanKaryawan||{};
+  let invoice=null;
+  (tk.pending||[]).forEach(s=>(s.items||[]).forEach(it=>{if(String(it.id)===String(invoiceId))invoice=Object.assign({supplierNama:s.supplierNama},it);}));
+  if(!invoice)return toast('Invoice tidak ditemukan. Muat ulang daftar titipan.','error');
+  if(invoice.correctionRequestStatus==='Pending')return toast('Permintaan koreksi invoice ini masih menunggu admin.','info');
+  const max=Number(invoice.qtyDrop)||0;
+  formModal({
+    title:'Ajukan Koreksi Invoice',
+    fields:[
+      {key:'qtyLaku',label:'Jumlah terjual yang benar (pcs)',type:'number',value:Number(invoice.currentQtyLaku===undefined?invoice.qtyLaku:invoice.currentQtyLaku)},
+      {key:'reason',label:'Alasan koreksi (wajib)',type:'textarea',value:''}
+    ],
+    onSubmit:async(data,close)=>{
+      const qty=Number(data.qtyLaku),reason=String(data.reason||'').trim();
+      if(!Number.isSafeInteger(qty)||qty<0||qty>max)return toast('Jumlah harus bilangan bulat dari 0 sampai '+max+'.','error');
+      if(qty===Number(invoice.currentQtyLaku===undefined?invoice.qtyLaku:invoice.currentQtyLaku))return toast('Jumlah baru sama dengan jumlah saat ini.','error');
+      if(reason.length<5)return toast('Alasan koreksi minimal 5 karakter.','error');
+      data.requestKey='CORR-'+invoiceId+'-'+Date.now().toString(36);
+      close();showLoader();
+      try{
+        const result=await api('submitSupplierCorrection',{token:S.token,payload:{invoiceId,qtyLaku:qty,reason,requestKey:data.requestKey}});
+        toast(result.message||'Permintaan dikirim.',result.success?'success':'error');
+        if(result.success){S.titipanKaryawan=await api('getTitipanKaryawan',{token:S.token});render();}
+      }catch(e){toast(e.message,'error');}
+      finally{hideLoader();}
+    }
+  });
+}
+async function adminReviewSupplierCorrection(id,approve) {
+  const question=approve?'Setujui koreksi invoice ini? Sistem akan memperbarui kewajiban supplier, setoran terkait, dan saldo stok.':'Tolak permintaan koreksi ini? Invoice tidak akan diubah.';
+  if(!(await confirmDlg(approve?'Setujui Koreksi Invoice':'Tolak Koreksi Invoice',question,approve?'Setujui':'Tolak'))return;
+  showLoader();
+  try{
+    const result=await api(approve?'approveSupplierCorrection':'rejectSupplierCorrection',{token:S.token,id,note:approve?'Disetujui admin':'Ditolak admin'});
+    toast(result.message||'Permintaan diproses.',result.success?'success':'error');
+    if(result.success){MEM.clear();await loadTabData('konsinyasi');}
+  }catch(e){toast(e.message,'error');}
+  finally{hideLoader();render();}
+}
+
+function formBayarSupplier(supplierId) {
   if (!supplierId) return toast('Supplier wajib', 'error');
   showLoader();
   try {
@@ -3328,7 +3378,7 @@ async function formBayarSupplier(supplierId) {
     hideLoader();
     if (detail.total <= 0) return toast('Tidak ada utang pending.', 'info');
     const sup = S.suppliers.find(s => String(s.id) === String(supplierId)) || {};
-    let body = '<div class="card-flat" style="padding:12px;margin-bottom:12px"><strong>' + esc(sup.nama || supplierId) + '</strong><div class="text-xs text-gray mt-1">' + (detail.groupedCount || detail.count) + ' baris gabungan dari ' + detail.count + ' transaksi/lapak · Titipan: ' + fmtRp(detail.totalTitipan || 0) + ' · Pembelian susulan: ' + fmtRp(detail.totalPembelianSusulan || 0) + '</div><div class="hero" style="margin-top:12px;margin-bottom:0;padding:16px"><div class="hero-label">Total Tagihan Supplier (semua lapak)</div><div class="hero-value" style="font-size:22px;margin-bottom:0">' + fmtRp(detail.total) + '</div></div></div>';
+    let body = '<div class="card-flat" style="padding:12px;margin-bottom:12px"><strong>' + esc(sup.nama || supplierId) + '</strong><div class="text-xs text-gray mt-1">' + (detail.groupedCount || detail.count) + ' baris gabungan dari ' + detail.count + ' transaksi/lapak · Titipan: ' + fmtRp(detail.totalTitipan || 0) + ' · Pembelian susulan: ' + fmtRp(detail.totalPembelianSusulan || 0) + '</div><div class="hero" style="margin-top:12px;margin-bottom:0;padding:16px"><div class="hero-label">Tagihan kotor</div><div class="hero-value" style="font-size:22px;margin-bottom:0">' + fmtRp(detail.total) + '</div></div>' + (detail.creditToApply>0 ? '<div class="row-between text-sm mt-2"><span>Saldo lebih dipakai</span><strong class="text-green">- ' + fmtRp(detail.creditToApply) + '</strong></div>' : '') + '<div class="row-between text-sm mt-2"><strong>Perlu dibayar tunai</strong><strong>' + fmtRp(detail.totalAfterCredit===undefined?detail.total:detail.totalAfterCredit) + '</strong></div></div>';
     body += '<p class="text-xs font-semibold text-gray mb-2">Rincian digabung berdasarkan kue dan supplier, walaupun tanggal atau lapaknya berbeda</p><div style="max-height:300px;overflow-y:auto">';
     body += detail.items.map(it => {
       const lapakText = (it.sourceBreakdown || it.lapakBreakdown || []).map(x => (x.tanggal ? x.tanggal + ' · ' : '') + x.lapakNama + ': ' + x.qty + ' pcs').join(' · ');
@@ -3340,7 +3390,7 @@ async function formBayarSupplier(supplierId) {
       title: 'Bayar Supplier', body,
       actions: [
         { label: 'Batal', onClick: c => c() },
-        { label: 'Bayar ' + fmtRp(detail.total), className: 'btn-success', onClick: async (c, w) => {
+        { label: (detail.totalAfterCredit>0?'Bayar '+fmtRp(detail.totalAfterCredit):'Terapkan saldo lebih '+fmtRp(detail.creditToApply||0)), className: 'btn-success', onClick: async (c, w) => {
           const metode = w.querySelector('[data-f="metode"]').value;
           c(); showLoader();
           try { const r = await api('bayarSupplier', { token: S.token, payload: { supplierId, metode } }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) { await loadKonsinyasi(); S.dash = await api('getAdminDashboard', { token: S.token }); MEM.clear(); } }
