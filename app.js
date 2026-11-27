@@ -472,7 +472,8 @@ function renderTitipanSection() {
   const tk = S.titipanKaryawan || {};
   const pending = tk.pending || [];
   const sudahBayar = tk.sudahBayar || [];
-  if (!pending.length && !sudahBayar.length) return '';
+  const correctionCandidates = tk.correctionCandidates || [];
+  if (!pending.length && !sudahBayar.length && !correctionCandidates.length) return '';
 
   const totalPending = pending.reduce((s, x) => s + (x.total || 0), 0);
   const totalSudahBayar = sudahBayar.reduce((s, x) => s + (x.total || 0), 0);
@@ -510,6 +511,21 @@ function renderTitipanSection() {
         </button>
       </div>
     `).join('');
+  }
+
+  if (correctionCandidates.length) {
+    html += `<div class="mt-3" style="padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:8px">
+      <div class="text-xs font-semibold mb-2">Invoice yang sudah lunas — masih dapat dikoreksi melalui admin</div>`;
+    html += correctionCandidates.map(it => `
+      <div class="row-between" style="padding:8px 0;border-top:1px solid var(--border);gap:8px">
+        <div style="min-width:0;flex:1">
+          <strong class="text-sm">${esc(it.nama)}</strong>
+          <div class="text-xs text-gray">${esc(it.supplierNama)} · ${esc(it.tanggal)} · ${it.qtyLaku} pcs · ${fmtRp(it.qtyLaku*it.hargaTitip)} · Lunas</div>
+          ${it.correctionRequestStatus ? `<span class="badge ${it.correctionRequestStatus==='Pending'?'badge-warn':it.correctionRequestStatus==='Approved'?'badge-success':'badge-gray'}">Koreksi: ${esc(it.correctionRequestStatus)}</span>` : ''}
+        </div>
+        ${it.correctionRequestStatus==='Pending' ? '<span class="text-xs text-amber">Menunggu admin</span>' : `<button class="btn btn-ghost btn-sm" data-act="request-supplier-correction" data-id="${esc(it.id)}">Ajukan koreksi</button>`}
+      </div>`).join('');
+    html += '</div>';
   }
 
   if (totalSudahBayar > 0) {
@@ -3333,6 +3349,7 @@ async function formAjukanKoreksiSupplier(invoiceId) {
   const tk=S.titipanKaryawan||{};
   let invoice=null;
   (tk.pending||[]).forEach(s=>(s.items||[]).forEach(it=>{if(String(it.id)===String(invoiceId))invoice=Object.assign({supplierNama:s.supplierNama},it);}));
+  if(!invoice) invoice=(tk.correctionCandidates||[]).find(it=>String(it.id)===String(invoiceId))||null;
   if(!invoice)return toast('Invoice tidak ditemukan. Muat ulang daftar titipan.','error');
   if(invoice.correctionRequestStatus==='Pending')return toast('Permintaan koreksi invoice ini masih menunggu admin.','info');
   const max=Number(invoice.qtyDrop)||0;
