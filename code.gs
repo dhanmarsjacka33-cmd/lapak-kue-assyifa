@@ -3054,24 +3054,31 @@ function mapKasbon(k, userMap) {
   return { id:k.id, tanggal:formatDate(k.tanggal), userId:k.userId, userName: userMap && userMap[k.userId] || k.userId, nominal:Number(k.nominal) || 0, keterangan:k.keterangan || '', tipe:k.tipe || 'Kasbon', status:k.status || 'Outstanding', approvedBy:k.approvedBy || '', approvedAt: formatDateTime(k.approvedAt), gajiId:k.gajiId || '' };
 }
 function getKasbonOutstandingMap_(rows) {
+  const events = (rows || []).map((k, index) => ({
+    row:k, index, time:(new Date(k.tanggal).getTime() || 0), userId:String(k.userId || '')
+  })).filter(e=>e.userId).sort((a,b)=>a.time-b.time || a.index-b.index);
   const byUser = {};
-  (rows || []).forEach(k => {
-    const uid = String(k.userId || '');
-    if (!uid) return;
-    if (!byUser[uid]) byUser[uid] = { debts: [], payments: 0, outstanding: 0 };
+  events.forEach(e => {
+    const k=e.row, uid=e.userId;
+    if (!byUser[uid]) byUser[uid] = { debts: [], outstanding: 0 };
+    const item=byUser[uid];
     if ((k.tipe || 'Kasbon') === 'Kasbon' && k.status === 'Outstanding') {
-      byUser[uid].debts.push({ id:k.id, nominal:Number(k.nominal)||0, remaining:Number(k.nominal)||0, keterangan:k.keterangan||'', tanggal:formatDate(k.tanggal), _time:new Date(k.tanggal).getTime()||0 });
+      item.debts.push({ id:k.id, nominal:Number(k.nominal)||0, keterangan:k.keterangan||'', tanggal:formatDate(k.tanggal), remaining:Number(k.nominal)||0 });
     } else if (k.tipe === 'Bayar' && k.status === 'Lunas') {
-      byUser[uid].payments += Number(k.nominal)||0;
+      // Pembayaran hanya mengurangi utang yang sudah ada pada saat uang diterima.
+      // Sisa pembayaran tidak dibawa ke kasbon baru di masa depan.
+      let paid=Math.max(0,Number(k.nominal)||0);
+      item.debts.forEach(d=>{
+        if(paid<=0)return;
+        const applied=Math.min(d.remaining,paid);
+        d.remaining-=applied; paid-=applied;
+      });
     }
   });
-  Object.keys(byUser).forEach(uid => {
-    const item = byUser[uid];
-    item.debts.sort((a,b)=>a._time-b._time);
-    let paid = item.payments;
-    item.debts.forEach(d => { const applied=Math.min(d.remaining,paid); d.remaining-=applied; paid-=applied; });
-    item.debts = item.debts.filter(d=>d.remaining>0).map(d=>({id:d.id,nominal:d.remaining,keterangan:d.keterangan,tanggal:d.tanggal}));
-    item.outstanding = item.debts.reduce((sum,d)=>sum+d.nominal,0);
+  Object.keys(byUser).forEach(uid=>{
+    const item=byUser[uid];
+    item.debts=item.debts.filter(d=>d.remaining>0).map(d=>({id:d.id,nominal:d.remaining,keterangan:d.keterangan,tanggal:d.tanggal}));
+    item.outstanding=item.debts.reduce((sum,d)=>sum+d.nominal,0);
   });
   return byUser;
 }
