@@ -3946,7 +3946,7 @@ function apiBayarSupplier(token, payload) {
     }
     if (totalBayar <= 0) return { success: false, message: 'Tidak ada utang pending.' };
     const kasSheet = ss.getSheetByName('Kas');
-    if (!hasHeaders(kasSheet, ['id','tanggal','keterangan','tipe','kategori','nominal','saldo'])) return {success:false,message:'Struktur Kas belum lengkap. Tidak ada perubahan.'};
+    if (!hasHeaders(kasSheet, ['id','tanggal','keterangan','tipe','nominal','saldo'])) return {success:false,message:'Struktur Kas belum lengkap. Tidak ada perubahan.'};
     const kasData = kasSheet.getDataRange().getValues();
     const iSaldo = kasData[0].indexOf('saldo');
     const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
