@@ -2233,6 +2233,27 @@ function apiSubmitRekap(token, payload) {
       });
       if (kRows.length) appendObjectsByHeaders(konsinyasiSheet,kRows);
     }
+
+    // Bila pembayaran tunai/kredit yang sudah dialokasikan melebihi kewajiban
+    // final setelah koreksi draft, selisih menjadi saldo supplier setelah laporan dikirim.
+    _clearSheetCache('Konsinyasi');_clearSheetCache('BayarTitipanKaryawan');_clearSheetCache('SupplierCreditLedger');
+    const settlementMaps=getSupplierInvoiceSettlementMaps_();
+    const existingCreditKeys=new Set((getSheetData('SupplierCreditLedger')||[]).map(x=>String(x.requestKey||'')));
+    const surplusCredits=[];
+    (getSheetData('Konsinyasi')||[]).filter(k=>String(k.setoranId)===String(setoranId)).forEach(k=>{
+      const supplier=supMap[String(k.supplierId)];
+      if(!supplier||(supplier.tipeTransaksi||'BeliPutus')!=='TitipJual')return;
+      const invoiceId=String(k.id),gross=(Number(k.qtyLaku)||0)*(Number(k.hargaTitip)||0);
+      const paid=(settlementMaps.cashPaidById[invoiceId]||0)+(settlementMaps.creditAppliedByInvoice[invoiceId]||0);
+      const surplus=Math.max(0,paid-gross);
+      const requestKey='SETORAN-SURPLUS:'+setoranId+':'+invoiceId;
+      if(surplus>0&&!existingCreditKeys.has(requestKey)){
+        surplusCredits.push({id:'SCL'+Utilities.getUuid().slice(0,8).toUpperCase(),createdAt:new Date(),supplierId:String(k.supplierId),eventType:'CREDIT',amount:surplus,correctionId:'',sourceInvoiceId:invoiceId,referenceInvoiceId:'',createdBy:sess.username,notes:'Saldo lebih dari koreksi draft sebelum submit setoran '+setoranId,requestKey});
+        existingCreditKeys.add(requestKey);
+      }
+    });
+    if(surplusCredits.length)appendObjectsByHeaders(ss.getSheetByName('SupplierCreditLedger'),surplusCredits);
+    _clearSheetCache('SupplierCreditLedger');
     applySupplierCreditsToPendingInvoices_('',sess.username,journal);
     } catch (writeError) {
       try {
