@@ -268,7 +268,7 @@ has(backend, /const pendingCorrections = getSheetData\('SupplierCorrectionReques
 has(backend, /const unresolvedCorrections=getSheetData\('SupplierCorrectionRequests'\)/, 'Submit must recheck outstanding corrections while holding the script lock');
 has(backend, /if \(d\.qtyLaku <= 0\) return;\s*const hargaTitip/, 'New zero-sale supplier rows must not create a new payable invoice');
 has(backend, /if \(d\.qtyLaku <= 0\) return;\s*const hargaTitip/, 'Zero-quantity rows without a prior draft must not generate a new debt');
-has(backend, /paidFromAllocations\)\):Math\.max\(0,oldGross-oldDue,paidFromAllocations\)/, 'Correction approval must preserve allocations and settled status when recalculating payment');
+has(backend, /statusSettledById\[String\(krow\[ki\('id'\)\]\)\]\|\|0\)/, 'Correction approval must preserve admin/legacy settled balances in addition to cash and credit allocations');
 has(backend, /rollbackWriteJournal\(journal\)/, 'Rejection and approval writes must be reversible on failure');
 has(backend, /statusSettledById\[id\]=Math\.max\(0,gross-recorded\)/, 'Admin-paid and legacy paid invoices must be recognized as settled');
 has(backend, /if \(d\.qtyLaku <= 0\) return;\s*const hargaTitip/, 'Zero qty should not create a new payable supplier invoice');
