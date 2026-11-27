@@ -63,8 +63,25 @@ Pengiriman/persetujuan setoran ditahan jika ada koreksi kewajiban yang masih men
 8. Invoice duplikat historis.
 9. Submit dan approval setoran tidak menggandakan dampak Kas Utama.
 
+## Implementasi koreksi dan saldo kredit
+
+- Sheet `SupplierCorrectionRequests` menyimpan pengajuan karyawan, snapshot nilai sebelum/sesudah, alasan, status, dan keputusan admin.
+- Sheet `SupplierCreditLedger` adalah ledger append-only: `CREDIT` menambah hak kredit supplier dan `APPLY` mencatat kredit yang dipakai pada invoice.
+- Sheet finance dibuat otomatis saat endpoint terkait dipanggil; bila sheet ada, kolom yang kurang ditambahkan di sisi kanan tanpa memindahkan atau menghapus data lama.
+- Karyawan hanya dapat mengajukan koreksi untuk invoice dari lapaknya yang sudah terhubung ke setoran. Permintaan ganda yang masih Pending pada invoice yang sama ditolak.
+- Admin menyetujui atau menolak permintaan. Persetujuan memperbarui invoice sumber, detail setoran, jumlah penjualan/selisih setoran, dan ledger stok dalam satu write journal yang dapat di-rollback.
+- Jika pembayaran/kredit yang sudah diterima lebih besar dari kewajiban baru, selisih dicatat sebagai event CREDIT untuk supplier yang sama.
+- Kredit dipakai ke invoice Pending tertua dari supplier yang sama saat laporan baru disubmit, saat pembelian susulan dibuat, atau sebelum admin membayar supplier. Event APPLY mencatat invoice tujuan sehingga penggunaan kredit dapat diaudit.
+- Pembayaran admin hanya mengeluarkan uang tunai untuk sisa tagihan setelah kredit diterapkan. Bila seluruh tagihan tertutup kredit, tidak dibuat baris pengeluaran Kas.
+- Edit langsung invoice oleh admin ditolak untuk invoice Pending yang sudah menerima pembayaran sebagian; koreksi harus melewati pengajuan dan persetujuan agar alokasi pembayaran tidak hilang.
+- Jika nilai invoice berubah setelah pengajuan dan sebelum keputusan, permintaan ditandai Stale dan harus diajukan ulang.
+
+## Batasan yang harus diuji saat penerapan
+
+- Perubahan koreksi memperbarui nilai penjualan historis dan selisih setoran; penerimaan fisik tunai/QRIS/transfer tidak diubah otomatis.
+- Kredit supplier adalah hak tagih terhadap supplier, bukan uang tunai di Kas. Kredit baru mengurangi jumlah kas yang dikeluarkan pada pembayaran berikutnya ketika dipakai.
+- Invoice dan pembayaran lama tidak dihapus. Kredit lama tidak dibuat secara otomatis dari data historis yang tidak memiliki alokasi per invoice; diperlukan rekonsiliasi admin untuk data legacy yang tidak dapat ditelusuri dengan pasti.
+
 ## Status implementasi
 
-Perlindungan awal pada endpoint pembayaran telah ditambahkan: jika invoice pending memiliki invoice saudara dengan kunci draft yang sama dan invoice saudara itu sudah menerima pembayaran aktif, karyawan tidak dapat mengubah invoice pending tersebut melalui form pembayaran. Aplikasi mengarahkan koreksi ke admin.
-
-Fitur pengajuan/persetujuan koreksi dan buku saldo kredit supplier belum diimplementasikan dalam tahap ini. Keduanya memerlukan perubahan backend, UI admin/karyawan, skema sheet non-destruktif, serta pengujian integrasi sebelum digunakan.
+Backend, UI karyawan/admin, skema sheet non-destruktif, dan regression tests untuk alur koreksi serta ledger kredit ditambahkan pada perubahan ini. Pengujian otomatis kode tidak menggantikan verifikasi transaksi pada spreadsheet nyata. Deployment Apps Script harus memakai `code.gs` versi yang sama dengan GitHub `main`; tidak ada migrasi atau deployment yang dijalankan oleh PR ini.
