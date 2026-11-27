@@ -164,3 +164,14 @@ if (/hasHeaders\(kasSheet, \['id','tanggal','keterangan','tipe','kategori','nomi
 has(frontend, /Penerimaan belum diisi/, 'Employee rekap must clearly warn when sales exist but all payment channels are zero');
 has(frontend, /Pengeluaran operasional melebihi tunai yang diinput/, 'Employee rekap must explain why cash handover becomes negative');
 has(frontend, /Kekurangan tunai/, 'Negative cash handover must be labeled as a shortfall, not an amount to hand over');
+
+// Search coverage for both roles and supplier bill aggregation across lapaks.
+has(frontend, /data-drop-search/, 'Employee drop form must search cake and supplier names');
+has(frontend, /data-dist-search/, 'Admin stock drop must search cakes and suppliers');
+has(frontend, /data-supplier-search/, 'Admin supplier list must support supplier search');
+has(frontend, /data-bill-supplier-search/, 'Consolidated supplier bill list must be searchable');
+has(backend, /lapakBreakdown/, 'Supplier invoice detail must consolidate same product across lapaks while retaining lapak breakdown');
+has(backend, /function getKasbonOutstandingMap_/, 'Kasbon payments must be allocated against outstanding balances');
+has(backend, /Pembayaran melebihi sisa kasbon/, 'Kasbon receipt must not exceed outstanding balance');
+has(backend, /const kasbonMap = getKasbonOutstandingMap_/, 'Payroll deduction must use remaining kasbon after received payments');
+has(frontend, /Terima Pembayaran Kasbon \(uang masuk\)/, 'Admin kasbon form must offer receiving employee repayments');
