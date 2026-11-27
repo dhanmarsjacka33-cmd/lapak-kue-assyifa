@@ -200,3 +200,7 @@ has(indexHtml, /app\.js\?v=7\.6/, 'Main app must request the new frontend asset 
 has(testingHtml, /app\.js\?v=7\.6/, 'Testing page must request the new frontend asset version');
 has(serviceWorker, /kueassyifa-v15/, 'Service worker cache must be invalidated for the new release');
 has(serviceWorker, /app\.js\?v=7\.6/, 'Service worker static asset list must preload the new frontend version');
+
+// Once an invoice is linked to a submitted setoran, employee adjustment must be locked in UI and API.
+has(backend, /canAdjust: !paidIds\[id\] && !String\(k\.setoranId \|\| ''\)/, 'Submitted supplier invoices must render as locked for employees');
+has(backend, /if\(row\.setoranId\) return \{success:false,message:'Laporan lapak sudah dikirim/, 'Backend must refuse post-submit employee quantity edits even if the client bypasses UI');

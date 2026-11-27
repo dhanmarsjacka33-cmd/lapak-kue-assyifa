@@ -2336,7 +2336,7 @@ function apiGetTitipanKaryawan(token) {
       qtySisa: Number(detail.qtySisa) || 0,
       hargaTitip: Number(k.hargaTitip) || 0,
       utang: saldo,
-      canAdjust: !paidIds[id]
+      canAdjust: !paidIds[id] && !String(k.setoranId || '')
     });
   });
   const pending = Object.values(grouped).sort((a, b) => b.total - a.total);
@@ -2448,6 +2448,7 @@ function apiKaryawanBayarSupplier(token, payload) {
       for(const id of Object.keys(adjustmentMap)){
         const row=pendingRows.find(x=>x.id===id);
         if(!row) return {success:false,message:'Item tagihan tidak ditemukan pada supplier ini. Muat ulang data.'};
+        if(row.setoranId) return {success:false,message:'Laporan lapak sudah dikirim. Karyawan tidak dapat mengubah jumlah atau sisa invoice ini secara langsung. Hubungi admin untuk koreksi dengan persetujuan admin.'};
         // Jika ada invoice saudara untuk draft supplier/produk/periode yang sama yang sudah dibayar,
         // jangan izinkan karyawan mengubah invoice pending duplikat. Koreksi wajib melalui admin.
         const targetRow = data[row.row - 1];
