@@ -2511,6 +2511,7 @@ function apiKaryawanBayarSupplier(token, payload) {
       diDrop=detailHeaders.indexOf('qtyDrop');diSisa=detailHeaders.indexOf('qtySisa');diLaku=detailHeaders.indexOf('qtyLaku');
       if([diSetoran,diKatalog,diDrop,diSisa,diLaku].some(i=>i<0)) return {success:false,message:'Kolom rincian stok tidak lengkap. Penyesuaian sisa kue dibatalkan.'};
       const paidIds={};
+      const appliedCreditsByInvoice=getSupplierInvoiceSettlementMaps_().creditAppliedByInvoice;
       activePayments.forEach(x=>{
         const raw=String(x.konsinyasiIds||'');
         if(raw.trim().startsWith('[')){try{JSON.parse(raw).forEach(v=>{if(v&&v.id)paidIds[String(v.id)]=true;});}catch(e){}}
@@ -2529,7 +2530,7 @@ function apiKaryawanBayarSupplier(token, payload) {
         );
         if(paidSibling) return {success:false,message:'Ditemukan invoice lain untuk transaksi supplier/produk yang sama yang sudah menerima pembayaran. Jangan ubah atau bayar tagihan ini. Ajukan koreksi kepada admin agar pembayaran lama tetap diperhitungkan.'};
         if(paidIds[id]) return {success:false,message:'Jumlah produk '+id+' tidak dapat diubah karena sudah pernah menerima pembayaran. Selesaikan atau batalkan pembayaran sebelumnya terlebih dahulu.'};
-        const appliedCredit=getSupplierInvoiceSettlementMaps_().creditAppliedByInvoice[id]||0;
+        const appliedCredit=appliedCreditsByInvoice[id]||0;
         if(appliedCredit>0)return {success:false,message:'Invoice ini sudah menggunakan saldo lebih supplier. Ubah jumlah melalui rekap draft sebelum laporan dikirim, bukan melalui formulir pembayaran.'};
         const detailIndex=detailData.findIndex((d,i)=>i>0&&String(d[diSetoran])===row.setoranId&&String(d[diKatalog])===row.katalogId);
         if(detailIndex<1) return {success:false,message:'Rincian stok untuk '+id+' tidak ditemukan. Muat ulang data.'};
