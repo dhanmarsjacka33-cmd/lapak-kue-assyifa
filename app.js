@@ -3360,7 +3360,7 @@ async function formAjukanKoreksiSupplier(invoiceId) {
 }
 async function adminReviewSupplierCorrection(id,approve) {
   const question=approve?'Setujui koreksi invoice ini? Sistem akan memperbarui kewajiban supplier, setoran terkait, dan saldo stok.':'Tolak permintaan koreksi ini? Invoice tidak akan diubah.';
-  if(!(await confirmDlg(approve?'Setujui Koreksi Invoice':'Tolak Koreksi Invoice',question,approve?'Setujui':'Tolak'))return;
+  if (!(await confirmDlg(approve?'Setujui Koreksi Invoice':'Tolak Koreksi Invoice',question,approve?'Setujui':'Tolak'))) return;
   showLoader();
   try{
     const result=await api(approve?'approveSupplierCorrection':'rejectSupplierCorrection',{token:S.token,id,note:approve?'Disetujui admin':'Ditolak admin'});
