@@ -202,7 +202,7 @@ has(serviceWorker, /kueassyifa-v15/, 'Service worker cache must be invalidated f
 has(serviceWorker, /app\.js\?v=7\.6/, 'Service worker static asset list must preload the new frontend version');
 
 // Once an invoice is linked to a submitted setoran, employee adjustment must be locked in UI and API.
-has(backend, /canAdjust: !paidIds\[id\] && !String\(k\.setoranId \|\| ''\)/, 'Submitted supplier invoices must render as locked for employees');
+has(backend, /canAdjust: !paidIds\[id\] && !\(settlementMaps\.creditAppliedByInvoice\[id\]>0\) && !String\(k\.setoranId \|\| ''\)/, 'Submitted or credit-paid supplier invoices must render as locked in the payment form');
 has(backend, /if\(row\.setoranId\) return \{success:false,message:'Laporan lapak sudah dikirim/, 'Backend must refuse post-submit employee quantity edits even if the client bypasses UI');
 
 
