@@ -245,7 +245,7 @@ function setupDatabase() {
     ['K3','Lemper Ayam','SP3',1500,2000,'Lemper',true],
     ['K4','Risoles Mayo','SP1',2200,2800,'Risoles',true]
   ]);
-  seedIfEmpty('Kas', [['KS1', new Date(), 'Modal Awal', 'Masuk', 'Modal', 1500000, 1500000]]);
+  seedIfEmpty('Kas', [['KS1', new Date(), 'Modal Awal', 'Masuk', 'Modal', 'Internal', 1500000, 1500000]]);
   seedIfEmpty('SettingPayroll', [
     ['SPL1', 'L01', 50000, 50000, new Date(), true],
     ['SPL2', 'L02', 70000, 50000, new Date(), true],
