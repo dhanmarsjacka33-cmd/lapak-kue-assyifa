@@ -676,7 +676,12 @@ function summaryHTML() {
   const transferDiserahkan = transfer;
   const expected = tunaiDiserahkan + qrisDiserahkan + transferDiserahkan;
   const selisih = total - (tunai + qris + transfer);
+  const penerimaan = tunai + qris + transfer;
+  const warnings = [];
+  if (total > 0 && penerimaan === 0) warnings.push('Penerimaan belum diisi. Masukkan jumlah tunai, QRIS, dan transfer yang benar-benar diterima.');
+  if (pengeluaran > tunai) warnings.push('Pengeluaran operasional melebihi tunai yang diinput. Setoran tunai negatif dan laporan tidak dapat dikirim.');
   return `<div style="flex:1">
+    ${warnings.length ? `<div class="text-xs text-red font-semibold mb-2">${warnings.map(esc).join('<br>')}</div>` : ''}
     <div class="row-between text-xs"><span>Penjualan</span><strong>${fmtRp(total)}</strong></div>
     <div class="row-between text-xs"><span>Tunai dipegang karyawan</span><span>${fmtRp(tunai)}</span></div>
     <div class="row-between text-xs"><span>QRIS</span><span>${fmtRp(qris)}</span></div><div class="row-between text-xs"><span>Transfer</span><span>${fmtRp(transfer)}</span></div>
@@ -684,8 +689,8 @@ function summaryHTML() {
     ${totalTitipanQris > 0 ? `<div class="row-between text-xs text-gray"><span>Titipan dibayar QRIS (informasi)</span><span>${fmtRp(totalTitipanQris)}</span></div>` : ''}
     ${totalTitipanTransfer > 0 ? `<div class="row-between text-xs text-gray"><span>Titipan dibayar Transfer (informasi)</span><span>${fmtRp(totalTitipanTransfer)}</span></div>` : ''}
     <div class="row-between text-xs text-red"><span>Pengeluaran operasional</span><span>- ${fmtRp(pengeluaran)}</span></div>
-    <div class="row-between text-xs text-green font-bold mt-2"><span>Tunai yang diserahkan karyawan</span><span>${fmtRp(tunaiDiserahkan)}</span></div>
-    <div class="row-between text-xs text-green font-bold"><span>Total penerimaan Owner</span><span>${fmtRp(expected)}</span></div>
+    <div class="row-between text-xs ${tunaiDiserahkan < 0 ? 'text-red' : 'text-green'} font-bold mt-2"><span>${tunaiDiserahkan < 0 ? 'Kekurangan tunai' : 'Tunai yang diserahkan karyawan'}</span><span>${fmtRp(Math.abs(tunaiDiserahkan))}</span></div>
+    <div class="row-between text-xs ${expected < 0 ? 'text-red' : 'text-green'} font-bold"><span>${expected < 0 ? 'Kekurangan penerimaan Owner' : 'Total penerimaan Owner'}</span><span>${fmtRp(Math.abs(expected))}</span></div>
     <div class="divider" style="margin:10px 0"></div>
     <div class="row-between text-xs font-bold ${Math.abs(selisih) < 1 ? 'text-green' : 'text-red'}"><span>Selisih penjualan vs pembayaran</span><span>${fmtRp(selisih)}</span></div>
   </div>`;
