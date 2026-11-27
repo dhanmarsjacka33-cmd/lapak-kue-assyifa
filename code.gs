@@ -4371,7 +4371,7 @@ function apiApproveSupplierCorrection(token,requestId,reviewNote) {
     if(sindex<1)return {success:false,message:'Setoran sumber tidak ditemukan.'};
     const oldDue=Math.max(0,Number(krow[ki('utang')])||0);
     const settlementMaps=getSupplierInvoiceSettlementMaps_();
-    const paidFromAllocations=(settlementMaps.cashPaidById[String(krow[ki('id')])]||0)+(settlementMaps.creditAppliedByInvoice[String(krow[ki('id')])]||0);
+    const paidFromAllocations=(settlementMaps.cashPaidById[String(krow[ki('id')])]||0)+(settlementMaps.creditAppliedByInvoice[String(krow[ki('id')])]||0)+(settlementMaps.statusSettledById[String(krow[ki('id')])]||0);
     const paid=String(krow[ki('status')])==='Bayar'?Math.max(oldGross,paidFromAllocations):Math.max(0,oldGross-oldDue,paidFromAllocations);
     const newGross=newQty*price,newDue=Math.max(0,newGross-paid),credit=Math.max(0,paid-newGross),newStatus=newDue>0?'Pending':(newQty===0&&paid<=0?'Cancelled':'Bayar');
     const st=stocks.getDataRange().getValues(),sth=st[0].map(x=>String(x).trim()),sx=n=>sth.indexOf(n),stockIdxs=[];
