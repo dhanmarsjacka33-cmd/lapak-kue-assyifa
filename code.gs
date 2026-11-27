@@ -4416,9 +4416,19 @@ function apiRejectSupplierCorrection(token,requestId,reviewNote) {
     if(index<1)return {success:false,message:'Permintaan koreksi tidak ditemukan.'};
     if(String(data[index][ix('status')])!=='Pending')return {success:false,message:'Permintaan sudah diproses.'};
     const journal=beginWriteJournal(['SupplierCorrectionRequests']);
-    journalSetValue(journal,sheet,index+1,ix('status')+1,'Rejected');journalSetValue(journal,sheet,index+1,ix('reviewedBy')+1,sess.username);journalSetValue(journal,sheet,index+1,ix('reviewedAt')+1,new Date());journalSetValue(journal,sheet,index+1,ix('reviewNote')+1,String(reviewNote||'Ditolak admin'));
-    _clearSheetCache();logAction(sess.username,'REJECT_KOREKSI_INVOICE_SUPPLIER',{requestId,reviewNote:String(reviewNote||'')});
-    return {success:true,message:'Permintaan ditolak. Invoice dan saldo supplier tidak diubah.'};
+    try{
+      journalSetValue(journal,sheet,index+1,ix('status')+1,'Rejected');
+      journalSetValue(journal,sheet,index+1,ix('reviewedBy')+1,sess.username);
+      journalSetValue(journal,sheet,index+1,ix('reviewedAt')+1,new Date());
+      journalSetValue(journal,sheet,index+1,ix('reviewNote')+1,String(reviewNote||'Ditolak admin'));
+      _clearSheetCache();
+      logAction(sess.username,'REJECT_KOREKSI_INVOICE_SUPPLIER',{requestId,reviewNote:String(reviewNote||'')});
+      return {success:true,message:'Permintaan ditolak. Invoice dan saldo supplier tidak diubah.'};
+    }catch(error){
+      try{rollbackWriteJournal(journal);}catch(rollbackError){return {success:false,message:'Penolakan gagal dan pemulihan perlu diperiksa. '+error.message+' | '+rollbackError.message};}
+      _clearSheetCache();
+      return {success:false,message:'Penolakan gagal. Tidak ada perubahan yang dipertahankan: '+error.message};
+    }
   }finally{lock.releaseLock();}
 }
 function apiGetKonsinyasiDetailSupplier(token, supplierId) {
