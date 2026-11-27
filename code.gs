@@ -245,7 +245,7 @@ function setupDatabase() {
     ['K3','Lemper Ayam','SP3',1500,2000,'Lemper',true],
     ['K4','Risoles Mayo','SP1',2200,2800,'Risoles',true]
   ]);
-  seedIfEmpty('Kas', [['KS1', new Date(), 'Modal Awal', 'Masuk', 'Modal', 1500000, 1500000]]);
+  seedIfEmpty('Kas', [['KS1', new Date(), 'Modal Awal', 'Masuk', 'Modal', 'Internal', 1500000, 1500000]]);
   seedIfEmpty('SettingPayroll', [
     ['SPL1', 'L01', 50000, 50000, new Date(), true],
     ['SPL2', 'L02', 70000, 50000, new Date(), true],
@@ -2086,8 +2086,7 @@ function apiSubmitRekap(token, payload) {
     (!b.setoranId || b.setoranId === '') &&
     String(b.status || 'Active') === 'Active'
   );
-  // Pembayaran titipan dibayar dari uang hasil penjualan tunai yang dipegang karyawan.
-  // Catat terpisah dari biaya operasional agar mengurangi kas fisik tanpa mengurangi laba.
+  // Pembayaran supplier adalah metadata metode pembayaran, bukan potongan kedua dari penerimaan karyawan.
 
   for (const p of pengeluaranList) {
     const nominal = Number(p && p.nominal);
@@ -2739,7 +2738,7 @@ function apiApproveSetoran(token, idSetoran) {
     const iId = h.indexOf('id'), iStatus = h.indexOf('status');
     const iTunai = h.indexOf('totalTunai'), iQris = h.indexOf('totalQris'), iTransfer = h.indexOf('totalTransfer'), iPengeluaran = h.indexOf('pengeluaran');
     const iLapak = h.indexOf('lapakId'), iAt = h.indexOf('approvedAt'), iBy = h.indexOf('approvedBy');
-    if (!hasHeaders(kasSheet, ['id','tanggal','keterangan','tipe','kategori','nominal','saldo'])) {
+    if (!hasHeaders(kasSheet, ['id','tanggal','keterangan','tipe','nominal','saldo'])) {
       return { success:false, message:'Struktur Kas belum lengkap. Setoran tidak disetujui dan tidak ada perubahan.' };
     }
     if (iTunai < 0 || iPengeluaran < 0) {
@@ -3947,7 +3946,7 @@ function apiBayarSupplier(token, payload) {
     }
     if (totalBayar <= 0) return { success: false, message: 'Tidak ada utang pending.' };
     const kasSheet = ss.getSheetByName('Kas');
-    if (!hasHeaders(kasSheet, ['id','tanggal','keterangan','tipe','kategori','nominal','saldo'])) return {success:false,message:'Struktur Kas belum lengkap. Tidak ada perubahan.'};
+    if (!hasHeaders(kasSheet, ['id','tanggal','keterangan','tipe','nominal','saldo'])) return {success:false,message:'Struktur Kas belum lengkap. Tidak ada perubahan.'};
     const kasData = kasSheet.getDataRange().getValues();
     const iSaldo = kasData[0].indexOf('saldo');
     const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
