@@ -2281,6 +2281,7 @@ function apiGetTitipanKaryawan(token) {
   const sess = requireRole(token, ['karyawan']);
   const lapakId = sess.lapakId;
   if (!lapakId) return { pending: [], sudahBayar: [] };
+  const settlementMaps=getSupplierInvoiceSettlementMaps_();
   ensureSupplierFinanceSheets_();
   const correctionByInvoice={};
   getSheetData('SupplierCorrectionRequests').filter(r=>String(r.lapakId)===String(lapakId)).forEach(r=>{correctionByInvoice[String(r.konsinyasiId)]={id:r.id,status:r.status||'Pending'};});
@@ -2377,7 +2378,7 @@ function apiGetTitipanKaryawan(token) {
       utang: saldo,
       setoranId: String(k.setoranId||''),
       currentQtyLaku: Number(k.qtyLaku)||0,
-      canAdjust: !paidIds[id] && !String(k.setoranId || ''),
+      canAdjust: !paidIds[id] && !(settlementMaps.creditAppliedByInvoice[id]>0) && !String(k.setoranId || ''),
       correctionRequestId: (correctionByInvoice[id]||{}).id||'',
       correctionRequestStatus: (correctionByInvoice[id]||{}).status||''
     });
@@ -2528,6 +2529,8 @@ function apiKaryawanBayarSupplier(token, payload) {
         );
         if(paidSibling) return {success:false,message:'Ditemukan invoice lain untuk transaksi supplier/produk yang sama yang sudah menerima pembayaran. Jangan ubah atau bayar tagihan ini. Ajukan koreksi kepada admin agar pembayaran lama tetap diperhitungkan.'};
         if(paidIds[id]) return {success:false,message:'Jumlah produk '+id+' tidak dapat diubah karena sudah pernah menerima pembayaran. Selesaikan atau batalkan pembayaran sebelumnya terlebih dahulu.'};
+        const appliedCredit=getSupplierInvoiceSettlementMaps_().creditAppliedByInvoice[id]||0;
+        if(appliedCredit>0)return {success:false,message:'Invoice ini sudah menggunakan saldo lebih supplier. Ubah jumlah melalui rekap draft sebelum laporan dikirim, bukan melalui formulir pembayaran.'};
         const detailIndex=detailData.findIndex((d,i)=>i>0&&String(d[diSetoran])===row.setoranId&&String(d[diKatalog])===row.katalogId);
         if(detailIndex<1) return {success:false,message:'Rincian stok untuk '+id+' tidak ditemukan. Muat ulang data.'};
         const qtyDrop=Number(detailData[detailIndex][diDrop])||0, qtySisa=qtyDrop-adjustmentMap[id];
