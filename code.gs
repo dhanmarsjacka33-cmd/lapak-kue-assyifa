@@ -4185,8 +4185,9 @@ function ensureSupplierFinanceSheets_() {
   return {requests:ss.getSheetByName('SupplierCorrectionRequests'),credits:ss.getSheetByName('SupplierCreditLedger')};
 }
 function getSupplierCreditBalanceMap_() {
-  ensureSupplierFinanceSheets_();
   const map={};
+  const ledgerSheet=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('SupplierCreditLedger');
+  if(!ledgerSheet || ledgerSheet.getLastRow()<2)return map;
   getSheetData('SupplierCreditLedger').forEach(r=>{
     const sid=String(r.supplierId||'');if(!sid)return;
     if(!map[sid])map[sid]={supplierId:sid,credited:0,used:0,balance:0,events:0};
