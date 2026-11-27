@@ -150,3 +150,11 @@ has(backend, /if \(saldo <= 0\) return/, 'Fully paid invoices must not reappear 
 has(backend, /remainingPayment = Math\.max\(0, Number\(b\.totalBayar\) \|\| 0\)/, 'Legacy payment records without per-invoice amounts must be reconciled conservatively');
 
 has(backend, /const reconciled=originalUtang>0\?Math\.min\(currentUtang,Math\.max\(0,originalUtang-\(paidAmountById\[String\(data\[i\]\[iId\]\)\]\|\|0\)\)\):currentUtang/, 'Payment endpoint must reconcile allocated amounts before accepting another supplier payment');
+
+// Legacy TESTING Kas sheets may not yet contain optional category/method columns.
+// Supplier payment and setoran approval must require only columns needed to write a safe ledger row.
+has(backend, /hasHeaders\(kasSheet, \['id','tanggal','keterangan','tipe','nominal','saldo'\]\)/, 'Supplier payment must support legacy Kas sheets without optional category column');
+if (/hasHeaders\(kasSheet, \['id','tanggal','keterangan','tipe','kategori','nominal','saldo'\]\)/.test(backend)) throw new Error('Kas category must not block supplier payment or setoran approval when optional column is absent');
+has(frontend, /Penerimaan belum diisi/, 'Employee rekap must clearly warn when sales exist but all payment channels are zero');
+has(frontend, /Pengeluaran operasional melebihi tunai yang diinput/, 'Employee rekap must explain why cash handover becomes negative');
+has(frontend, /Kekurangan tunai/, 'Negative cash handover must be labeled as a shortfall, not an amount to hand over');
