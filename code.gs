@@ -1961,6 +1961,7 @@ function apiSaveRekapDraft(token, payload) {
     if (!ks || ks.getLastRow() < 1) return { success:false, message:'Sheet Konsinyasi belum tersedia.' };
     const data = ks.getDataRange().getValues();
     const h = data[0].map(x => String(x).trim());
+    const settlementMaps = getSupplierInvoiceSettlementMaps_();
     const ix = name => h.indexOf(name);
     const required = ['id','tanggal','supplierId','lapakId','katalogId','qtyLaku','hargaTitip','utang','status','setoranId','catatan'];
     if (required.some(x => ix(x) < 0)) return { success:false, message:'Struktur kolom Konsinyasi tidak sesuai.' };
@@ -1990,18 +1991,18 @@ function apiSaveRekapDraft(token, payload) {
       if(!sup || String(sup.tipeTransaksi||'BeliPutus')!=='TitipJual') continue;
       const laku=drop-sisa, harga=Number(k.hargaBeli)||0, utang=laku*harga;
       const old=existing[id];
-      if(old && old.status==='Bayar' && old.qty!==laku) return {success:false,message:'Pembayaran untuk '+(k.nama||id)+' sudah dilakukan. Perubahan sisa harus dikoreksi oleh admin.'};
       if(old) {
-        const row=data[old.row-1];
-        if(laku<=0) {
-          if(old.status==='Pending' || old.status==='Cancelled') {
-            updates.push({row:old.row,col:ix('qtyLaku')+1,value:0},{row:old.row,col:ix('utang')+1,value:0});
-            if(old.status==='Pending') updates.push({row:old.row,col:ix('status')+1,value:'Cancelled'});
-          }
-        } else if(old.status==='Pending' || old.status==='Cancelled') {
-          updates.push({row:old.row,col:ix('qtyLaku')+1,value:laku},{row:old.row,col:ix('hargaTitip')+1,value:harga},{row:old.row,col:ix('utang')+1,value:utang});
-          if(old.status==='Cancelled') updates.push({row:old.row,col:ix('status')+1,value:'Pending'});
-        }
+        // Draft belum dikirim: karyawan tetap bebas memperbaiki sisa meskipun
+        // sudah ada pembayaran tunai atau kredit yang dialokasikan ke invoice ini.
+        const settled=(settlementMaps.cashPaidById[String(old.id)]||0)+(settlementMaps.creditAppliedByInvoice[String(old.id)]||0);
+        const remaining=Math.max(0,utang-settled);
+        const nextStatus=(laku<=0&&settled<=0)?'Cancelled':(remaining>0?'Pending':'Bayar');
+        updates.push(
+          {row:old.row,col:ix('qtyLaku')+1,value:laku},
+          {row:old.row,col:ix('hargaTitip')+1,value:harga},
+          {row:old.row,col:ix('utang')+1,value:remaining},
+          {row:old.row,col:ix('status')+1,value:nextStatus}
+        );
       } else if(laku>0) {
         const obj={}; h.forEach((name,j)=>obj[name]='');
         obj.id='KN'+Utilities.getUuid().slice(0,8).toUpperCase(); obj.tanggal=new Date(tgl); obj.supplierId=k.supplierId; obj.lapakId=sess.lapakId; obj.katalogId=id; obj.qtyLaku=laku; obj.hargaTitip=harga; obj.utang=utang; obj.status='Pending'; obj.catatan='DRAFT_REKAP|'+tgl+'|'+sess.lapakId+'|'+id;
