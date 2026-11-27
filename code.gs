@@ -1951,6 +1951,7 @@ function apiSaveRekapDraft(token, payload) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success:false, message:'Sistem sibuk. Coba lagi.' };
   try {
+    ensureSupplierFinanceSheets_();
     if (getSheetData('Setoran').some(x => formatDate(x.tanggal)===tgl && String(x.lapakId)===String(sess.lapakId))) return {success:false,message:'Laporan hari ini sudah dikirim.'};
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const dist = getSheetData('Distribusi').filter(x => formatDate(x.tanggal) === tgl && String(x.lapakId) === String(sess.lapakId));
