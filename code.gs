@@ -2109,6 +2109,11 @@ function apiSubmitRekap(token, payload) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success: false, message: 'Sistem sibuk. Coba lagi.' };
   try {
+    // Ulangi pemeriksaan antrean koreksi di dalam lock agar pengajuan dan submit
+    // yang terjadi hampir bersamaan tidak dapat saling melewati.
+    _clearSheetCache('SupplierCorrectionRequests');
+    const unresolvedCorrections=getSheetData('SupplierCorrectionRequests').filter(r=>String(r.lapakId)===String(sess.lapakId)&&String(r.status)==='Pending');
+    if(unresolvedCorrections.length)return {success:false,message:'Masih ada permintaan koreksi invoice yang menunggu keputusan admin. Laporan belum dapat dikirim.'};
     // Refresh pembayaran setelah lock diperoleh agar pembayaran supplier yang terjadi
     // bersamaan dengan submit tidak tertinggal dari perhitungan maupun tautan setoran.
     // Cache lokal eksekusi harus dibuang agar pembacaan ini benar-benar membaca sheet terbaru.
@@ -2216,7 +2221,6 @@ function apiSubmitRekap(token, payload) {
     if (konsinyasiSheet) {
       const kRows = [];
       details.forEach(d => {
-        if (d.qtyLaku <= 0) return;
         const k = katMap[d.katalogId]; if (!k) return;
         const supplier = supMap[k.supplierId]; if (!supplier) return;
         if ((supplier.tipeTransaksi || 'BeliPutus') !== 'TitipJual') return;
@@ -2229,6 +2233,9 @@ function apiSubmitRekap(token, payload) {
           if(iDraftSetoran>=0) for(let ri=1;ri<draftData.length;ri++) if(String(draftData[ri][iDraftId])===String(existingDraft.id)){journalSetValue(journal, konsinyasiSheet, ri+1, iDraftSetoran+1, setoranId);break;}
           return;
         }
+        // Hanya buat invoice baru bila ada qty terjual; invoice draft nol tetap
+        // ditautkan di atas agar alokasi pembayaran dan kreditnya bisa diaudit.
+        if (d.qtyLaku <= 0) return;
         const hargaTitip = Number(k.hargaBeli) || 0;
         const utang = d.qtyLaku * hargaTitip;
         kRows.push({id:'KN'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),supplierId:k.supplierId,lapakId:sess.lapakId,katalogId:d.katalogId,qtyLaku:d.qtyLaku,hargaTitip,utang,status:'Pending',kasId:'',bayarAt:'',bayarBy:'',setoranId,catatan:''});
