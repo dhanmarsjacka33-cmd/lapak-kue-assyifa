@@ -4259,20 +4259,27 @@ function applySupplierCreditsToPendingInvoices_(supplierId,actor,parentJournal) 
   const journal=parentJournal||beginWriteJournal(['Konsinyasi','SupplierCreditLedger']);
   const sh=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Konsinyasi'),ledger=sheets.credits;
   const h=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0].map(x=>String(x).trim()),ix=n=>h.indexOf(n);
-  if(['id','supplierId','tanggal','utang','status'].some(n=>ix(n)<0))throw new Error('Struktur Konsinyasi tidak lengkap untuk penggunaan saldo lebih.');
-  const rows=sh.getDataRange().getValues(),balances=getSupplierCreditBalanceMap_();
+  if(['id','supplierId','tanggal','qtyLaku','hargaTitip','utang','status'].some(n=>ix(n)<0))throw new Error('Struktur Konsinyasi tidak lengkap untuk penggunaan saldo lebih.');
+  _clearSheetCache('Konsinyasi');_clearSheetCache('BayarTitipanKaryawan');_clearSheetCache('SupplierCreditLedger');
+  const rows=sh.getDataRange().getValues(),balances=getSupplierCreditBalanceMap_(),settlements=getSupplierInvoiceSettlementMaps_();
   const supplierIds=supplierId?[String(supplierId)]:Object.keys(balances),events=[],used=[];
   try{
     supplierIds.forEach(sid=>{
       let credit=(balances[sid]||{balance:0}).balance;if(credit<=0)return;
       const pending=[];
       for(let i=1;i<rows.length;i++)if(String(rows[i][ix('supplierId')])===sid&&String(rows[i][ix('status')])==='Pending'){
-        const due=Math.max(0,Number(rows[i][ix('utang')])||0);if(due>0)pending.push({row:i+1,id:String(rows[i][ix('id')]),due,date:new Date(rows[i][ix('tanggal')]).getTime()||0});
+        const id=String(rows[i][ix('id')]);
+        const currentDue=Math.max(0,Number(rows[i][ix('utang')])||0);
+        const gross=(Number(rows[i][ix('qtyLaku')])||0)*(Number(rows[i][ix('hargaTitip')])||0);
+        const allocated=(settlements.cashPaidById[id]||0)+(settlements.creditAppliedByInvoice[id]||0);
+        const reconciledDue=gross>0?Math.min(currentDue,Math.max(0,gross-allocated)):currentDue;
+        if(reconciledDue>0)pending.push({row:i+1,id,due:reconciledDue,date:new Date(rows[i][ix('tanggal')]).getTime()||0,currentDue});
       }
       pending.sort((a,b)=>a.date-b.date||a.row-b.row);
       pending.forEach(item=>{
         if(credit<=0)return;
         const amount=Math.min(item.due,credit),remaining=item.due-amount;if(amount<=0)return;
+        // Reconcile stale invoice balance before applying any supplier credit.
         journalSetValue(journal,sh,item.row,ix('utang')+1,remaining);
         if(remaining===0){
           journalSetValue(journal,sh,item.row,ix('status')+1,'Bayar');
