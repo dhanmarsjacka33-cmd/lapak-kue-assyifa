@@ -249,3 +249,9 @@ has(backend, /Tagihan supplier sudah tertutup oleh saldo lebih/, 'Fully credited
 has(backend, /Saldo lebih supplier yang diterapkan/, 'Employee payment confirmation must report the credit used');
 has(backend, /const pendingCorrections = getSheetData\('SupplierCorrectionRequests'\)/, 'New employee report must be blocked while correction approvals remain pending');
 has(backend, /const correctionCandidates = konsinyasiRows/, 'Paid invoices must be listed for post-submit correction requests');
+
+has(backend, /canAdjust: !paidIds\[id\] && !\(settlementMaps\.creditAppliedByInvoice\[id\]>0\)/, 'Employee must not directly alter quantities in the supplier payment form after credit was applied');
+has(backend, /if\(appliedCredit>0\)return \{success:false,message:'Invoice ini sudah menggunakan saldo lebih supplier/, 'Backend must reject payment-form quantity edits to credit-settled invoices');
+has(backend, /function getSupplierInvoiceSettlementMaps_\(\)/, 'Draft correction must reconcile cash allocations and supplier credit allocations per invoice');
+has(backend, /const settled=\(settlementMaps\.cashPaidById\[String\(old\.id\)\]\|\|0\)\+\(settlementMaps\.creditAppliedByInvoice\[String\(old\.id\)\]\|\|0\)/, 'Draft quantity corrections must preserve both existing cash and credit allocations');
+has(backend, /const surplus=Math\.max\(0,paid-gross\)/, 'Final overpayment after a pre-submit correction must become supplier credit');
