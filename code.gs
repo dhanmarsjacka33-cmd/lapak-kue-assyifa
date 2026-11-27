@@ -4392,7 +4392,7 @@ function apiApproveSupplierCorrection(token,requestId,reviewNote) {
       const oldNote=String(krow[ki('catatan')]||''),audit='KOREKSI '+requestId+' oleh '+sess.username+': qty '+oldQty+'→'+newQty+'; kewajiban '+oldGross+'→'+newGross;
       journalSetValue(journal,ks,krowNum,ki('catatan')+1,(oldNote?oldNote+' | ':'')+audit);
       journalSetValue(journal,ds,didx+1,di('qtyLaku')+1,newQty);journalSetValue(journal,ds,didx+1,di('qtySisa')+1,drop-newQty);journalSetValue(journal,ds,didx+1,di('subtotal')+1,newSubtotal);
-      const newSales=dd.slice(1).reduce((sum,row,index)=>sum+(index===didx?newSubtotal:(Number(row[di('subtotal')])||0)),0);
+      const newSales=dd.slice(1).reduce((sum,row,index)=>sum+(index+1===didx?newSubtotal:(Number(row[di('subtotal')])||0)),0);
       journalSetValue(journal,ssheet,sindex+1,si('totalSistem')+1,newSales);
       const received=(Number(sd[sindex][si('totalTunai')])||0)+(Number(sd[sindex][si('totalQris')])||0)+(si('totalTransfer')>=0?(Number(sd[sindex][si('totalTransfer')])||0):0);
       journalSetValue(journal,ssheet,sindex+1,si('selisih')+1,newSales-received);
