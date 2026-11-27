@@ -255,3 +255,9 @@ has(backend, /if\(appliedCredit>0\)return \{success:false,message:'Invoice ini s
 has(backend, /function getSupplierInvoiceSettlementMaps_\(\)/, 'Draft correction must reconcile cash allocations and supplier credit allocations per invoice');
 has(backend, /const settled=\(settlementMaps\.cashPaidById\[String\(old\.id\)\]\|\|0\)\+\(settlementMaps\.creditAppliedByInvoice\[String\(old\.id\)\]\|\|0\)/, 'Draft quantity corrections must preserve both existing cash and credit allocations');
 has(backend, /const surplus=Math\.max\(0,paid-gross\)/, 'Final overpayment after a pre-submit correction must become supplier credit');
+
+has(backend, /newStatus=newDue>0\?'Pending':\(newQty===0&&paid<=0\?'Cancelled':'Bayar'\)/, 'Zero-quantity corrections without prior settlement must cancel the invoice, not falsely mark it paid');
+has(backend, /stockIdxs.length>1\|\|\(oldQty>0&&stockIdxs.length!==1\)/, 'Correction approval must safely support a zero-sale invoice that needs its first stock ledger row');
+has(backend, /else appendObjectsByHeaders\(stocks,\[\{id:'KS'/, 'Approved corrections from zero quantity must append the missing stock-out event');
+has(backend, /\['Bayar','Cancelled'\]\.includes\(String\(k\.status\)\)/, 'Employees must be able to request correction for a cancelled submitted invoice');
+has(frontend, /it\.status==='Cancelled'\?'Dibatalkan':'Lunas'/, 'Employee correction list must distinguish cancelled invoices from paid invoices');
