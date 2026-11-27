@@ -4011,7 +4011,16 @@ function apiGetSaldoSupplier(token) {
     if (k.status === 'Pending') { balanceMap[sid].pending += Number(k.utang) || 0; balanceMap[sid].pendingCount++; }
     else if (k.status === 'Bayar') { balanceMap[sid].totalDibayar += Number(k.utang) || 0; balanceMap[sid].countDibayar++; }
   });
-  return Object.values(balanceMap).sort((a, b) => b.pending - a.pending);
+  const creditMap=getSupplierCreditBalanceMap_();
+  Object.keys(balanceMap).forEach(sid=>{
+    const credit=(creditMap[sid]||{balance:0}).balance;
+    balanceMap[sid].saldoLebih=credit;
+    balanceMap[sid].pendingSetelahKredit=Math.max(0,balanceMap[sid].pending-credit);
+  });
+  Object.keys(creditMap).forEach(sid=>{
+    if(!balanceMap[sid]&&creditMap[sid].balance>0)balanceMap[sid]={supplierId:sid,nama:(supMap[sid]||{}).nama||sid,tipeTransaksi:(supMap[sid]||{}).tipeTransaksi||'TitipJual',pending:0,pendingCount:0,totalDibayar:0,countDibayar:0,saldoLebih:creditMap[sid].balance,pendingSetelahKredit:0};
+  });
+  return Object.values(balanceMap).sort((a, b) => b.pendingSetelahKredit - a.pendingSetelahKredit);
 }
 function apiBayarSupplier(token, payload) {
   const sess = requireRole(token, ['admin']);
@@ -4024,6 +4033,8 @@ function apiBayarSupplier(token, payload) {
   if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success: false, message: 'Sistem sibuk. Coba lagi.' };
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
+    ensureSupplierFinanceSheets_();
+    const creditUse = applySupplierCreditsToPendingInvoices_(supplierId,sess.username);
     const sheet = ss.getSheetByName('Konsinyasi');
     const data = sheet.getDataRange().getValues();
     const h = data[0];
@@ -4038,7 +4049,7 @@ function apiBayarSupplier(token, payload) {
         totalBayar += Number(data[i][iUtang]) || 0; rowsToUpdate.push(i + 1);
       }
     }
-    if (totalBayar <= 0) return { success: false, message: 'Tidak ada utang pending.' };
+    if (totalBayar <= 0) return { success: true, message: creditUse.total>0 ? 'Tagihan lunas menggunakan saldo lebih supplier. Tidak perlu pembayaran tunai.' : 'Tidak ada utang pending.', total:0, creditApplied:creditUse.total, count:0 };
     const kasSheet = ss.getSheetByName('Kas');
     if (!hasHeaders(kasSheet, ['id','tanggal','keterangan','tipe','nominal','saldo'])) return {success:false,message:'Struktur Kas belum lengkap. Tidak ada perubahan.'};
     const kasData = kasSheet.getDataRange().getValues();
@@ -4063,7 +4074,7 @@ function apiBayarSupplier(token, payload) {
       return {success:false,message:'Pembayaran gagal. Perubahan dibatalkan: '+writeError.message};
     }
     _clearSheetCache();
-    return { success: true, message: 'Bayar ' + (sup.nama || supplierId) + ': Rp ' + totalBayar.toLocaleString('id-ID') + ' via ' + metode, total: totalBayar, count: rowsToUpdate.length, kasId, metode };
+    return { success: true, message: 'Bayar ' + (sup.nama || supplierId) + ': Rp ' + totalBayar.toLocaleString('id-ID') + ' via ' + metode + (creditUse.total>0 ? '. Saldo lebih yang dipakai: Rp '+creditUse.total.toLocaleString('id-ID') : ''), total: totalBayar, creditApplied:creditUse.total, count: rowsToUpdate.length, kasId, metode };
   } finally { lock.releaseLock(); }
 }
 function apiGetRiwayatBayarSupplier(token, filter) {
@@ -4312,7 +4323,10 @@ function apiGetKonsinyasiDetailSupplier(token, supplierId) {
     tanggalList:g.tanggalList.sort(),
     sourceBreakdown:g.sourceBreakdown.sort((a,b)=>a.tanggal.localeCompare(b.tanggal)||a.lapakNama.localeCompare(b.lapakNama))
   })).sort((a,b)=>a.nama.localeCompare(b.nama));
-  return { count:list.length, groupedCount:items.length, total:list.reduce((sum,k)=>sum+(Number(k.utang)||0),0), countPembelianSusulan:items.filter(x=>x.jenis==='Pembelian susulan').length, totalPembelianSusulan:items.filter(x=>x.jenis==='Pembelian susulan').reduce((sum,x)=>sum+x.utang,0), countTitipan:items.filter(x=>x.jenis==='Titipan terjual').length, totalTitipan:items.filter(x=>x.jenis==='Titipan terjual').reduce((sum,x)=>sum+x.utang,0), items };
+  const total=list.reduce((sum,k)=>sum+(Number(k.utang)||0),0);
+  const credit=(getSupplierCreditBalanceMap_()[String(supplierId)]||{balance:0}).balance;
+  const creditForThisBill=Math.min(total,credit);
+  return { count:list.length, groupedCount:items.length, total, creditAvailable:credit, creditToApply:creditForThisBill, totalAfterCredit:Math.max(0,total-creditForThisBill), countPembelianSusulan:items.filter(x=>x.jenis==='Pembelian susulan').length, totalPembelianSusulan:items.filter(x=>x.jenis==='Pembelian susulan').reduce((sum,x)=>sum+x.utang,0), countTitipan:items.filter(x=>x.jenis==='Titipan terjual').length, totalTitipan:items.filter(x=>x.jenis==='Titipan terjual').reduce((sum,x)=>sum+x.utang,0), items };
 }
 function apiGetTemplateBox(token) {
   requireRole(token, ['admin', 'karyawan']);
