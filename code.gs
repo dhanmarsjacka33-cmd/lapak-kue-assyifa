@@ -2405,7 +2405,7 @@ function apiGetTitipanKaryawan(token) {
     }));
 
   const correctionCandidates = konsinyasiRows
-    .filter(k=>String(k.status)==='Bayar'&&String(k.setoranId||''))
+    .filter(k=>['Bayar','Cancelled'].includes(String(k.status))&&String(k.setoranId||''))
     .sort((a,b)=>(new Date(b.tanggal).getTime()||0)-(new Date(a.tanggal).getTime()||0))
     .slice(0,100)
     .map(k=>{
@@ -4293,7 +4293,6 @@ function apiSubmitSupplierCorrection(token,payload) {
     if(!inv)return {success:false,message:'Invoice tidak ditemukan.'};
     if(String(inv.lapakId)!==String(sess.lapakId))return {success:false,message:'Invoice bukan milik lapak Anda.'};
     if(!inv.setoranId)return {success:false,message:'Invoice belum terhubung ke laporan yang dikirim.'};
-    if(String(inv.status)==='Cancelled')return {success:false,message:'Invoice yang dibatalkan tidak dapat dikoreksi.'};
     const detail=getSheetData('SetoranDetail').filter(x=>String(x.setoranId)===String(inv.setoranId)&&String(x.katalogId)===String(inv.katalogId));
     if(detail.length!==1)return {success:false,message:'Rincian laporan tidak ditemukan atau ganda. Hubungi admin.'};
     const drop=Number(detail[0].qtyDrop)||0;if(qty>drop)return {success:false,message:'Jumlah terjual maksimal '+drop+' pcs.'};
@@ -4355,11 +4354,11 @@ function apiApproveSupplierCorrection(token,requestId,reviewNote) {
     const sd=ssheet.getDataRange().getValues(),sh=sd[0].map(x=>String(x).trim()),si=n=>sh.indexOf(n),sindex=sd.findIndex((row,i)=>i>0&&String(row[si('id')])===setoranId);
     if(sindex<1)return {success:false,message:'Setoran sumber tidak ditemukan.'};
     const oldDue=Math.max(0,Number(krow[ki('utang')])||0),paid=String(krow[ki('status')])==='Bayar'?oldGross:Math.max(0,oldGross-oldDue);
-    const newGross=newQty*price,newDue=Math.max(0,newGross-paid),credit=Math.max(0,paid-newGross),newStatus=newDue>0?'Pending':'Bayar';
+    const newGross=newQty*price,newDue=Math.max(0,newGross-paid),credit=Math.max(0,paid-newGross),newStatus=newDue>0?'Pending':(newQty===0&&paid<=0?'Cancelled':'Bayar');
     const st=stocks.getDataRange().getValues(),sth=st[0].map(x=>String(x).trim()),sx=n=>sth.indexOf(n),stockIdxs=[];
     for(let i=1;i<st.length;i++)if(String(st[i][sx('refId')])===setoranId&&String(st[i][sx('katalogId')])===katalogId&&String(st[i][sx('lapakId')])===lapakId&&String(st[i][sx('tipe')])==='Terjual')stockIdxs.push(i);
-    if(stockIdxs.length!==1)return {success:false,message:'Ledger stok penjualan tidak unik. Koreksi dibatalkan.'};
-    const stockIdx=stockIdxs[0],newSubtotal=newQty*(Number(drow[di('hargaJual')])||0);
+    if(stockIdxs.length>1||(oldQty>0&&stockIdxs.length!==1))return {success:false,message:'Ledger stok penjualan tidak unik atau tidak ditemukan. Koreksi dibatalkan agar saldo stok tidak rusak.'};
+    const stockIdx=stockIdxs.length?stockIdxs[0]:-1,newSubtotal=newQty*(Number(drow[di('hargaJual')])||0);
     const journal=beginWriteJournal(['SupplierCorrectionRequests','SupplierCreditLedger','Konsinyasi','SetoranDetail','Setoran','KartuStok']);
     try{
       journalSetValue(journal,ks,krowNum,ki('qtyLaku')+1,newQty);journalSetValue(journal,ks,krowNum,ki('utang')+1,newDue);journalSetValue(journal,ks,krowNum,ki('status')+1,newStatus);
@@ -4371,8 +4370,10 @@ function apiApproveSupplierCorrection(token,requestId,reviewNote) {
       journalSetValue(journal,ssheet,sindex+1,si('totalSistem')+1,newSales);
       const received=(Number(sd[sindex][si('totalTunai')])||0)+(Number(sd[sindex][si('totalQris')])||0)+(si('totalTransfer')>=0?(Number(sd[sindex][si('totalTransfer')])||0):0);
       journalSetValue(journal,ssheet,sindex+1,si('selisih')+1,newSales-received);
-      journalSetValue(journal,stocks,stockIdx+1,sx('keluar')+1,newQty);
-      let running=0;for(let i=1;i<st.length;i++)if(String(st[i][sx('katalogId')])===katalogId){running+=(Number(st[i][sx('masuk')])||0)-(Number(st[i][sx('keluar')])||0);journalSetValue(journal,stocks,i+1,sx('saldo')+1,running);}
+      if(stockIdx>=0)journalSetValue(journal,stocks,stockIdx+1,sx('keluar')+1,newQty);
+      else appendObjectsByHeaders(stocks,[{id:'KS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),katalogId,lapakId,tipe:'Terjual',masuk:0,keluar:newQty,saldo:0,refId:setoranId,keterangan:'Koreksi admin '+requestId+' untuk penjualan yang sebelumnya tercatat nol'}]);
+      const updatedStockData=stocks.getDataRange().getValues();
+      let running=0;for(let i=1;i<updatedStockData.length;i++)if(String(updatedStockData[i][sx('katalogId')])===katalogId){running+=(Number(updatedStockData[i][sx('masuk')])||0)-(Number(updatedStockData[i][sx('keluar')])||0);journalSetValue(journal,stocks,i+1,sx('saldo')+1,running);}
       if(credit>0)appendObjectsByHeaders(creditSheet,[{id:'SCL'+Utilities.getUuid().slice(0,8).toUpperCase(),createdAt:new Date(),supplierId,eventType:'CREDIT',amount:credit,correctionId:requestId,sourceInvoiceId:String(krow[ki('id')]),referenceInvoiceId:'',createdBy:sess.username,notes:'Saldo lebih dari koreksi invoice '+requestId,requestKey:'CORR:'+requestId}]);
       journalSetValue(journal,requestSheet,rrow,ri('status')+1,'Approved');journalSetValue(journal,requestSheet,rrow,ri('reviewedBy')+1,sess.username);journalSetValue(journal,requestSheet,rrow,ri('reviewedAt')+1,new Date());journalSetValue(journal,requestSheet,rrow,ri('reviewNote')+1,String(reviewNote||'Disetujui admin'));journalSetValue(journal,requestSheet,rrow,ri('appliedAt')+1,new Date());journalSetValue(journal,requestSheet,rrow,ri('paidAmount')+1,paid);journalSetValue(journal,requestSheet,rrow,ri('creditCreated')+1,credit);
       _clearSheetCache();
