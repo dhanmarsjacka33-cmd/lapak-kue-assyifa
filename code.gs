@@ -3918,6 +3918,8 @@ function apiEditKonsinyasi(token, id, updates) {
     if (konsinyasiRow < 0) return { success: false, message: 'Data titipan tidak ditemukan.' };
     const oldRow = konsinyasiData[konsinyasiRow - 1];
     if (oldRow[kStatus] !== 'Pending') return { success: false, message: 'Titipan yang sudah dibayar terkunci.' };
+    const currentQty=Number(oldRow[kQty])||0, currentPrice=Number(oldRow[kHarga])||0, currentDue=Number(oldRow[kUtang])||0;
+    if (currentQty*currentPrice-currentDue>0) return {success:false,message:'Invoice sudah menerima pembayaran sebagian. Gunakan permintaan koreksi invoice agar selisih pembayaran dan saldo lebih supplier tetap tercatat.'};
 
     const setoranId = String(oldRow[kSetoran] || '');
     const katalogId = String(oldRow[kKatalog] || '');
