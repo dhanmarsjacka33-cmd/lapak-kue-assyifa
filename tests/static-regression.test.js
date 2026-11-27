@@ -217,7 +217,7 @@ has(backend, /function apiGetSupplierFinanceOverview\(token\)/, 'Admin must be a
 has(backend, /function apiApproveSupplierCorrection\(token,requestId,reviewNote\)/, 'Admin approval endpoint must exist');
 has(backend, /function apiRejectSupplierCorrection\(token,requestId,reviewNote\)/, 'Admin rejection endpoint must exist');
 has(backend, /if\(String\(req\[ri\('status'\)\]\)!=='Pending'\)/, 'A correction request may only be applied once');
-has(backend, /paid=String\(krow\[ki\('status'\)\]\)==='Bayar'\?oldGross:Math\.max\(0,oldGross-oldDue\)/, 'Approval must preserve amounts already paid or credited before recalculating the obligation');
+has(backend, /paid=String\(krow\[ki\('status'\)\]\)==='Bayar'\?Math\.max\(oldGross,paidFromAllocations\):Math\.max\(0,oldGross-oldDue,paidFromAllocations\)/, 'Approval must reconcile actual allocated payments even when legacy invoice balance was not updated');
 has(backend, /const newGross=newQty\*price,newDue=Math\.max\(0,newGross-paid\),credit=Math\.max\(0,paid-newGross\)/, 'Overpayment from an approved correction must become supplier credit');
 has(backend, /eventType:'CREDIT'/, 'Approved overpayment must create a credit ledger event');
 has(backend, /eventType:'APPLY'/, 'Using credit on an invoice must be an auditable ledger event');
@@ -261,3 +261,5 @@ has(backend, /stockIdxs.length>1\|\|\(oldQty>0&&stockIdxs.length!==1\)/, 'Correc
 has(backend, /else appendObjectsByHeaders\(stocks,\[\{id:'KS'/, 'Approved corrections from zero quantity must append the missing stock-out event');
 has(backend, /\['Bayar','Cancelled'\]\.includes\(String\(k\.status\)\)/, 'Employees must be able to request correction for a cancelled submitted invoice');
 has(frontend, /it\.status==='Cancelled'\?'Dibatalkan':'Lunas'/, 'Employee correction list must distinguish cancelled invoices from paid invoices');
+
+has(backend, /const paidFromAllocations=\(settlementMaps\.cashPaidById\[String\(krow\[ki\('id'\)\]\)\]\|\|0\)\+\(settlementMaps\.creditAppliedByInvoice\[String\(krow\[ki\('id'\)\]\)\]\|\|0\)/, 'Correction approval must include both supplier cash allocations and prior credit applications');
