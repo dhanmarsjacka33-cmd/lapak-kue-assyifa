@@ -2405,18 +2405,27 @@ function apiKaryawanBayarSupplier(token, payload) {
     if (!supplierId) return { success:false, message:'Supplier wajib dipilih.' };
     const lapakId = sess.lapakId, tgl = todayStr();
     if (isPeriodeLocked(tgl)) return { success:false, message:'Periode ini terkunci.' };
+    const requestedPayment = Number(payload.nominalBayar);
+    if (!Number.isSafeInteger(requestedPayment) || requestedPayment <= 0)
+      return {success:false,message:'Nominal pembayaran harus bilangan bulat lebih dari 0.'};
+    const metode = String(payload.metode || 'Tunai').trim();
+    if (!['Tunai','QRIS','Transfer'].includes(metode)) return {success:false,message:'Metode pembayaran harus Tunai, QRIS, atau Transfer.'};
+
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const ks = ss.getSheetByName('Konsinyasi'), bayarSheet = ss.getSheetByName('BayarTitipanKaryawan');
     if (!hasHeaders(ks, ['id','supplierId','lapakId','status','utang','bayarAt','bayarBy','catatan']) ||
         !hasHeaders(bayarSheet, ['id','tanggal','lapakId','supplierId','userName','totalBayar','konsinyasiIds','setoranId','createdAt','catatan','noNota','metode','status'])) {
       return {success:false,message:'Struktur sheet pembayaran titipan belum lengkap. Tidak ada perubahan yang dilakukan.'};
     }
+    ensureSupplierFinanceSheets_();
     const data = ks.getDataRange().getValues(), h = data[0].map(x => String(x).trim());
     const iId=h.indexOf('id'), iSupplier=h.indexOf('supplierId'), iLapak=h.indexOf('lapakId');
     const iStatus=h.indexOf('status'), iUtang=h.indexOf('utang'), iBayarAt=h.indexOf('bayarAt');
     const iBayarBy=h.indexOf('bayarBy'), iCatatan=h.indexOf('catatan');
     const iQtyLaku=h.indexOf('qtyLaku'), iHargaTitip=h.indexOf('hargaTitip');
     const iSetoran=h.indexOf('setoranId'), iKatalog=h.indexOf('katalogId');
+
+    // Rekonsiliasi pembayaran kas yang sudah pernah dialokasikan ke invoice ini.
     const paidAmountById = {};
     const activePayments = (getSheetData('BayarTitipanKaryawan') || []).filter(b =>
       String(b.lapakId)===String(lapakId) && String(b.supplierId)===supplierId &&
@@ -2445,19 +2454,19 @@ function apiKaryawanBayarSupplier(token, payload) {
         });
       }
     });
+
     const pendingRows=[];
     for (let i=1;i<data.length;i++) {
       if (String(data[i][iSupplier])!==supplierId || String(data[i][iLapak])!==String(lapakId) || String(data[i][iStatus])!=='Pending') continue;
       const currentUtang=Math.max(0,Number(data[i][iUtang])||0);
       const originalUtang=(Number(data[i][iQtyLaku])||0)*(Number(data[i][iHargaTitip])||0);
       const reconciled=originalUtang>0?Math.min(currentUtang,Math.max(0,originalUtang-(paidAmountById[String(data[i][iId])]||0))):currentUtang;
-      const outstanding=reconciled;
-      if (!outstanding) continue;
-      pendingRows.push({row:i+1,id:String(data[i][iId]),outstanding,qtyLaku:Number(data[i][iQtyLaku])||0,hargaTitip:Number(data[i][iHargaTitip])||0,setoranId:String(data[i][iSetoran]||''),katalogId:String(data[i][iKatalog]||'')});
+      if (reconciled<=0) continue;
+      pendingRows.push({row:i+1,id:String(data[i][iId]),outstanding:reconciled,qtyLaku:Number(data[i][iQtyLaku])||0,hargaTitip:Number(data[i][iHargaTitip])||0,setoranId:String(data[i][iSetoran]||''),katalogId:String(data[i][iKatalog]||'')});
     }
     if (!pendingRows.length) return {success:false,message:'Tidak ada utang pending untuk supplier ini.'};
 
-    // Penyesuaian jumlah tagihan harus dilakukan sebelum pembayaran pertama pada invoice tersebut.
+    // Penyesuaian qty hanya diizinkan pada draft sebelum laporan dikirim.
     const adjustments=Array.isArray(payload.adjustments)?payload.adjustments:[];
     const adjustmentMap={};
     adjustments.forEach(x=>{
@@ -2466,15 +2475,17 @@ function apiKaryawanBayarSupplier(token, payload) {
       if(adjustmentMap[id]!==undefined) throw new Error('Item penyesuaian duplikat: '+id);
       adjustmentMap[id]=qty;
     });
+    let detailSheet=null,detailData=null,detailHeaders=null,diSetoran=-1,diKatalog=-1,diDrop=-1,diSisa=-1,diLaku=-1;
     if(adjustments.length){
-      const detailSheet=ss.getSheetByName('SetoranDetail');
+      detailSheet=ss.getSheetByName('SetoranDetail');
       if(!detailSheet) return {success:false,message:'Data rincian setoran tidak ditemukan. Penyesuaian sisa kue dibatalkan.'};
-      const detailData=detailSheet.getDataRange().getValues(), detailHeaders=detailData[0].map(x=>String(x).trim());
-      const diSetoran=detailHeaders.indexOf('setoranId'), diKatalog=detailHeaders.indexOf('katalogId'), diDrop=detailHeaders.indexOf('qtyDrop'), diSisa=detailHeaders.indexOf('qtySisa'), diLaku=detailHeaders.indexOf('qtyLaku');
+      detailData=detailSheet.getDataRange().getValues();
+      detailHeaders=detailData[0].map(x=>String(x).trim());
+      diSetoran=detailHeaders.indexOf('setoranId');diKatalog=detailHeaders.indexOf('katalogId');
+      diDrop=detailHeaders.indexOf('qtyDrop');diSisa=detailHeaders.indexOf('qtySisa');diLaku=detailHeaders.indexOf('qtyLaku');
       if([diSetoran,diKatalog,diDrop,diSisa,diLaku].some(i=>i<0)) return {success:false,message:'Kolom rincian stok tidak lengkap. Penyesuaian sisa kue dibatalkan.'};
-      const paidRows=getSheetData('BayarTitipanKaryawan').filter(x=>String(x.lapakId)===String(lapakId)&&String(x.supplierId)===supplierId&&String(x.status||'Active')==='Active');
       const paidIds={};
-      paidRows.forEach(x=>{
+      activePayments.forEach(x=>{
         const raw=String(x.konsinyasiIds||'');
         if(raw.trim().startsWith('[')){try{JSON.parse(raw).forEach(v=>{if(v&&v.id)paidIds[String(v.id)]=true;});}catch(e){}}
         else raw.split(',').map(v=>v.trim()).filter(Boolean).forEach(id=>paidIds[id]=true);
@@ -2483,8 +2494,6 @@ function apiKaryawanBayarSupplier(token, payload) {
         const row=pendingRows.find(x=>x.id===id);
         if(!row) return {success:false,message:'Item tagihan tidak ditemukan pada supplier ini. Muat ulang data.'};
         if(row.setoranId) return {success:false,message:'Laporan lapak sudah dikirim. Karyawan tidak dapat mengubah jumlah atau sisa invoice ini secara langsung. Hubungi admin untuk koreksi dengan persetujuan admin.'};
-        // Jika ada invoice saudara untuk draft supplier/produk/periode yang sama yang sudah dibayar,
-        // jangan izinkan karyawan mengubah invoice pending duplikat. Koreksi wajib melalui admin.
         const targetRow = data[row.row - 1];
         const draftKey = iCatatan >= 0 ? String(targetRow[iCatatan] || '') : '';
         const paidSibling = draftKey && data.some((raw, idx) =>
@@ -2504,50 +2513,55 @@ function apiKaryawanBayarSupplier(token, payload) {
         row.qtySisa=qtySisa;
       }
     }
-    const totalUtang=pendingRows.reduce((sum,x)=>sum+x.outstanding,0);
-    if(totalUtang<=0) return {success:false,message:'Total tagihan setelah penyesuaian harus lebih dari 0.'};
-    const nominalBayar=Number(payload.nominalBayar);
-    if (!Number.isSafeInteger(nominalBayar)||nominalBayar<=0||nominalBayar>totalUtang)
-      return {success:false,message:'Nominal pembayaran harus angka bulat lebih dari 0 dan tidak melebihi sisa utang '+fmtRpLocal(totalUtang)+'.'};
-    const metode=String(payload.metode||'Tunai').trim();
-    if (!['Tunai','QRIS','Transfer'].includes(metode)) return {success:false,message:'Metode pembayaran harus Tunai, QRIS, atau Transfer.'};
 
-    // Alokasikan ke tagihan tertua. Kolom utang menyimpan sisa saldo yang belum dibayar.
-    let sisaBayar=nominalBayar; const allocations=[];
-    pendingRows.forEach(item=>{
-      if(sisaBayar<=0)return;
-      const amount=Math.min(item.outstanding,sisaBayar);
-      if(amount<=0)return;
-      allocations.push({id:item.id,amount,remaining:item.outstanding-amount,row:item.row});
-      sisaBayar-=amount;
-    });
-    if(sisaBayar!==0)return {success:false,message:'Nominal tidak dapat dialokasikan. Muat ulang data dan coba lagi.'};
     const noNota=String(payload.noNota||'').trim(), catatanText=String(payload.catatan||'').trim();
     const sup=getSheetData('Suppliers').find(s=>String(s.id)===supplierId)||{};
     const bayarId='BT'+Utilities.getUuid().slice(0,8).toUpperCase();
-    const bh=bayarSheet.getRange(1,1,1,bayarSheet.getLastColumn()).getValues()[0];
-    const newRow=bh.map(col=>{
-      switch(String(col).trim()){
-        case 'id':return bayarId; case 'tanggal':return new Date(tgl); case 'lapakId':return lapakId;
-        case 'supplierId':return supplierId; case 'userName':return sess.username; case 'totalBayar':return nominalBayar;
-        case 'konsinyasiIds':return JSON.stringify(allocations.map(x=>({id:x.id,amount:x.amount})));
-        case 'setoranId':return ''; case 'createdAt':return new Date(); case 'catatan':return catatanText;
-        case 'noNota':return noNota; case 'metode':return metode; case 'status':return 'Active'; default:return '';
-      }
-    });
-    const journal=beginWriteJournal(['Konsinyasi','BayarTitipanKaryawan','SetoranDetail']);
+    const journal=beginWriteJournal(['Konsinyasi','BayarTitipanKaryawan','SetoranDetail','SupplierCreditLedger']);
     try {
+      // Simpan penyesuaian draft terlebih dahulu dalam journal yang sama.
       Object.keys(adjustmentMap).forEach(id=>{
-        const item=pendingRows.find(x=>x.id===id);
-        if(!item) return;
+        const item=pendingRows.find(x=>x.id===id);if(!item)return;
         journalSetValue(journal,ks,item.row,h.indexOf('qtyLaku')+1,item.qtyLaku);
         journalSetValue(journal,ks,item.row,iUtang+1,item.outstanding);
         if(item.detailRow){
-          const detailSheet=ss.getSheetByName('SetoranDetail'), detailHeaders=detailSheet.getRange(1,1,1,detailSheet.getLastColumn()).getValues()[0].map(x=>String(x).trim());
-          journalSetValue(journal,detailSheet,item.detailRow,detailHeaders.indexOf('qtySisa')+1,item.qtySisa);
-          journalSetValue(journal,detailSheet,item.detailRow,detailHeaders.indexOf('qtyLaku')+1,item.qtyLaku);
+          journalSetValue(journal,detailSheet,item.detailRow,diSisa+1,item.qtySisa);
+          journalSetValue(journal,detailSheet,item.detailRow,diLaku+1,item.qtyLaku);
         }
-        if(item.qtyLaku<=0) journalSetValue(journal,ks,item.row,iStatus+1,'Cancelled');
+        if(item.qtyLaku<=0)journalSetValue(journal,ks,item.row,iStatus+1,'Cancelled');
+      });
+      // Kredit supplier diterapkan sesudah qty final, lintas lapak, ke invoice tertua dahulu.
+      const creditUse=applySupplierCreditsToPendingInvoices_(supplierId,sess.username,journal);
+      const creditedById={};(creditUse.items||[]).forEach(x=>{creditedById[String(x.invoiceId)]=Number(x.amount)||0;});
+      const payableRows=pendingRows.map(item=>({
+        ...item,
+        outstanding:Math.max(0,Number(item.outstanding)||0-(creditedById[String(item.id)]||0))
+      })).filter(item=>item.outstanding>0);
+      const totalUtang=payableRows.reduce((sum,x)=>sum+x.outstanding,0);
+      if(totalUtang<=0){
+        _clearSheetCache();
+        return {success:true,message:'Tagihan supplier sudah tertutup oleh saldo lebih atau penyesuaian stok. Tidak ada pembayaran tunai yang perlu dilakukan.',total:0,creditApplied:creditUse.total||0,remaining:0,count:0};
+      }
+      // Jika form dibuka sebelum kredit diterapkan, pembayaran dibatasi pada sisa tagihan setelah kredit.
+      const nominalBayar=Math.min(requestedPayment,totalUtang);
+      let sisaBayar=nominalBayar;const allocations=[];
+      payableRows.forEach(item=>{
+        if(sisaBayar<=0)return;
+        const amount=Math.min(item.outstanding,sisaBayar);
+        if(amount<=0)return;
+        allocations.push({id:item.id,amount,remaining:item.outstanding-amount,row:item.row});
+        sisaBayar-=amount;
+      });
+      if(sisaBayar!==0)throw new Error('Nominal tidak dapat dialokasikan. Muat ulang data dan coba lagi.');
+      const bh=bayarSheet.getRange(1,1,1,bayarSheet.getLastColumn()).getValues()[0];
+      const newRow=bh.map(col=>{
+        switch(String(col).trim()){
+          case 'id':return bayarId;case 'tanggal':return new Date(tgl);case 'lapakId':return lapakId;
+          case 'supplierId':return supplierId;case 'userName':return sess.username;case 'totalBayar':return nominalBayar;
+          case 'konsinyasiIds':return JSON.stringify(allocations.map(x=>({id:x.id,amount:x.amount})));
+          case 'setoranId':return '';case 'createdAt':return new Date();case 'catatan':return catatanText;
+          case 'noNota':return noNota;case 'metode':return metode;case 'status':return 'Active';default:return '';
+        }
       });
       allocations.forEach(item=>{
         journalSetValue(journal,ks,item.row,iUtang+1,item.remaining);
@@ -2555,29 +2569,25 @@ function apiKaryawanBayarSupplier(token, payload) {
           journalSetValue(journal,ks,item.row,iStatus+1,'Bayar');
           if(iBayarAt>=0)journalSetValue(journal,ks,item.row,iBayarAt+1,new Date());
           if(iBayarBy>=0)journalSetValue(journal,ks,item.row,iBayarBy+1,sess.username);
-        } else {
-          journalSetValue(journal,ks,item.row,iStatus+1,'Pending');
-        }
+        }else journalSetValue(journal,ks,item.row,iStatus+1,'Pending');
         if(iCatatan>=0){
           const prev=String(ks.getRange(item.row,iCatatan+1).getValue()||'');
-          const note='Pembayaran '+fmtRpLocal(item.amount)+' oleh '+sess.name+(noNota?' (Nota: '+noNota+')':'')+(catatanText?' — '+catatanText:'');
+          const note='Pembayaran tunai '+fmtRpLocal(item.amount)+' oleh '+sess.name+(noNota?' (Nota: '+noNota+')':'')+(catatanText?' — '+catatanText:'');
           journalSetValue(journal,ks,item.row,iCatatan+1,(prev?prev+' | ':'')+note);
         }
       });
       bayarSheet.appendRow(newRow);
-    } catch(writeError) {
-      try{rollbackWriteJournal(journal);}catch(rollbackError){
-        console.error('Gagal rollback pembayaran titipan:',rollbackError.message);
-        return {success:false,message:'Pembayaran gagal dan pemulihan otomatis tidak sepenuhnya berhasil. Hentikan transaksi lanjutan dan minta pemeriksaan admin. Detail: '+writeError.message+' | '+rollbackError.message};
-      }
       _clearSheetCache();
-      return {success:false,message:'Pembayaran gagal. Perubahan telah dibatalkan: '+writeError.message};
+      const sudahSubmit=getSheetData('Setoran').some(x=>formatDate(x.tanggal)===tgl&&String(x.lapakId)===String(lapakId));
+      const sisaUtang=totalUtang-nominalBayar;
+      const tail=sudahSubmit?' Akan masuk ke rekap setoran berikutnya.':' Setoran hari ini otomatis berkurang.';
+      const creditMsg=creditUse.total>0?' Saldo lebih supplier yang diterapkan: '+fmtRpLocal(creditUse.total)+'.':'';
+      return {success:true,message:'Pembayaran '+(sup.nama||supplierId)+' '+fmtRpLocal(nominalBayar)+' berhasil.'+creditMsg+' Sisa utang lapak: '+fmtRpLocal(sisaUtang)+'.'+tail,total:nominalBayar,creditApplied:creditUse.total||0,remaining:sisaUtang,count:allocations.length};
+    }catch(writeError){
+      try{rollbackWriteJournal(journal);}catch(rollbackError){return {success:false,message:'Pembayaran gagal dan rollback tidak lengkap. Hentikan transaksi dan minta pemeriksaan admin: '+writeError.message+' | '+rollbackError.message};}
+      _clearSheetCache();
+      return {success:false,message:'Pembayaran gagal. Seluruh penyesuaian, penggunaan kredit, dan pembayaran dibatalkan: '+writeError.message};
     }
-    _clearSheetCache();
-    const sudahSubmit=getSheetData('Setoran').some(s=>formatDate(s.tanggal)===tgl&&String(s.lapakId)===String(lapakId));
-    const sisaUtang=totalUtang-nominalBayar;
-    const tail=sudahSubmit?' Akan masuk ke rekap setoran berikutnya.':' Setoran hari ini otomatis berkurang.';
-    return {success:true,message:'Pembayaran '+(sup.nama||supplierId)+' '+fmtRpLocal(nominalBayar)+' berhasil. Sisa utang supplier: '+fmtRpLocal(sisaUtang)+'.'+tail,total:nominalBayar,remaining:sisaUtang,count:allocations.length};
   } finally { lock.releaseLock(); }
 }
 function apiBatalBayarTitipan(token, bayarId) {
