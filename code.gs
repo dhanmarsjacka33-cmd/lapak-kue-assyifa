@@ -2381,7 +2381,8 @@ function apiGetTitipanKaryawan(token) {
       correctionRequestStatus: (correctionByInvoice[id]||{}).status||''
     });
   });
-  const pending = Object.values(grouped).sort((a, b) => b.total - a.total);
+  const creditMap=getSupplierCreditBalanceMap_();
+  const pending = Object.values(grouped).map(item=>Object.assign(item,{saldoLebihAvailable:(creditMap[String(item.supplierId)]||{balance:0}).balance})).sort((a, b) => b.total - a.total);
 
   // Riwayat pembayaran aktif yang belum ditautkan ke setoran.
   const tgl = todayStr();
