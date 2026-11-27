@@ -2530,12 +2530,19 @@ function apiKaryawanBayarSupplier(token, payload) {
         }
         if(item.qtyLaku<=0)journalSetValue(journal,ks,item.row,iStatus+1,'Cancelled');
       });
-      // Kredit supplier diterapkan sesudah qty final, lintas lapak, ke invoice tertua dahulu.
+      // Perbaiki saldo invoice legacy yang belum merefleksikan alokasi pembayaran tunai.
+      pendingRows.forEach(item=>{
+        if(!Object.prototype.hasOwnProperty.call(adjustmentMap,item.id)){
+          const sheetDue=Math.max(0,Number(data[item.row-1][iUtang])||0);
+          if(sheetDue!==item.outstanding)journalSetValue(journal,ks,item.row,iUtang+1,item.outstanding);
+        }
+      });
+      // Kredit supplier diterapkan sesudah qty dan alokasi pembayaran final, lintas lapak, ke invoice tertua dahulu.
       const creditUse=applySupplierCreditsToPendingInvoices_(supplierId,sess.username,journal);
       const creditedById={};(creditUse.items||[]).forEach(x=>{creditedById[String(x.invoiceId)]=Number(x.amount)||0;});
       const payableRows=pendingRows.map(item=>({
         ...item,
-        outstanding:Math.max(0,Number(item.outstanding)||0-(creditedById[String(item.id)]||0))
+        outstanding:Math.max(0,(Number(item.outstanding)||0)-(creditedById[String(item.id)]||0))
       })).filter(item=>item.outstanding>0);
       const totalUtang=payableRows.reduce((sum,x)=>sum+x.outstanding,0);
       if(totalUtang<=0){
