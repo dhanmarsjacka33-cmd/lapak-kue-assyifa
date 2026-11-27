@@ -2141,9 +2141,10 @@ function apiSubmitRekap(token, payload) {
       const draft = draftRows.find(x => String(x.catatan || '').indexOf(marker) === 0);
       if (!draft) continue; // kompatibilitas untuk item yang belum pernah disiapkan sebagai draft
       const expectedUtang = d.qtyLaku * (Number(k.hargaBeli) || 0);
-      if (String(draft.status) !== (d.qtyLaku > 0 ? 'Bayar' : 'Cancelled') ||
+      const statusValid = d.qtyLaku > 0 ? String(draft.status)==='Bayar' : ['Cancelled','Bayar'].includes(String(draft.status));
+      if (!statusValid ||
           (Number(draft.qtyLaku) || 0) !== d.qtyLaku ||
-          (Number(draft.utang) || 0) !== expectedUtang) {
+          (Number(draft.utang) || 0) !== 0) {
         return {success:false,message:'Jumlah sisa atau tagihan '+(k.nama || d.katalogId)+' berubah setelah tagihan disiapkan. Hitung ulang sisa dan tagihan sebelum mengirim laporan.'};
       }
     }
