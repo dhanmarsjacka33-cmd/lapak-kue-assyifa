@@ -263,3 +263,16 @@ has(backend, /\['Bayar','Cancelled'\]\.includes\(String\(k\.status\)\)/, 'Employ
 has(frontend, /it\.status==='Cancelled'\?'Dibatalkan':'Lunas'/, 'Employee correction list must distinguish cancelled invoices from paid invoices');
 
 has(backend, /const paidFromAllocations=\(settlementMaps\.cashPaidById\[String\(krow\[ki\('id'\)\]\)\]\|\|0\)\+\(settlementMaps\.creditAppliedByInvoice\[String\(krow\[ki\('id'\)\]\)\]\|\|0\)/, 'Correction approval must include both supplier cash allocations and prior credit applications');
+
+has(backend, /const pendingCorrections = getSheetData\('SupplierCorrectionRequests'\)/, 'Submit and admin approval must consider outstanding correction requests');
+has(backend, /const unresolvedCorrections=getSheetData\('SupplierCorrectionRequests'\)/, 'Submit must recheck outstanding corrections while holding the script lock');
+has(backend, /if \(d\.qtyLaku <= 0\) return;\s*const hargaTitip/, 'New zero-sale supplier rows must not create a new payable invoice');
+has(backend, /if \(d\.qtyLaku <= 0\) return;\s*const hargaTitip/, 'Zero-quantity rows without a prior draft must not generate a new debt');
+has(backend, /paidFromAllocations\)\):Math\.max\(0,oldGross-oldDue,paidFromAllocations\)/, 'Correction approval must preserve allocations and settled status when recalculating payment');
+has(backend, /rollbackWriteJournal\(journal\)/, 'Rejection and approval writes must be reversible on failure');
+has(backend, /statusSettledById\[id\]=Math\.max\(0,gross-recorded\)/, 'Admin-paid and legacy paid invoices must be recognized as settled');
+has(backend, /if \(d\.qtyLaku <= 0\) return;\s*const hargaTitip/, 'Zero qty should not create a new payable supplier invoice');
+has(indexHtml, /app\.js\?v=7\.7/, 'Main UI must request correction and credit frontend version 7.7');
+has(testingHtml, /app\.js\?v=7\.7/, 'Testing UI must request frontend version 7.7 too');
+has(serviceWorker, /kueassyifa-v16/, 'Service worker must invalidate cache for correction and credit release');
+has(serviceWorker, /app\.js\?v=7\.7/, 'Service worker must preload the new frontend asset');
