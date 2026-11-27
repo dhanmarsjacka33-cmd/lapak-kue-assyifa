@@ -204,3 +204,35 @@ has(serviceWorker, /app\.js\?v=7\.6/, 'Service worker static asset list must pre
 // Once an invoice is linked to a submitted setoran, employee adjustment must be locked in UI and API.
 has(backend, /canAdjust: !paidIds\[id\] && !String\(k\.setoranId \|\| ''\)/, 'Submitted supplier invoices must render as locked for employees');
 has(backend, /if\(row\.setoranId\) return \{success:false,message:'Laporan lapak sudah dikirim/, 'Backend must refuse post-submit employee quantity edits even if the client bypasses UI');
+
+
+// Supplier invoice correction approval and supplier-credit ledger.
+has(backend, /SupplierCorrectionRequests/, 'Database must provide a non-destructive supplier correction request sheet');
+has(backend, /SupplierCreditLedger/, 'Database must provide an append-only supplier credit ledger');
+has(backend, /function ensureSupplierFinanceSheets_\(\)/, 'Supplier finance sheets must be created or extended safely when the features are used');
+has(backend, /function apiSubmitSupplierCorrection\(token,payload\)/, 'Employee must be able to submit an invoice correction request');
+has(backend, /String\(invoice\.lapakId\)!==String\(sess\.lapakId\)/, 'Employee correction requests must be restricted to their active lapak');
+has(backend, /records\.some\(x=>String\(x\.konsinyasiId\)===invoiceId&&String\(x\.status\)==='Pending'\)/, 'Duplicate pending correction requests for the same invoice must be rejected');
+has(backend, /function apiGetSupplierFinanceOverview\(token\)/, 'Admin must be able to view correction requests and supplier credits');
+has(backend, /function apiApproveSupplierCorrection\(token,requestId,reviewNote\)/, 'Admin approval endpoint must exist');
+has(backend, /function apiRejectSupplierCorrection\(token,requestId,reviewNote\)/, 'Admin rejection endpoint must exist');
+has(backend, /if\(String\(req\[ri\('status'\)\]\)!=='Pending'\)/, 'A correction request may only be applied once');
+has(backend, /const paid=String\(krow\[ki\('status'\)\]\)==='Bayar'\?oldGross:Math\.max\(0,oldGross-oldDue\)/, 'Approval must preserve amounts already paid or credited before recalculating the obligation');
+has(backend, /const newGross=newQty\*price,newDue=Math\.max\(0,newGross-paid\),credit=Math\.max\(0,paid-newGross\)/, 'Overpayment from an approved correction must become supplier credit');
+has(backend, /eventType:'CREDIT'/, 'Approved overpayment must create a credit ledger event');
+has(backend, /eventType:'APPLY'/, 'Using credit on an invoice must be an auditable ledger event');
+has(backend, /function applySupplierCreditsToPendingInvoices_/, 'Supplier credits must apply automatically to pending invoices');
+has(backend, /pending\.sort\(\(a,b\)=>a\.date-b\.date\|\|a\.row-b\.row\)/, 'Supplier credit must be applied to oldest pending invoice first');
+has(backend, /applySupplierCreditsToPendingInvoices_\('',sess\.username,journal\)/, 'Supplier credits must apply when a new end-of-day report is submitted');
+has(backend, /applySupplierCreditsToPendingInvoices_\(supplierId,sess\.username,journal\)/, 'Supplier credits must apply when admin adds a follow-up purchase');
+has(backend, /const creditUse = applySupplierCreditsToPendingInvoices_\(supplierId,sess\.username\)/, 'Supplier credits must be applied before admin cash payment is calculated');
+has(backend, /creditAvailable:credit, creditToApply:creditForThisBill, totalAfterCredit:Math\.max\(0,total-creditForThisBill\)/, 'Admin invoice detail must show available credit and net amount after credit');
+has(backend, /if \(currentQty\*currentPrice-currentDue>0\)/, 'Admin must not directly edit a partially paid invoice outside correction approval');
+has(backend, /journalSetValue\(journal,ds,didx\+1,di\('qtyLaku'\)\+1,newQty\)/, 'Approved correction must update the exact submitted sale detail');
+has(backend, /journalSetValue\(journal,stocks,stockIdx\+1,sx\('keluar'\)\+1,newQty\)/, 'Approved correction must update the stock ledger');
+has(frontend, /request-supplier-correction/, 'Employee invoice list must expose a correction request action');
+has(frontend, /function formAjukanKoreksiSupplier\(invoiceId\)/, 'Employee must have a correction request form');
+has(frontend, /approve-supplier-correction/, 'Admin must have an approve action');
+has(frontend, /reject-supplier-correction/, 'Admin must have a reject action');
+has(frontend, /getSupplierFinanceOverview/, 'Admin supplier invoice view must load current correction queue and credit balance');
+has(frontend, /Saldo Lebih Supplier/, 'Admin supplier view must show overpayment credit balances');
