@@ -3109,28 +3109,78 @@ function apiGetKasbon(token, filter) {
 }
 function apiAddKasbon(token, payload) {
   const sess = getSession(token);
+  payload = payload || {};
+  if (!['admin','karyawan'].includes(sess.role)) return {success:false,message:'Akses kasbon tidak diizinkan.'};
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success:false, message:'Sistem sibuk. Coba lagi.' };
   try {
-    const nominal = toPosNum(payload && payload.nominal);
+    const nominal = toPosNum(payload.nominal);
     if (nominal <= 0) return { success:false, message:'Nominal harus lebih dari 0.' };
     let userId, tipe, status;
-    if (sess.role === 'karyawan') { userId = sess.id; tipe = 'Kasbon'; status = 'Outstanding'; }
-    else {
+    if (sess.role === 'karyawan') {
+      userId = sess.id; tipe = 'Kasbon'; status = 'Outstanding';
+    } else {
       userId = String(payload.userId || '');
       tipe = payload.tipe === 'Bayar' ? 'Bayar' : 'Kasbon';
       status = tipe === 'Bayar' ? 'Lunas' : 'Outstanding';
       if (!userId) return { success:false, message:'Pilih karyawan terlebih dahulu.' };
-      if (tipe === 'Bayar') {
-        const balance = getKasbonOutstandingMap_(getSheetData('Kasbon'))[userId];
-        const outstanding = balance ? balance.outstanding : 0;
-        if (outstanding <= 0) return {success:false,message:'Karyawan ini tidak memiliki kasbon yang belum dibayar.'};
-        if (nominal > outstanding) return {success:false,message:'Pembayaran melebihi sisa kasbon '+fmtRpLocal(outstanding)+'.'};
-      }
     }
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Kasbon');
-    const id = 'KB' + Utilities.getUuid().slice(0,8).toUpperCase();
-    sheet.appendRow([id, new Date(), userId, nominal, String(payload.keterangan||''), tipe, status, sess.username, new Date(), '']);
+    const ss=SpreadsheetApp.getActiveSpreadsheet();
+    const sheet=ss.getSheetByName('Kasbon');
+    if(!hasHeaders(sheet,['id','tanggal','userId','nominal','keterangan','tipe','status'])) return {success:false,message:'Struktur Kasbon belum lengkap. Tidak ada perubahan.'};
+
+    // A request key makes a repeated submit safe if the browser retries after a network timeout.
+    const requestKey=String(payload.requestKey||'').replace(/[^A-Za-z0-9_-]/g,'').slice(0,32);
+    const id=requestKey?'KB'+requestKey:'KB'+Utilities.getUuid().slice(0,8).toUpperCase();
+    const existing=getSheetData('Kasbon').find(k=>String(k.id)===id);
+    if(existing) {
+      if(String(existing.userId)!==userId||Number(existing.nominal)!==nominal||String(existing.tipe||'Kasbon')!==tipe)
+        return {success:false,message:'Kunci transaksi sudah digunakan untuk data kasbon yang berbeda.'};
+      return {success:true,message:tipe==='Bayar'?'Pembayaran kasbon sudah tercatat.':'Kasbon sudah tercatat.',id,duplicate:true};
+    }
+
+    const now=new Date();
+    const keterangan=String(payload.keterangan||'').trim();
+    const kasbonRow={id,tanggal:now,userId,nominal,keterangan,tipe,status,approvedBy:sess.username,approvedAt:now,gajiId:''};
+    if(tipe==='Bayar') {
+      if(sess.role!=='admin') return {success:false,message:'Hanya admin yang dapat menerima pembayaran kasbon.'};
+      const balance=getKasbonOutstandingMap_(getSheetData('Kasbon'))[userId];
+      const outstanding=balance?balance.outstanding:0;
+      if(outstanding<=0) return {success:false,message:'Karyawan ini tidak memiliki kasbon yang belum dibayar.'};
+      if(nominal>outstanding) return {success:false,message:'Pembayaran melebihi sisa kasbon '+fmtRpLocal(outstanding)+'.'};
+      const metode=String(payload.metode||'Tunai').trim();
+      if(!['Tunai','QRIS','Transfer'].includes(metode)) return {success:false,message:'Metode pembayaran harus Tunai, QRIS, atau Transfer.'};
+      const kasSheet=ss.getSheetByName('Kas');
+      if(!hasHeaders(kasSheet,['id','tanggal','keterangan','tipe','nominal','saldo'])) return {success:false,message:'Struktur Kas belum lengkap. Pembayaran kasbon tidak disimpan.'};
+      const kasData=kasSheet.getDataRange().getValues();
+      const saldoIndex=kasData[0].map(x=>String(x).trim()).indexOf('saldo');
+      const saldoLama=kasData.length>1?Number(kasData[kasData.length-1][saldoIndex])||0:0;
+      const kasId='KS'+Utilities.getUuid().slice(0,8).toUpperCase();
+      const userName=(getSheetData('Users').find(u=>String(u.id)===userId)||{}).name||userId;
+      const keteranganKas='Penerimaan kasbon '+userName+(keterangan?' · '+keterangan:'')+' [Kasbon '+id+']';
+      const kasRow={id:kasId,tanggal:now,keterangan:keteranganKas,tipe:'Masuk',kategori:'Penerimaan Kasbon Karyawan',metode,nominal,saldo:saldoLama+nominal};
+      const journal=beginWriteJournal(['Kasbon','Kas']);
+      try {
+        appendObjectsByHeaders(sheet,[kasbonRow]);
+        appendObjectsByHeaders(kasSheet,[kasRow]);
+      } catch(writeError) {
+        try { rollbackWriteJournal(journal); }
+        catch(rollbackError) { console.error('Gagal rollback penerimaan kasbon:',rollbackError.message); return {success:false,message:'Penerimaan gagal dan pemulihan otomatis perlu diperiksa. '+writeError.message+' | '+rollbackError.message}; }
+        _clearSheetCache();
+        return {success:false,message:'Penerimaan kasbon gagal. Tidak ada perubahan yang disimpan: '+writeError.message};
+      }
+      _clearSheetCache();
+      return {success:true,message:'Pembayaran kasbon '+fmtRpLocal(nominal)+' diterima via '+metode+' dan dicatat ke Kas.',id,kasId,metode,nominal};
+    }
+
+    const journal=beginWriteJournal(['Kasbon']);
+    try { appendObjectsByHeaders(sheet,[kasbonRow]); }
+    catch(writeError) {
+      try { rollbackWriteJournal(journal); }
+      catch(rollbackError) { console.error('Gagal rollback kasbon:',rollbackError.message); return {success:false,message:'Penyimpanan kasbon gagal dan pemulihan otomatis perlu diperiksa. '+writeError.message+' | '+rollbackError.message}; }
+      _clearSheetCache();
+      return {success:false,message:'Kasbon gagal disimpan: '+writeError.message};
+    }
     _clearSheetCache();
     return { success:true, message:'Kasbon dicatat.', id };
   } finally { lock.releaseLock(); }
@@ -4034,22 +4084,31 @@ function apiGetKonsinyasiDetailSupplier(token, supplierId) {
   list.forEach(k => {
     const susulan=String(k.catatan||'').indexOf('PEMBELIAN_SUSULAN|')===0;
     const tanggal=formatDate(k.tanggal), harga=Number(k.hargaTitip)||0, katalogId=String(k.katalogId||'');
-    const key=[tanggal,katalogId,harga,susulan?'susulan':'titipan'].join('|');
-    if (!grouped[key]) grouped[key]={id:'GRP_'+key,tanggal,nama:katMap[katalogId]||katalogId,katalogId,qtyLaku:0,hargaTitip:harga,utang:0,jenis:susulan?'Pembelian susulan':'Titipan terjual',lapakBreakdown:[],invoiceIds:[],setoranIds:[],catatan:''};
-    const g=grouped[key]; g.qtyLaku+=Number(k.qtyLaku)||0; g.utang+=Number(k.utang)||0; g.invoiceIds.push(String(k.id));
+    // Supplier is fixed by this API call. Same catalogue item, unit price and
+    // transaction type become one line even when drops happened on other dates/lapaks.
+    const key=[katalogId,harga,susulan?'susulan':'titipan'].join('|');
+    if (!grouped[key]) grouped[key]={id:'GRP_'+key,nama:katMap[katalogId]||katalogId,katalogId,qtyLaku:0,hargaTitip:harga,utang:0,jenis:susulan?'Pembelian susulan':'Titipan terjual',tanggalList:[],lapakBreakdown:[],sourceBreakdown:[],invoiceIds:[],setoranIds:[],catatan:''};
+    const g=grouped[key];
+    g.qtyLaku+=Number(k.qtyLaku)||0;
+    g.utang+=Number(k.utang)||0;
+    g.invoiceIds.push(String(k.id));
+    if(g.tanggalList.indexOf(tanggal)<0)g.tanggalList.push(tanggal);
     const lapakNama=lapakMap[k.lapakId]||k.lapakId;
-    const existing=g.lapakBreakdown.find(x=>x.lapakNama===lapakNama);
-    if(existing){existing.qty+=(Number(k.qtyLaku)||0);existing.utang+=(Number(k.utang)||0);}
+    const lapakExisting=g.lapakBreakdown.find(x=>x.lapakNama===lapakNama);
+    if(lapakExisting){lapakExisting.qty+=(Number(k.qtyLaku)||0);lapakExisting.utang+=(Number(k.utang)||0);}
     else g.lapakBreakdown.push({lapakNama,qty:Number(k.qtyLaku)||0,utang:Number(k.utang)||0});
+    const sourceExisting=g.sourceBreakdown.find(x=>x.tanggal===tanggal&&x.lapakNama===lapakNama);
+    if(sourceExisting){sourceExisting.qty+=(Number(k.qtyLaku)||0);sourceExisting.utang+=(Number(k.utang)||0);}
+    else g.sourceBreakdown.push({tanggal,lapakNama,qty:Number(k.qtyLaku)||0,utang:Number(k.utang)||0});
     if(susulan)g.setoranIds.push(String(k.catatan||'').split('|')[1]||'');
   });
-  const items=Object.values(grouped).sort((a,b)=>a.tanggal.localeCompare(b.tanggal)||a.nama.localeCompare(b.nama));
+  const items=Object.values(grouped).map(g=>({
+    ...g,
+    tanggalList:g.tanggalList.sort(),
+    sourceBreakdown:g.sourceBreakdown.sort((a,b)=>a.tanggal.localeCompare(b.tanggal)||a.lapakNama.localeCompare(b.lapakNama))
+  })).sort((a,b)=>a.nama.localeCompare(b.nama));
   return { count:list.length, groupedCount:items.length, total:list.reduce((sum,k)=>sum+(Number(k.utang)||0),0), countPembelianSusulan:items.filter(x=>x.jenis==='Pembelian susulan').length, totalPembelianSusulan:items.filter(x=>x.jenis==='Pembelian susulan').reduce((sum,x)=>sum+x.utang,0), countTitipan:items.filter(x=>x.jenis==='Titipan terjual').length, totalTitipan:items.filter(x=>x.jenis==='Titipan terjual').reduce((sum,x)=>sum+x.utang,0), items };
 }
-
-// ============================================================
-//  FASE 3 — TEMPLATE BOX
-// ============================================================
 function apiGetTemplateBox(token) {
   requireRole(token, ['admin', 'karyawan']);
   return getTemplateBoxFullData();
