@@ -4353,7 +4353,10 @@ function apiApproveSupplierCorrection(token,requestId,reviewNote) {
     if(!Number.isSafeInteger(newQty)||newQty<0||newQty>drop)return {success:false,message:'Jumlah koreksi tidak valid terhadap jumlah drop.'};
     const sd=ssheet.getDataRange().getValues(),sh=sd[0].map(x=>String(x).trim()),si=n=>sh.indexOf(n),sindex=sd.findIndex((row,i)=>i>0&&String(row[si('id')])===setoranId);
     if(sindex<1)return {success:false,message:'Setoran sumber tidak ditemukan.'};
-    const oldDue=Math.max(0,Number(krow[ki('utang')])||0),paid=String(krow[ki('status')])==='Bayar'?oldGross:Math.max(0,oldGross-oldDue);
+    const oldDue=Math.max(0,Number(krow[ki('utang')])||0);
+    const settlementMaps=getSupplierInvoiceSettlementMaps_();
+    const paidFromAllocations=(settlementMaps.cashPaidById[String(krow[ki('id')])]||0)+(settlementMaps.creditAppliedByInvoice[String(krow[ki('id')])]||0);
+    const paid=String(krow[ki('status')])==='Bayar'?Math.max(oldGross,paidFromAllocations):Math.max(0,oldGross-oldDue,paidFromAllocations);
     const newGross=newQty*price,newDue=Math.max(0,newGross-paid),credit=Math.max(0,paid-newGross),newStatus=newDue>0?'Pending':(newQty===0&&paid<=0?'Cancelled':'Bayar');
     const st=stocks.getDataRange().getValues(),sth=st[0].map(x=>String(x).trim()),sx=n=>sth.indexOf(n),stockIdxs=[];
     for(let i=1;i<st.length;i++)if(String(st[i][sx('refId')])===setoranId&&String(st[i][sx('katalogId')])===katalogId&&String(st[i][sx('lapakId')])===lapakId&&String(st[i][sx('tipe')])==='Terjual')stockIdxs.push(i);
