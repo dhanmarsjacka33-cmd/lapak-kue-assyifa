@@ -484,9 +484,9 @@ function renderTitipanSection() {
     </div>`;
 
   if (totalPending > 0) {
-    html += `<p class="text-xs text-gray mb-3">Klik <strong>Bayar</strong> untuk melunasi utang ke supplier. Bisa bayar sebagian atau penuh, kapan saja.</p>`;
+    html += `<p class="text-xs text-gray mb-3">Klik <strong>Bayar</strong> untuk melunasi utang ke supplier. Bisa bayar sebagian atau penuh, kapan saja.</p><div class="field mb-2"><input type="search" class="input" data-titipan-supplier-search placeholder="Cari nama supplier..." autocomplete="off" aria-label="Cari tagihan supplier"></div>`;
     html += pending.map(s => `
-      <div style="padding:10px 0;border-bottom:1px solid rgba(245,158,11,.2)">
+      <div data-titipan-supplier-row data-search="${esc(String(s.supplierNama||'').toLocaleLowerCase('id-ID'))}" style="padding:10px 0;border-bottom:1px solid rgba(245,158,11,.2)">
         <div class="row-between mb-2">
           <div style="min-width:0;flex:1">
             <div class="text-sm font-semibold">${esc(s.supplierNama)}</div>
@@ -524,7 +524,7 @@ function renderTitipanSection() {
         </div>
       </div>
     `).join('');
-    html += `<p class="text-xs text-gray mt-2">${ico('info','ico-sm')} Pembayaran yang belum masuk setoran akan dipotong pada rekap berikutnya. Pembayaran yang sudah tertaut tidak dihitung ulang.</p>
+    html += `<p class="text-xs text-gray mt-2">${ico('info','ico-sm')} Riwayat pembayaran ditampilkan sebagai informasi. Pembayaran supplier tidak dipotong ulang dari setoran karyawan.</p>
     </div>`;
   }
 
@@ -1654,6 +1654,11 @@ function handleInput(e) {
     let visible = 0;
     $('[data-bill-supplier-row]').forEach(row => { const match = !q || String(row.dataset.search || '').includes(q); row.hidden = !match; if (match) visible++; });
     const empty = $('[data-bill-supplier-empty]'); if (empty) empty.hidden = visible !== 0;
+    return;
+  }
+  if (t.dataset.titipanSupplierSearch !== undefined) {
+    const q = String(t.value || '').trim().toLocaleLowerCase('id-ID');
+    $('[data-titipan-supplier-row]').forEach(row => { row.hidden = !!q && !String(row.dataset.search || '').includes(q); });
     return;
   }
   if (t.dataset.titipanQty !== undefined) {
