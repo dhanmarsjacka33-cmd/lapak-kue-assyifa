@@ -2086,8 +2086,7 @@ function apiSubmitRekap(token, payload) {
     (!b.setoranId || b.setoranId === '') &&
     String(b.status || 'Active') === 'Active'
   );
-  // Pembayaran titipan dibayar dari uang hasil penjualan tunai yang dipegang karyawan.
-  // Catat terpisah dari biaya operasional agar mengurangi kas fisik tanpa mengurangi laba.
+  // Pembayaran supplier adalah metadata metode pembayaran, bukan potongan kedua dari penerimaan karyawan.
 
   for (const p of pengeluaranList) {
     const nominal = Number(p && p.nominal);
@@ -2739,7 +2738,7 @@ function apiApproveSetoran(token, idSetoran) {
     const iId = h.indexOf('id'), iStatus = h.indexOf('status');
     const iTunai = h.indexOf('totalTunai'), iQris = h.indexOf('totalQris'), iTransfer = h.indexOf('totalTransfer'), iPengeluaran = h.indexOf('pengeluaran');
     const iLapak = h.indexOf('lapakId'), iAt = h.indexOf('approvedAt'), iBy = h.indexOf('approvedBy');
-    if (!hasHeaders(kasSheet, ['id','tanggal','keterangan','tipe','kategori','nominal','saldo'])) {
+    if (!hasHeaders(kasSheet, ['id','tanggal','keterangan','tipe','nominal','saldo'])) {
       return { success:false, message:'Struktur Kas belum lengkap. Setoran tidak disetujui dan tidak ada perubahan.' };
     }
     if (iTunai < 0 || iPengeluaran < 0) {
