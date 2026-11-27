@@ -3205,8 +3205,8 @@ function apiRekapGaji(token, filter) {
     let gajiPokok = nominalSetting;
     if (tipe === 'Harian') gajiPokok = nominalSetting * hadir;
     else if (tipe === 'Mingguan') { const hariCount = Math.ceil((toMs - fromMs) / 86400000); const minggu = Math.max(1, Math.round(hariCount / 7)); gajiPokok = nominalSetting * minggu; }
-    const kasbonInfo = kasbonMap[u.id] || { total: 0, items: [] };
-    return { userId:u.id, userName:u.name, lapakId:u.lapakId || '', hadir, tipe, nominalSetting, gajiPokok, tunjangan:0, bonus:0, potonganKasbon: kasbonInfo.total, kasbonItems: kasbonInfo.items, totalBersih: Math.max(0, gajiPokok - kasbonInfo.total) };
+    const kasbonInfo = kasbonMap[String(u.id)] || { outstanding: 0, debts: [] };
+    return { userId:u.id, userName:u.name, lapakId:u.lapakId || '', hadir, tipe, nominalSetting, gajiPokok, tunjangan:0, bonus:0, potonganKasbon: kasbonInfo.outstanding, kasbonItems: kasbonInfo.debts, totalBersih: Math.max(0, gajiPokok - kasbonInfo.outstanding) };
   });
   const totals = list.reduce((s, x) => { s.gajiPokok += x.gajiPokok; s.potonganKasbon += x.potonganKasbon; s.totalBersih += x.totalBersih; return s; }, { gajiPokok: 0, potonganKasbon: 0, totalBersih: 0 });
   return { periode: { dari: formatDate(dari), sampai: formatDate(new Date(toMs - 1)), tipe }, list, totals };
@@ -3236,12 +3236,11 @@ function apiBayarGaji(token, payload) {
     const kh = kasbonData[0];
     const kUser = kh.indexOf('userId'), kStatus = kh.indexOf('status'), kTipe = kh.indexOf('tipe');
     const kNominal = kh.indexOf('nominal'), kGajiId = kh.indexOf('gajiId');
-    let potonganKasbon = 0;
+    const outstandingMap = getKasbonOutstandingMap_(getSheetData('Kasbon'));
+    const potonganKasbon = (outstandingMap[String(userId)] || {outstanding:0}).outstanding;
     const rowsToLunas = [];
     for (let i = 1; i < kasbonData.length; i++) {
-      if (String(kasbonData[i][kUser]) === String(userId) && kasbonData[i][kStatus] === 'Outstanding' && kasbonData[i][kTipe] === 'Kasbon') {
-        potonganKasbon += Number(kasbonData[i][kNominal]) || 0; rowsToLunas.push(i + 1);
-      }
+      if (String(kasbonData[i][kUser]) === String(userId) && kasbonData[i][kStatus] === 'Outstanding' && kasbonData[i][kTipe] === 'Kasbon') rowsToLunas.push(i + 1);
     }
     const gajiBersih = Math.max(0, gajiPokok + tunjangan - potonganKasbon);
     const kasSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Kas');
