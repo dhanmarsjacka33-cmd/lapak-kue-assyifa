@@ -4173,6 +4173,41 @@ function getSupplierCreditBalanceMap_() {
   Object.keys(map).forEach(sid=>map[sid].balance=Math.max(0,map[sid].credited-map[sid].used));
   return map;
 }
+function getSupplierInvoiceSettlementMaps_() {
+  const invoices=getSheetData('Konsinyasi')||[];
+  const invoiceById={};
+  invoices.forEach(x=>invoiceById[String(x.id)]=x);
+  const cashPaidById={};
+  (getSheetData('BayarTitipanKaryawan')||[]).filter(x=>String(x.status||'Active')==='Active').forEach(payment=>{
+    const raw=String(payment.konsinyasiIds||'');
+    if(raw.trim().startsWith('[')){
+      try{
+        JSON.parse(raw).forEach(item=>{
+          if(!item||!item.id)return;
+          const amount=Number(item.amount),id=String(item.id);
+          if(Number.isFinite(amount)&&amount>0)cashPaidById[id]=(cashPaidById[id]||0)+amount;
+        });
+      }catch(e){}
+    }else{
+      let remaining=Math.max(0,Number(payment.totalBayar)||0);
+      raw.split(',').map(x=>x.trim()).filter(Boolean).forEach(id=>{
+        if(remaining<=0)return;
+        const invoice=invoiceById[id];if(!invoice)return;
+        const gross=(Number(invoice.qtyLaku)||0)*(Number(invoice.hargaTitip)||0);
+        const capacity=gross>0?Math.max(0,gross-(cashPaidById[id]||0)):Math.max(0,Number(invoice.utang)||0);
+        const allocated=Math.min(capacity,remaining);
+        if(allocated>0){cashPaidById[id]=(cashPaidById[id]||0)+allocated;remaining-=allocated;}
+      });
+    }
+  });
+  const creditAppliedByInvoice={};
+  (getSheetData('SupplierCreditLedger')||[]).filter(x=>String(x.eventType)==='APPLY').forEach(x=>{
+    const id=String(x.referenceInvoiceId||''),amount=Math.max(0,Number(x.amount)||0);
+    if(id&&amount)creditAppliedByInvoice[id]=(creditAppliedByInvoice[id]||0)+amount;
+  });
+  return {cashPaidById,creditAppliedByInvoice};
+}
+
 function applySupplierCreditsToPendingInvoices_(supplierId,actor,parentJournal) {
   const sheets=ensureSupplierFinanceSheets_(),own=!parentJournal;
   const journal=parentJournal||beginWriteJournal(['Konsinyasi','SupplierCreditLedger']);
