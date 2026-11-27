@@ -1995,7 +1995,7 @@ function apiSaveRekapDraft(token, payload) {
       if(old) {
         // Draft belum dikirim: karyawan tetap bebas memperbaiki sisa meskipun
         // sudah ada pembayaran tunai atau kredit yang dialokasikan ke invoice ini.
-        const settled=(settlementMaps.cashPaidById[String(old.id)]||0)+(settlementMaps.creditAppliedByInvoice[String(old.id)]||0);
+        const settled=(settlementMaps.cashPaidById[String(old.id)]||0)+(settlementMaps.creditAppliedByInvoice[String(old.id)]||0)+(settlementMaps.statusSettledById[String(old.id)]||0);
         const remaining=Math.max(0,utang-settled);
         const nextStatus=(laku<=0&&settled<=0)?'Cancelled':(remaining>0?'Pending':'Bayar');
         updates.push(
@@ -2246,7 +2246,7 @@ function apiSubmitRekap(token, payload) {
       const supplier=supMap[String(k.supplierId)];
       if(!supplier||(supplier.tipeTransaksi||'BeliPutus')!=='TitipJual')return;
       const invoiceId=String(k.id),gross=(Number(k.qtyLaku)||0)*(Number(k.hargaTitip)||0);
-      const paid=(settlementMaps.cashPaidById[invoiceId]||0)+(settlementMaps.creditAppliedByInvoice[invoiceId]||0);
+      const paid=(settlementMaps.cashPaidById[invoiceId]||0)+(settlementMaps.creditAppliedByInvoice[invoiceId]||0)+(settlementMaps.statusSettledById[invoiceId]||0);
       const surplus=Math.max(0,paid-gross);
       const requestKey='SETORAN-SURPLUS:'+setoranId+':'+invoiceId;
       if(surplus>0&&!existingCreditKeys.has(requestKey)){
@@ -4235,7 +4235,16 @@ function getSupplierInvoiceSettlementMaps_() {
     const id=String(x.referenceInvoiceId||''),amount=Math.max(0,Number(x.amount)||0);
     if(id&&amount)creditAppliedByInvoice[id]=(creditAppliedByInvoice[id]||0)+amount;
   });
-  return {cashPaidById,creditAppliedByInvoice};
+  const statusSettledById={};
+  invoices.forEach(invoice=>{
+    if(String(invoice.status)!=='Bayar')return;
+    const id=String(invoice.id),gross=(Number(invoice.qtyLaku)||0)*(Number(invoice.hargaTitip)||0);
+    const recorded=(cashPaidById[id]||0)+(creditAppliedByInvoice[id]||0);
+    // Status Bayar adalah sumber lama yang sah untuk pembayaran admin di Kas
+    // atau data legacy yang belum memiliki alokasi per invoice.
+    statusSettledById[id]=Math.max(0,gross-recorded);
+  });
+  return {cashPaidById,creditAppliedByInvoice,statusSettledById};
 }
 
 function applySupplierCreditsToPendingInvoices_(supplierId,actor,parentJournal) {
