@@ -196,10 +196,10 @@ has(frontend, /api\('getKas', \{ token:S\.token, limit:50 \}\)/, 'Admin cash bal
 const indexHtml = fs.readFileSync('index.html', 'utf8');
 const testingHtml = fs.readFileSync('index.testing.html', 'utf8');
 const serviceWorker = fs.readFileSync('sw.js', 'utf8');
-has(indexHtml, /app\.js\?v=7\.6/, 'Main app must request the new frontend asset version');
-has(testingHtml, /app\.js\?v=7\.6/, 'Testing page must request the new frontend asset version');
+has(indexHtml, /app\.js\?v=7\.7/, 'Main app must request the new frontend asset version');
+has(testingHtml, /app\.js\?v=7\.7/, 'Testing page must request the new frontend asset version');
 has(serviceWorker, /kueassyifa-v15/, 'Service worker cache must be invalidated for the new release');
-has(serviceWorker, /app\.js\?v=7\.6/, 'Service worker static asset list must preload the new frontend version');
+has(serviceWorker, /app\.js\?v=7\.7/, 'Service worker static asset list must preload the new frontend version');
 
 // Once an invoice is linked to a submitted setoran, employee adjustment must be locked in UI and API.
 has(backend, /canAdjust: !paidIds\[id\] && !\(settlementMaps\.creditAppliedByInvoice\[id\]>0\) && !String\(k\.setoranId \|\| ''\)/, 'Submitted or credit-paid supplier invoices must render as locked in the payment form');
