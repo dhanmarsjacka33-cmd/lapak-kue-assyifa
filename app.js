@@ -521,7 +521,7 @@ function renderTitipanSection() {
       <div class="row-between" style="padding:8px 0;border-top:1px solid var(--border);gap:8px">
         <div style="min-width:0;flex:1">
           <strong class="text-sm">${esc(it.nama)}</strong>
-          <div class="text-xs text-gray">${esc(it.supplierNama)} · ${esc(it.tanggal)} · ${it.qtyLaku} pcs · ${fmtRp(it.qtyLaku*it.hargaTitip)} · Lunas</div>
+          <div class="text-xs text-gray">${esc(it.supplierNama)} · ${esc(it.tanggal)} · ${it.qtyLaku} pcs · ${fmtRp(it.qtyLaku*it.hargaTitip)} · ${it.status==='Cancelled'?'Dibatalkan':'Lunas'}</div>
           ${it.correctionRequestStatus ? `<span class="badge ${it.correctionRequestStatus==='Pending'?'badge-warn':it.correctionRequestStatus==='Approved'?'badge-success':'badge-gray'}">Koreksi: ${esc(it.correctionRequestStatus)}</span>` : ''}
         </div>
         ${it.correctionRequestStatus==='Pending' ? '<span class="text-xs text-amber">Menunggu admin</span>' : `<button class="btn btn-ghost btn-sm" data-act="request-supplier-correction" data-id="${esc(it.id)}">Ajukan koreksi</button>`}
