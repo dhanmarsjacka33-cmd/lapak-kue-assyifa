@@ -71,7 +71,9 @@ Pengiriman/persetujuan setoran ditahan jika ada koreksi kewajiban yang masih men
 - Karyawan hanya dapat mengajukan koreksi untuk invoice dari lapaknya yang sudah terhubung ke setoran. Permintaan ganda yang masih Pending pada invoice yang sama ditolak.
 - Admin menyetujui atau menolak permintaan. Persetujuan memperbarui invoice sumber, detail setoran, jumlah penjualan/selisih setoran, dan ledger stok dalam satu write journal yang dapat di-rollback.
 - Jika pembayaran/kredit yang sudah diterima lebih besar dari kewajiban baru, selisih dicatat sebagai event CREDIT untuk supplier yang sama.
-- Kredit dipakai ke invoice Pending tertua dari supplier yang sama saat laporan baru disubmit, saat pembelian susulan dibuat, atau sebelum admin membayar supplier. Event APPLY mencatat invoice tujuan sehingga penggunaan kredit dapat diaudit.
+- Kredit dipakai ke invoice Pending tertua dari supplier yang sama saat karyawan mengonfirmasi pembayaran titipan, saat laporan baru disubmit, saat pembelian susulan dibuat, atau sebelum admin membayar supplier. Event APPLY mencatat invoice tujuan sehingga penggunaan kredit dapat diaudit.
+- Jika karyawan mengubah jumlah draft sebelum laporan dikirim setelah pembayaran tunai/kredit teralokasi, draft yang sama dihitung ulang dengan mempertahankan alokasi lama. Bila pembayaran akhirnya melebihi kewajiban draft yang disetujui saat submit, selisih menjadi event CREDIT.
+- Pada pembayaran melalui login karyawan, nominal tunai dibatasi pada sisa tagihan sesudah kredit dipakai; jika kredit melunasi semua tagihan, tidak dibuat pembayaran tunai baru.
 - Pembayaran admin hanya mengeluarkan uang tunai untuk sisa tagihan setelah kredit diterapkan. Bila seluruh tagihan tertutup kredit, tidak dibuat baris pengeluaran Kas.
 - Edit langsung invoice oleh admin ditolak untuk invoice Pending yang sudah menerima pembayaran sebagian; koreksi harus melewati pengajuan dan persetujuan agar alokasi pembayaran tidak hilang.
 - Jika nilai invoice berubah setelah pengajuan dan sebelum keputusan, permintaan ditandai Stale dan harus diajukan ulang.
