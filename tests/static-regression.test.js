@@ -175,3 +175,28 @@ has(backend, /function getKasbonOutstandingMap_/, 'Kasbon payments must be alloc
 has(backend, /Pembayaran melebihi sisa kasbon/, 'Kasbon receipt must not exceed outstanding balance');
 has(backend, /const kasbonMap = getKasbonOutstandingMap_/, 'Payroll deduction must use remaining kasbon after received payments');
 has(frontend, /Terima Pembayaran Kasbon \(uang masuk\)/, 'Admin kasbon form must offer receiving employee repayments');
+
+
+// Search/cache and money-ledger regressions.
+has(frontend, /function setSearchRowVisible_\(row, visible\)/, 'Search rows must use one visibility helper');
+has(frontend, /row\.style\.setProperty\('display', 'none', 'important'\)/, 'Search must hide flex/card rows even when component CSS overrides the hidden attribute');
+has(frontend, /data-rekap-search/, 'Employee end-of-day recap must also search product and supplier names');
+has(frontend, /data-rekap-row data-search=/, 'Employee recap rows must expose searchable product and supplier text');
+has(frontend, /data-titipan-supplier-search/, 'Employee supplier bills must be searchable');
+has(frontend, /sourceBreakdown/, 'Grouped supplier bills must retain per-date and per-lapak source detail');
+has(backend, /const key=\[katalogId,harga,susulan\?'susulan':'titipan'\]\.join\('\|'\)/, 'Same supplier item and price must group across dates and lapaks');
+has(backend, /const kasRow=\{id:kasId,tanggal:now,keterangan:keteranganKas,tipe:'Masuk'/, 'Receiving employee kasbon must create a cash ledger inflow');
+has(backend, /beginWriteJournal\(\['Kasbon','Kas'\]\)/, 'Kasbon receipt and cash ledger entry must be saved atomically');
+has(backend, /rollbackWriteJournal\(journal\)/, 'Failed kasbon receipt must roll back both sheets');
+has(backend, /payload\.requestKey/, 'Kasbon submit must use an idempotency key to prevent duplicate receipts');
+has(frontend, /data\.requestKey = 'KASBON-'/, 'Admin kasbon submission must send an idempotency key');
+has(frontend, /api\('getKas', \{ token:S\.token, limit:50 \}\)/, 'Admin cash balance must refresh after a kasbon receipt');
+
+// Asset version checks ensure existing browser/service-worker caches get the corrected UI.
+const indexHtml = fs.readFileSync('index.html', 'utf8');
+const testingHtml = fs.readFileSync('index.testing.html', 'utf8');
+const serviceWorker = fs.readFileSync('sw.js', 'utf8');
+has(indexHtml, /app\.js\?v=7\.6/, 'Main app must request the new frontend asset version');
+has(testingHtml, /app\.js\?v=7\.6/, 'Testing page must request the new frontend asset version');
+has(serviceWorker, /kueassyifa-v15/, 'Service worker cache must be invalidated for the new release');
+has(serviceWorker, /app\.js\?v=7\.6/, 'Service worker static asset list must preload the new frontend version');

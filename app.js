@@ -610,8 +610,9 @@ function renderRekapForm(d) {
     <div class="card">
       <div class="row-between mb-3"><div class="card-title" style="margin:0">${ico('bar')} Rekap Akhir Hari</div><button class="btn btn-ghost btn-sm" data-act="edit-drop-open" ${d.locked ? 'disabled title="Input stok terkunci"' : ''}>Edit Stok Drop</button></div>
       ${d.locked ? `<div class="alert alert-danger">${ico('lock','ico-sm')}<span>Input terkunci setelah jam ${d.cutoffHour}:00</span></div>` : ''}
+      <div class="field mb-2"><input type="search" class="input" data-rekap-search placeholder="Cari kue atau supplier..." autocomplete="off" aria-label="Cari kue pada rekap"></div>
       ${d.distribusi.map(it => `
-        <div class="card card-flat" style="padding:12px;margin-bottom:8px">
+        <div class="card card-flat" data-rekap-row data-search="${esc([it.nama,it.supplierNama,it.katalogId].filter(Boolean).join(' ').toLocaleLowerCase('id-ID'))}" style="padding:12px;margin-bottom:8px">
           <div class="row-between mb-3">
             <div style="min-width:0;flex:1;padding-right:8px">
               <p class="text-sm font-semibold">${esc(it.nama)} ${it.tipeTransaksi === 'TitipJual' ? '<span class="badge badge-warn" style="font-size:9px">TITIP</span>' : ''}</p>
@@ -1623,42 +1624,55 @@ function applyKatalogFilter() {
   }
 }
 
+function setSearchRowVisible_(row, visible) {
+  if (!row) return;
+  row.hidden = !visible;
+  if (visible) row.style.removeProperty('display');
+  else row.style.setProperty('display', 'none', 'important');
+}
+
 function handleInput(e) {
   const t = e.target;
   if (t.dataset.katalogSearch !== undefined) {
     applyKatalogFilter();
     return;
   }
+  if (t.dataset.rekapSearch !== undefined) {
+    const q = String(t.value || '').trim().toLocaleLowerCase('id-ID');
+    let visible = 0;
+    $('[data-rekap-row]').forEach(row => { const match = !q || String(row.dataset.search || '').includes(q); setSearchRowVisible_(row, match); if (match) visible++; });
+    return;
+  }
   if (t.dataset.dropSearch !== undefined) {
     const q = String(t.value || '').trim().toLocaleLowerCase('id-ID');
-    $('[data-drop-row]').forEach(row => { row.hidden = q !== '' && !String(row.dataset.name || '').toLocaleLowerCase('id-ID').includes(q); });
+    $('[data-drop-row]').forEach(row => setSearchRowVisible_(row, !q || String(row.dataset.name || '').toLocaleLowerCase('id-ID').includes(q)));
     return;
   }
   if (t.dataset.supplierSearch !== undefined) {
     const q = String(t.value || '').trim().toLocaleLowerCase('id-ID');
     let visible = 0;
-    $('[data-supplier-row]').forEach(row => { const match = !q || String(row.dataset.search || '').includes(q); row.hidden = !match; if (match) visible++; });
+    $('[data-supplier-row]').forEach(row => { const match = !q || String(row.dataset.search || '').includes(q); setSearchRowVisible_(row, match); if (match) visible++; });
     const count = $('[data-supplier-count]'); if (count) count.textContent = 'Menampilkan ' + visible + ' supplier';
-    const empty = $('[data-supplier-empty]'); if (empty) empty.hidden = visible !== 0;
+    const empty = $('[data-supplier-empty]'); if (empty) setSearchRowVisible_(empty, visible === 0);
     return;
   }
   if (t.dataset.distSearch !== undefined) {
     const q = String(t.value || '').trim().toLocaleLowerCase('id-ID');
     let visible = 0;
-    $('[data-dist-row]').forEach(row => { const match = !q || String(row.dataset.search || '').includes(q); row.hidden = !match; if (match) visible++; });
-    const empty = $('[data-dist-empty]'); if (empty) empty.hidden = visible !== 0;
+    $('[data-dist-row]').forEach(row => { const match = !q || String(row.dataset.search || '').includes(q); setSearchRowVisible_(row, match); if (match) visible++; });
+    const empty = $('[data-dist-empty]'); if (empty) setSearchRowVisible_(empty, visible === 0);
     return;
   }
   if (t.dataset.billSupplierSearch !== undefined) {
     const q = String(t.value || '').trim().toLocaleLowerCase('id-ID');
     let visible = 0;
-    $('[data-bill-supplier-row]').forEach(row => { const match = !q || String(row.dataset.search || '').includes(q); row.hidden = !match; if (match) visible++; });
-    const empty = $('[data-bill-supplier-empty]'); if (empty) empty.hidden = visible !== 0;
+    $('[data-bill-supplier-row]').forEach(row => { const match = !q || String(row.dataset.search || '').includes(q); setSearchRowVisible_(row, match); if (match) visible++; });
+    const empty = $('[data-bill-supplier-empty]'); if (empty) setSearchRowVisible_(empty, visible === 0);
     return;
   }
   if (t.dataset.titipanSupplierSearch !== undefined) {
     const q = String(t.value || '').trim().toLocaleLowerCase('id-ID');
-    $('[data-titipan-supplier-row]').forEach(row => { row.hidden = !!q && !String(row.dataset.search || '').includes(q); });
+    $('[data-titipan-supplier-row]').forEach(row => setSearchRowVisible_(row, !q || String(row.dataset.search || '').includes(q)));
     return;
   }
   if (t.dataset.titipanQty !== undefined) {
@@ -2833,8 +2847,8 @@ function formKasbon(isAdmin) {
     if (!karyawans.length) return toast('Tidak ada karyawan', 'error');
     formModal({
       title: 'Kasbon / Terima Pembayaran',
-      fields: [{ key:'userId', label:'Karyawan', type:'select', options: karyawans.map(u => ({ v:u.id, l:u.name })) }, { key:'tipe', label:'Jenis transaksi', type:'select', options: [{v:'Kasbon',l:'Berikan Kasbon (uang keluar)'},{v:'Bayar',l:'Terima Pembayaran Kasbon (uang masuk)'}] }, { key:'nominal', label:'Nominal', type:'number' }, { key:'keterangan', label:'Keterangan', type:'textarea' }],
-      onSubmit: async (data, c) => { c(); showLoader(); try { await api('addKasbon', { token: S.token, payload: data }); S.kasbon = await api('getKasbon', { token: S.token, filter: {} }); toast(data.tipe === 'Bayar' ? 'Pembayaran kasbon diterima' : 'Kasbon dicatat', 'success'); } catch (e) { toast(e.message, 'error'); } finally { hideLoader(); render(); } }
+      fields: [{ key:'userId', label:'Karyawan', type:'select', options: karyawans.map(u => ({ v:u.id, l:u.name })) }, { key:'tipe', label:'Jenis transaksi', type:'select', options: [{v:'Kasbon',l:'Berikan Kasbon (uang keluar)'},{v:'Bayar',l:'Terima Pembayaran Kasbon (uang masuk)'}] }, { key:'nominal', label:'Nominal', type:'number' }, { key:'metode', label:'Metode pembayaran', type:'select', options: [{v:'Tunai',l:'Tunai'},{v:'QRIS',l:'QRIS'},{v:'Transfer',l:'Transfer'}] }, { key:'keterangan', label:'Keterangan', type:'textarea' }],
+      onSubmit: async (data, c) => { if (Number(data.nominal) <= 0) return toast('Nominal harus lebih dari 0.', 'error'); data.requestKey = 'KASBON-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,8); c(); showLoader(); try { const result = await api('addKasbon', { token: S.token, payload: data }); S.kasbon = await api('getKasbon', { token: S.token, filter: {} }); if (data.tipe === 'Bayar') { S.kas = await api('getKas', { token:S.token, limit:50 }); S.dash = await api('getAdminDashboard', { token:S.token }); } toast(result.message || (data.tipe === 'Bayar' ? 'Pembayaran kasbon diterima' : 'Kasbon dicatat'), 'success'); } catch (e) { toast(e.message, 'error'); } finally { hideLoader(); render(); } }
     });
   } else {
     formModal({
@@ -3289,10 +3303,10 @@ async function formBayarSupplier(supplierId) {
     if (detail.total <= 0) return toast('Tidak ada utang pending.', 'info');
     const sup = S.suppliers.find(s => String(s.id) === String(supplierId)) || {};
     let body = '<div class="card-flat" style="padding:12px;margin-bottom:12px"><strong>' + esc(sup.nama || supplierId) + '</strong><div class="text-xs text-gray mt-1">' + (detail.groupedCount || detail.count) + ' baris gabungan dari ' + detail.count + ' transaksi/lapak · Titipan: ' + fmtRp(detail.totalTitipan || 0) + ' · Pembelian susulan: ' + fmtRp(detail.totalPembelianSusulan || 0) + '</div><div class="hero" style="margin-top:12px;margin-bottom:0;padding:16px"><div class="hero-label">Total Tagihan Supplier (semua lapak)</div><div class="hero-value" style="font-size:22px;margin-bottom:0">' + fmtRp(detail.total) + '</div></div></div>';
-    body += '<p class="text-xs font-semibold text-gray mb-2">Rincian kue digabung per produk dan tanggal; asal lapak tetap terlihat</p><div style="max-height:300px;overflow-y:auto">';
+    body += '<p class="text-xs font-semibold text-gray mb-2">Rincian digabung berdasarkan kue dan supplier, walaupun tanggal atau lapaknya berbeda</p><div style="max-height:300px;overflow-y:auto">';
     body += detail.items.map(it => {
-      const lapakText = (it.lapakBreakdown || []).map(x => x.lapakNama + ': ' + x.qty + ' pcs').join(' · ');
-      return '<div class="row-between text-xs" style="padding:8px 0;border-bottom:1px solid #f8fafc"><div style="min-width:0;flex:1"><div class="font-semibold">' + esc(it.nama) + ' <span class="badge ' + (it.jenis === 'Pembelian susulan' ? 'badge-warn' : 'badge-info') + '">' + esc(it.jenis || 'Titipan terjual') + '</span></div><div class="text-gray">' + esc(it.tanggal) + ' · ' + esc(lapakText) + '</div><div class="text-gray">' + it.qtyLaku + ' × ' + fmtRp(it.hargaTitip) + '</div></div><div class="text-right font-bold">' + fmtRp(it.utang) + '</div></div>';
+      const lapakText = (it.sourceBreakdown || it.lapakBreakdown || []).map(x => (x.tanggal ? x.tanggal + ' · ' : '') + x.lapakNama + ': ' + x.qty + ' pcs').join(' · ');
+      return '<div class="row-between text-xs" style="padding:8px 0;border-bottom:1px solid #f8fafc"><div style="min-width:0;flex:1"><div class="font-semibold">' + esc(it.nama) + ' <span class="badge ' + (it.jenis === 'Pembelian susulan' ? 'badge-warn' : 'badge-info') + '">' + esc(it.jenis || 'Titipan terjual') + '</span></div><div class="text-gray">' + esc(lapakText) + '</div><div class="text-gray">' + it.qtyLaku + ' × ' + fmtRp(it.hargaTitip) + '</div></div><div class="text-right font-bold">' + fmtRp(it.utang) + '</div></div>';
     }).join('');
     body += '</div>';
     body += '<div class="field mt-3"><label>Metode Pembayaran</label><select data-f="metode" class="select"><option value="Tunai">Tunai</option><option value="QRIS">QRIS</option><option value="Transfer">Transfer</option></select></div>';
