@@ -110,7 +110,7 @@ has(frontend, /filter\(x => !x\.setoranId\)/, 'Employee summary must identify su
 has(frontend, /const tunaiDiserahkan = tunai - pengeluaran/, 'Cash handover preview deducts operating expenses only');
 has(frontend, /Belum tertaut ke laporan setoran/, 'Unlinked supplier payments must be labeled as informational history, not a future deduction');
 
-has(backend, /const nominalBayar=Number\(payload\.nominalBayar\)/, 'Employee supplier payment must accept an editable partial payment amount');
+has(backend, /const requestedPayment = Number\(payload\.nominalBayar\)/, 'Employee supplier payment must accept an editable partial payment amount');
 has(backend, /JSON\.stringify\(allocations\.map\(x=>\(\{id:x\.id,amount:x\.amount\}\)\)\)/, 'Partial supplier payment must persist exact per-invoice allocations');
 has(backend, /journalSetValue\(journal,ks,item\.row,iUtang\+1,item\.remaining\)/, 'Partial supplier payment must preserve remaining supplier debt');
 has(backend, /current\+allocationMap\[itemId\]/, 'Cancelling a partial payment must restore the allocated debt amount');
@@ -241,3 +241,11 @@ has(backend, /const correctionCandidates = konsinyasiRows/, 'Employees must rece
 has(backend, /String\(r\.setoranId\)===String\(idSetoran\).*String\(r\.status\)==='Pending'/, 'Admin must not approve a setoran while a correction request for that setoran is pending');
 has(backend, /String\(r\.lapakId\)===String\(sess\.lapakId\).*String\(r\.status\)==='Pending'/, 'Employee must not submit another report for a lapak with unresolved correction requests');
 has(frontend, /Invoice yang sudah lunas — masih dapat dikoreksi melalui admin/, 'Employee must be able to find paid invoices and request admin correction');
+
+has(backend, /const creditUse=applySupplierCreditsToPendingInvoices_\(supplierId,sess\.username,journal\)/, 'Employee supplier payment must automatically use the supplier credit ledger');
+has(backend, /const nominalBayar=Math\.min\(requestedPayment,totalUtang\)/, 'Cash payment must be capped at the balance remaining after supplier credit');
+has(backend, /SupplierCreditLedger'\]\)/, 'Employee supplier payment must include credit ledger in its rollback journal');
+has(backend, /Tagihan supplier sudah tertutup oleh saldo lebih/, 'Fully credited employee invoices must not request duplicate cash payment');
+has(backend, /Saldo lebih supplier yang diterapkan/, 'Employee payment confirmation must report the credit used');
+has(backend, /const pendingCorrections = getSheetData\('SupplierCorrectionRequests'\)/, 'New employee report must be blocked while correction approvals remain pending');
+has(backend, /const correctionCandidates = konsinyasiRows/, 'Paid invoices must be listed for post-submit correction requests');
