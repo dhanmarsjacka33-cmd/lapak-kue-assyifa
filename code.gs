@@ -2255,6 +2255,9 @@ function apiGetTitipanKaryawan(token) {
   const sess = requireRole(token, ['karyawan']);
   const lapakId = sess.lapakId;
   if (!lapakId) return { pending: [], sudahBayar: [] };
+  ensureSupplierFinanceSheets_();
+  const correctionByInvoice={};
+  getSheetData('SupplierCorrectionRequests').filter(r=>String(r.lapakId)===String(lapakId)).forEach(r=>{correctionByInvoice[String(r.konsinyasiId)]={id:r.id,status:r.status||'Pending'};});
 
   const supMap = {};
   getSheetData('Suppliers').forEach(s => { supMap[String(s.id)] = s.nama; });
@@ -2346,7 +2349,11 @@ function apiGetTitipanKaryawan(token) {
       qtySisa: Number(detail.qtySisa) || 0,
       hargaTitip: Number(k.hargaTitip) || 0,
       utang: saldo,
-      canAdjust: !paidIds[id] && !String(k.setoranId || '')
+      setoranId: String(k.setoranId||''),
+      currentQtyLaku: Number(k.qtyLaku)||0,
+      canAdjust: !paidIds[id] && !String(k.setoranId || ''),
+      correctionRequestId: (correctionByInvoice[id]||{}).id||'',
+      correctionRequestStatus: (correctionByInvoice[id]||{}).status||''
     });
   });
   const pending = Object.values(grouped).sort((a, b) => b.total - a.total);
