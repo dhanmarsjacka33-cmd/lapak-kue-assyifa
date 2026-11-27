@@ -3053,6 +3053,35 @@ function apiDeleteJadwal(token, id) {
 function mapKasbon(k, userMap) {
   return { id:k.id, tanggal:formatDate(k.tanggal), userId:k.userId, userName: userMap && userMap[k.userId] || k.userId, nominal:Number(k.nominal) || 0, keterangan:k.keterangan || '', tipe:k.tipe || 'Kasbon', status:k.status || 'Outstanding', approvedBy:k.approvedBy || '', approvedAt: formatDateTime(k.approvedAt), gajiId:k.gajiId || '' };
 }
+function getKasbonOutstandingMap_(rows) {
+  const events = (rows || []).map((k, index) => ({
+    row:k, index, time:(new Date(k.tanggal).getTime() || 0), userId:String(k.userId || '')
+  })).filter(e=>e.userId).sort((a,b)=>a.time-b.time || a.index-b.index);
+  const byUser = {};
+  events.forEach(e => {
+    const k=e.row, uid=e.userId;
+    if (!byUser[uid]) byUser[uid] = { debts: [], outstanding: 0 };
+    const item=byUser[uid];
+    if ((k.tipe || 'Kasbon') === 'Kasbon' && k.status === 'Outstanding') {
+      item.debts.push({ id:k.id, nominal:Number(k.nominal)||0, keterangan:k.keterangan||'', tanggal:formatDate(k.tanggal), remaining:Number(k.nominal)||0 });
+    } else if (k.tipe === 'Bayar' && k.status === 'Lunas') {
+      // Pembayaran hanya mengurangi utang yang sudah ada pada saat uang diterima.
+      // Sisa pembayaran tidak dibawa ke kasbon baru di masa depan.
+      let paid=Math.max(0,Number(k.nominal)||0);
+      item.debts.forEach(d=>{
+        if(paid<=0)return;
+        const applied=Math.min(d.remaining,paid);
+        d.remaining-=applied; paid-=applied;
+      });
+    }
+  });
+  Object.keys(byUser).forEach(uid=>{
+    const item=byUser[uid];
+    item.debts=item.debts.filter(d=>d.remaining>0).map(d=>({id:d.id,nominal:d.remaining,keterangan:d.keterangan,tanggal:d.tanggal}));
+    item.outstanding=item.debts.reduce((sum,d)=>sum+d.nominal,0);
+  });
+  return byUser;
+}
 function apiGetKasbon(token, filter) {
   const sess = getSession(token);
   filter = filter || {};
@@ -3062,14 +3091,19 @@ function apiGetKasbon(token, filter) {
   else if (filter.userId) list = list.filter(k => String(k.userId) === String(filter.userId));
   if (filter.status) list = list.filter(k => k.status === filter.status);
   const mapped = list.map(k => mapKasbon(k, userMap)).reverse();
+  const balances = getKasbonOutstandingMap_(getSheetData('Kasbon'));
+  mapped.forEach(k => {
+    const bal = balances[String(k.userId)] || {debts:[]};
+    const debt = bal.debts.find(d => String(d.id) === String(k.id));
+    if (k.tipe === 'Kasbon' && k.status === 'Outstanding') k.sisa = debt ? debt.nominal : 0;
+  });
   let summary = null;
   if (sess.role === 'admin') {
-    const sMap = {};
-    mapped.forEach(k => {
-      if (!sMap[k.userId]) sMap[k.userId] = { userId:k.userId, userName:k.userName, outstanding: 0 };
-      if (k.tipe === 'Kasbon' && k.status === 'Outstanding') sMap[k.userId].outstanding += k.nominal;
-    });
-    summary = Object.values(sMap);
+    const allUsers = getSheetData('Users');
+    summary = allUsers.filter(u=>u.role==='karyawan').map(u=>({
+      userId:String(u.id), userName:u.name||u.id,
+      outstanding:(balances[String(u.id)]||{outstanding:0}).outstanding
+    }));
   }
   return { list: mapped, summary };
 }
@@ -3078,15 +3112,21 @@ function apiAddKasbon(token, payload) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success:false, message:'Sistem sibuk. Coba lagi.' };
   try {
-    const nominal = toPosNum(payload.nominal);
+    const nominal = toPosNum(payload && payload.nominal);
     if (nominal <= 0) return { success:false, message:'Nominal harus lebih dari 0.' };
     let userId, tipe, status;
     if (sess.role === 'karyawan') { userId = sess.id; tipe = 'Kasbon'; status = 'Outstanding'; }
     else {
-      userId = payload.userId || '';
+      userId = String(payload.userId || '');
       tipe = payload.tipe === 'Bayar' ? 'Bayar' : 'Kasbon';
       status = tipe === 'Bayar' ? 'Lunas' : 'Outstanding';
       if (!userId) return { success:false, message:'Pilih karyawan terlebih dahulu.' };
+      if (tipe === 'Bayar') {
+        const balance = getKasbonOutstandingMap_(getSheetData('Kasbon'))[userId];
+        const outstanding = balance ? balance.outstanding : 0;
+        if (outstanding <= 0) return {success:false,message:'Karyawan ini tidak memiliki kasbon yang belum dibayar.'};
+        if (nominal > outstanding) return {success:false,message:'Pembayaran melebihi sisa kasbon '+fmtRpLocal(outstanding)+'.'};
+      }
     }
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Kasbon');
     const id = 'KB' + Utilities.getUuid().slice(0,8).toUpperCase();
@@ -3120,9 +3160,8 @@ function apiDeleteKasbon(token, id) {
 }
 function apiGetOutstandingKasbon(token, userId) {
   requireRole(token, ['admin']);
-  const list = getSheetData('Kasbon').filter(k => String(k.userId) === String(userId) && k.status === 'Outstanding' && k.tipe === 'Kasbon');
-  const total = list.reduce((s, k) => s + (Number(k.nominal) || 0), 0);
-  return { total, items: list.map(k => ({ id:k.id, nominal: Number(k.nominal) || 0, keterangan: k.keterangan || '', tanggal: formatDate(k.tanggal) })) };
+  const balance = getKasbonOutstandingMap_(getSheetData('Kasbon'))[String(userId)] || {outstanding:0,debts:[]};
+  return { total:balance.outstanding, items:balance.debts };
 }
 
 // ============================================================
@@ -3166,22 +3205,15 @@ function apiRekapGaji(token, filter) {
     if (!hadirMap[a.userId]) hadirMap[a.userId] = {};
     hadirMap[a.userId][formatDate(a.tanggal)] = true;
   });
-  const kasbonList = getSheetData('Kasbon').filter(k => k.status === 'Outstanding' && k.tipe === 'Kasbon');
-  const kasbonMap = {};
-  kasbonList.forEach(k => {
-    const uid = String(k.userId);
-    if (!kasbonMap[uid]) kasbonMap[uid] = { total: 0, items: [] };
-    kasbonMap[uid].total += Number(k.nominal) || 0;
-    kasbonMap[uid].items.push({ id: k.id, nominal: Number(k.nominal) || 0, keterangan: k.keterangan || '', tanggal: formatDate(k.tanggal) });
-  });
+  const kasbonMap = getKasbonOutstandingMap_(getSheetData('Kasbon'));
   const list = users.map(u => {
     const hadir = hadirMap[u.id] ? Object.keys(hadirMap[u.id]).length : 0;
     const nominalSetting = settingMap[u.id] || 0;
     let gajiPokok = nominalSetting;
     if (tipe === 'Harian') gajiPokok = nominalSetting * hadir;
     else if (tipe === 'Mingguan') { const hariCount = Math.ceil((toMs - fromMs) / 86400000); const minggu = Math.max(1, Math.round(hariCount / 7)); gajiPokok = nominalSetting * minggu; }
-    const kasbonInfo = kasbonMap[u.id] || { total: 0, items: [] };
-    return { userId:u.id, userName:u.name, lapakId:u.lapakId || '', hadir, tipe, nominalSetting, gajiPokok, tunjangan:0, bonus:0, potonganKasbon: kasbonInfo.total, kasbonItems: kasbonInfo.items, totalBersih: Math.max(0, gajiPokok - kasbonInfo.total) };
+    const kasbonInfo = kasbonMap[String(u.id)] || { outstanding: 0, debts: [] };
+    return { userId:u.id, userName:u.name, lapakId:u.lapakId || '', hadir, tipe, nominalSetting, gajiPokok, tunjangan:0, bonus:0, potonganKasbon: kasbonInfo.outstanding, kasbonItems: kasbonInfo.debts, totalBersih: Math.max(0, gajiPokok - kasbonInfo.outstanding) };
   });
   const totals = list.reduce((s, x) => { s.gajiPokok += x.gajiPokok; s.potonganKasbon += x.potonganKasbon; s.totalBersih += x.totalBersih; return s; }, { gajiPokok: 0, potonganKasbon: 0, totalBersih: 0 });
   return { periode: { dari: formatDate(dari), sampai: formatDate(new Date(toMs - 1)), tipe }, list, totals };
@@ -3211,12 +3243,11 @@ function apiBayarGaji(token, payload) {
     const kh = kasbonData[0];
     const kUser = kh.indexOf('userId'), kStatus = kh.indexOf('status'), kTipe = kh.indexOf('tipe');
     const kNominal = kh.indexOf('nominal'), kGajiId = kh.indexOf('gajiId');
-    let potonganKasbon = 0;
+    const outstandingMap = getKasbonOutstandingMap_(getSheetData('Kasbon'));
+    const potonganKasbon = (outstandingMap[String(userId)] || {outstanding:0}).outstanding;
     const rowsToLunas = [];
     for (let i = 1; i < kasbonData.length; i++) {
-      if (String(kasbonData[i][kUser]) === String(userId) && kasbonData[i][kStatus] === 'Outstanding' && kasbonData[i][kTipe] === 'Kasbon') {
-        potonganKasbon += Number(kasbonData[i][kNominal]) || 0; rowsToLunas.push(i + 1);
-      }
+      if (String(kasbonData[i][kUser]) === String(userId) && kasbonData[i][kStatus] === 'Outstanding' && kasbonData[i][kTipe] === 'Kasbon') rowsToLunas.push(i + 1);
     }
     const gajiBersih = Math.max(0, gajiPokok + tunjangan - potonganKasbon);
     const kasSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Kas');
@@ -3999,8 +4030,21 @@ function apiGetKonsinyasiDetailSupplier(token, supplierId) {
   const katMap = {}; getSheetData('Katalog').forEach(k => katMap[k.id] = k.nama);
   const lapakMap = {}; getSheetData('Lapak').forEach(l => lapakMap[l.id] = l.nama);
   const list = getSheetData('Konsinyasi').filter(k => String(k.supplierId) === String(supplierId) && k.status === 'Pending');
-  const items = list.map(k => { const susulan=String(k.catatan||'').indexOf('PEMBELIAN_SUSULAN|')===0; return { id:k.id, tanggal:formatDate(k.tanggal), lapakNama:lapakMap[k.lapakId]||k.lapakId, nama:katMap[k.katalogId]||k.katalogId, qtyLaku:Number(k.qtyLaku)||0, hargaTitip:Number(k.hargaTitip)||0, utang:Number(k.utang)||0, jenis:susulan?'Pembelian susulan':'Titipan terjual', setoranId:susulan?String(k.catatan||'').split('|')[1]:'', catatan:susulan?String(k.catatan||'').split('|').slice(2).join('|'):'' }; }).sort((a,b)=>a.tanggal.localeCompare(b.tanggal));
-  return { count:list.length, total:list.reduce((s,k)=>s+(Number(k.utang)||0),0), countPembelianSusulan:items.filter(x=>x.jenis==='Pembelian susulan').length, totalPembelianSusulan:items.filter(x=>x.jenis==='Pembelian susulan').reduce((s,x)=>s+x.utang,0), countTitipan:items.filter(x=>x.jenis==='Titipan terjual').length, totalTitipan:items.filter(x=>x.jenis==='Titipan terjual').reduce((s,x)=>s+x.utang,0), items };
+  const grouped = {};
+  list.forEach(k => {
+    const susulan=String(k.catatan||'').indexOf('PEMBELIAN_SUSULAN|')===0;
+    const tanggal=formatDate(k.tanggal), harga=Number(k.hargaTitip)||0, katalogId=String(k.katalogId||'');
+    const key=[tanggal,katalogId,harga,susulan?'susulan':'titipan'].join('|');
+    if (!grouped[key]) grouped[key]={id:'GRP_'+key,tanggal,nama:katMap[katalogId]||katalogId,katalogId,qtyLaku:0,hargaTitip:harga,utang:0,jenis:susulan?'Pembelian susulan':'Titipan terjual',lapakBreakdown:[],invoiceIds:[],setoranIds:[],catatan:''};
+    const g=grouped[key]; g.qtyLaku+=Number(k.qtyLaku)||0; g.utang+=Number(k.utang)||0; g.invoiceIds.push(String(k.id));
+    const lapakNama=lapakMap[k.lapakId]||k.lapakId;
+    const existing=g.lapakBreakdown.find(x=>x.lapakNama===lapakNama);
+    if(existing){existing.qty+=(Number(k.qtyLaku)||0);existing.utang+=(Number(k.utang)||0);}
+    else g.lapakBreakdown.push({lapakNama,qty:Number(k.qtyLaku)||0,utang:Number(k.utang)||0});
+    if(susulan)g.setoranIds.push(String(k.catatan||'').split('|')[1]||'');
+  });
+  const items=Object.values(grouped).sort((a,b)=>a.tanggal.localeCompare(b.tanggal)||a.nama.localeCompare(b.nama));
+  return { count:list.length, groupedCount:items.length, total:list.reduce((sum,k)=>sum+(Number(k.utang)||0),0), countPembelianSusulan:items.filter(x=>x.jenis==='Pembelian susulan').length, totalPembelianSusulan:items.filter(x=>x.jenis==='Pembelian susulan').reduce((sum,x)=>sum+x.utang,0), countTitipan:items.filter(x=>x.jenis==='Titipan terjual').length, totalTitipan:items.filter(x=>x.jenis==='Titipan terjual').reduce((sum,x)=>sum+x.utang,0), items };
 }
 
 // ============================================================

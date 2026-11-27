@@ -484,9 +484,9 @@ function renderTitipanSection() {
     </div>`;
 
   if (totalPending > 0) {
-    html += `<p class="text-xs text-gray mb-3">Klik <strong>Bayar</strong> untuk melunasi utang ke supplier. Bisa bayar sebagian atau penuh, kapan saja.</p>`;
+    html += `<p class="text-xs text-gray mb-3">Klik <strong>Bayar</strong> untuk melunasi utang ke supplier. Bisa bayar sebagian atau penuh, kapan saja.</p><div class="field mb-2"><input type="search" class="input" data-titipan-supplier-search placeholder="Cari nama supplier..." autocomplete="off" aria-label="Cari tagihan supplier"></div>`;
     html += pending.map(s => `
-      <div style="padding:10px 0;border-bottom:1px solid rgba(245,158,11,.2)">
+      <div data-titipan-supplier-row data-search="${esc(String(s.supplierNama||'').toLocaleLowerCase('id-ID'))}" style="padding:10px 0;border-bottom:1px solid rgba(245,158,11,.2)">
         <div class="row-between mb-2">
           <div style="min-width:0;flex:1">
             <div class="text-sm font-semibold">${esc(s.supplierNama)}</div>
@@ -524,7 +524,7 @@ function renderTitipanSection() {
         </div>
       </div>
     `).join('');
-    html += `<p class="text-xs text-gray mt-2">${ico('info','ico-sm')} Pembayaran yang belum masuk setoran akan dipotong pada rekap berikutnya. Pembayaran yang sudah tertaut tidak dihitung ulang.</p>
+    html += `<p class="text-xs text-gray mt-2">${ico('info','ico-sm')} Riwayat pembayaran ditampilkan sebagai informasi. Pembayaran supplier tidak dipotong ulang dari setoran karyawan.</p>
     </div>`;
   }
 
@@ -954,8 +954,10 @@ function tabKatalog() {
 // ============================================
 function tabSuppliers() {
   if (!S.suppliers.length) return skeletonList(2);
-  let html = `<div class="row-between mb-3"><h3 class="card-title" style="margin:0">${ico('truck')} Suppliers</h3><button class="btn btn-primary btn-sm" data-act="add-supplier">+ Tambah</button></div>`;
-  html += S.suppliers.map(s => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${esc(s.nama)}${s.tipeTransaksi === 'TitipJual' ? '<span class="badge badge-warn" style="font-size:9px;margin-left:4px">TITIP</span>' : '<span class="badge badge-gray" style="font-size:9px;margin-left:4px">BELI PUTUS</span>'}</div><div class="list-item-sub">${esc(s.kontak || '-')}</div>${s.jadwalPesan ? `<div class="text-xs text-amber mt-2">${esc(s.jadwalPesan)}</div>` : ''}</div><div class="list-item-actions"><button class="action-btn action-edit" data-act="edit-supplier" data-id="${esc(s.id)}">${ico('edit','ico-sm')}</button><button class="action-btn action-del" data-act="del-supplier" data-id="${esc(s.id)}">${ico('trash','ico-sm')}</button></div></div>`).join('');
+  let html = `<div class="row-between mb-3"><h3 class="card-title" style="margin:0">${ico('truck')} Suppliers (${S.suppliers.length})</h3><button class="btn btn-primary btn-sm" data-act="add-supplier">+ Tambah</button></div>`;
+  html += `<div class="field mb-2"><input type="search" class="input" data-supplier-search placeholder="Cari nama supplier, kontak, atau jenis..." autocomplete="off" aria-label="Cari supplier"></div><p class="text-xs text-gray mb-2" data-supplier-count>Menampilkan ${S.suppliers.length} supplier</p>`;
+  html += S.suppliers.map(s => `<div class="list-item" data-supplier-row data-search="${esc([s.nama,s.kontak,s.tipeTransaksi,s.jadwalPesan].filter(Boolean).join(' ').toLocaleLowerCase('id-ID'))}"><div class="list-item-main"><div class="list-item-title">${esc(s.nama)}${s.tipeTransaksi === 'TitipJual' ? '<span class="badge badge-warn" style="font-size:9px;margin-left:4px">TITIP</span>' : '<span class="badge badge-gray" style="font-size:9px;margin-left:4px">BELI PUTUS</span>'}</div><div class="list-item-sub">${esc(s.kontak || '-')}</div>${s.jadwalPesan ? `<div class="text-xs text-amber mt-2">${esc(s.jadwalPesan)}</div>` : ''}</div><div class="list-item-actions"><button class="action-btn action-edit" data-act="edit-supplier" data-id="${esc(s.id)}">${ico('edit','ico-sm')}</button><button class="action-btn action-del" data-act="del-supplier" data-id="${esc(s.id)}">${ico('trash','ico-sm')}</button></div></div>`).join('');
+  html += '<div class="empty" data-supplier-empty hidden><p>Supplier tidak ditemukan.</p></div>';
   return html;
 }
 
@@ -982,9 +984,10 @@ function tabDistribusi() {
   const items = S._distItems || {};
   let html = `<h3 class="card-title">${ico('boxes')} Drop Stok</h3>
     <div class="card"><div class="form-grid"><div class="field"><label>Tanggal</label><input type="date" data-dist-tgl value="${tgl}" class="input field-sm"></div><div class="field"><label>Lapak</label><select data-dist-lapak class="select field-sm">${S.lapak.map(l => `<option value="${esc(l.id)}" ${l.id === lapakId ? 'selected' : ''}>${esc(l.nama)}</option>`).join('')}</select></div></div><button class="btn btn-ghost btn-block btn-sm" data-act="load-distribusi">Muat</button></div>
-    <div class="card">`;
+    <div class="card"><div class="field mb-2"><input type="search" class="input" data-dist-search placeholder="Cari kue atau supplier..." autocomplete="off" aria-label="Cari kue dan supplier"></div>`;
   if (!S.katalog.length) html += '<p class="text-xs text-gray">Katalog kosong.</p>';
-  else html += S.katalog.map(k => `<div class="row-between" style="padding:10px 0;border-bottom:1px solid #f8fafc"><div style="min-width:0;flex:1;padding-right:8px"><p class="text-sm font-semibold">${esc(k.nama)}</p><p class="text-xs text-gray">${esc(k.supplierNama || '-')} · ${fmtRp(k.hargaJual)}</p></div><input type="number" min="0" inputmode="numeric" value="${items[k.id] || 0}" data-dist-item="${esc(k.id)}" class="input field-sm" style="width:72px;text-align:center"></div>`).join('');
+  else html += S.katalog.map(k => `<div class="row-between" data-dist-row data-search="${esc([k.nama,k.supplierNama,k.kategori].filter(Boolean).join(' ').toLocaleLowerCase('id-ID'))}" style="padding:10px 0;border-bottom:1px solid #f8fafc"><div style="min-width:0;flex:1;padding-right:8px"><p class="text-sm font-semibold">${esc(k.nama)}</p><p class="text-xs text-gray">${esc(k.supplierNama || '-')} · ${fmtRp(k.hargaJual)}</p></div><input type="number" min="0" inputmode="numeric" value="${items[k.id] || 0}" data-dist-item="${esc(k.id)}" class="input field-sm" style="width:72px;text-align:center"></div>`).join('');
+  html += '<div class="empty" data-dist-empty hidden><p>Kue atau supplier tidak ditemukan.</p></div>';
   html += `</div><button class="btn btn-primary btn-block mt-3" data-act="save-distribusi">Simpan Drop</button>`;
   return html;
 }
@@ -1008,7 +1011,7 @@ function tabKasbon() {
   const outstanding = (data.summary || []).filter(s => s.outstanding > 0);
   let html = `<div class="row-between mb-3"><h3 class="card-title" style="margin:0">${ico('money')} Kasbon</h3><button class="btn btn-primary btn-sm" data-act="add-kasbon">+ Tambah</button></div>`;
   if (outstanding.length) {
-    html += `<div class="card"><div class="card-title">Outstanding</div>`;
+    html += `<div class="card"><div class="card-title">Outstanding (setelah dikurangi pembayaran)</div>`;
     html += outstanding.map(s => `<div class="row-between text-sm" style="padding:6px 0;border-bottom:1px solid #f8fafc"><span>${esc(s.userName)}</span><strong class="text-red">${fmtRp(s.outstanding)}</strong></div>`).join('');
     html += `</div>`;
   }
@@ -1233,11 +1236,12 @@ function tabKonsinyasi() {
   const saldo = S.saldoSupplier || [], list = S.konsinyasi || [];
   const totalUtang = saldo.reduce((s, x) => s + (x.pending || 0), 0);
   let html = `<h3 class="card-title">${ico('truck')} Titip Jual</h3>
-    <div class="hero hero-amber"><div class="hero-label">Total Utang Supplier</div><div class="hero-value">${fmtRp(totalUtang)}</div><div class="hero-sub">${saldo.filter(s => s.pending > 0).length} supplier belum dibayar</div></div>
-    <h3 class="card-title">${ico('list')} Saldo per Supplier</h3>`;
+    <div class="hero hero-amber"><div class="hero-label">Total Tagihan Gabungan Semua Lapak</div><div class="hero-value">${fmtRp(totalUtang)}</div><div class="hero-sub">Satu pembayaran untuk setiap supplier, mencakup semua lapak</div></div>
+    <h3 class="card-title">${ico('list')} Tagihan per Supplier</h3><div class="field mb-2"><input type="search" class="input" data-bill-supplier-search placeholder="Cari supplier..." autocomplete="off"></div>`;
   const withPending = saldo.filter(s => s.pending > 0);
   if (!withPending.length) html += '<div class="empty"><p>Tidak ada utang pending.</p></div>';
-  else html += withPending.map(s => `<div class="card"><div class="row-between mb-3"><div style="min-width:0;flex:1"><strong>${esc(s.nama)}</strong><div class="text-xs text-gray mt-1">${s.tipeTransaksi === 'TitipJual' ? '<span class="badge badge-warn" style="font-size:9px">TITIP</span>' : '<span class="badge badge-gray" style="font-size:9px">BELI</span>'} ${s.pendingCount} transaksi</div></div><div class="text-sm font-bold text-red">${fmtRp(s.pending)}</div></div><div class="row" style="gap:8px"><button class="btn btn-ghost btn-sm" data-act="detail-konsinyasi" data-id="${esc(s.supplierId)}" style="flex:1">Detail</button><button class="btn btn-success btn-sm" data-act="bayar-supplier" data-id="${esc(s.supplierId)}" style="flex:1">Bayar</button></div></div>`).join('');
+  else html += withPending.map(s => `<div class="card" data-bill-supplier-row data-search="${esc(String(s.nama||'').toLocaleLowerCase('id-ID'))}"><div class="row-between mb-3"><div style="min-width:0;flex:1"><strong>${esc(s.nama)}</strong><div class="text-xs text-gray mt-1">${s.tipeTransaksi === 'TitipJual' ? '<span class="badge badge-warn" style="font-size:9px">TITIP</span>' : '<span class="badge badge-gray" style="font-size:9px">BELI</span>'} ${s.pendingCount} transaksi</div></div><div class="text-sm font-bold text-red">${fmtRp(s.pending)}</div></div><div class="row" style="gap:8px"><button class="btn btn-ghost btn-sm" data-act="detail-konsinyasi" data-id="${esc(s.supplierId)}" style="flex:1">Detail</button><button class="btn btn-success btn-sm" data-act="bayar-supplier" data-id="${esc(s.supplierId)}" style="flex:1">Bayar</button></div></div>`).join('');
+  html += '<div class="empty" data-bill-supplier-empty hidden><p>Supplier tidak ditemukan.</p></div>';
   html += `<div class="divider"></div><h3 class="card-title">${ico('file')} Riwayat Transaksi</h3>`;
   if (!list.length) html += '<div class="empty"><p>Belum ada transaksi.</p></div>';
   else html += list.slice(0, 30).map(k => `
@@ -1627,9 +1631,34 @@ function handleInput(e) {
   }
   if (t.dataset.dropSearch !== undefined) {
     const q = String(t.value || '').trim().toLocaleLowerCase('id-ID');
-    $('[data-drop-row]').forEach(row => {
-      row.hidden = q !== '' && !String(row.dataset.name || '').toLocaleLowerCase('id-ID').includes(q);
-    });
+    $('[data-drop-row]').forEach(row => { row.hidden = q !== '' && !String(row.dataset.name || '').toLocaleLowerCase('id-ID').includes(q); });
+    return;
+  }
+  if (t.dataset.supplierSearch !== undefined) {
+    const q = String(t.value || '').trim().toLocaleLowerCase('id-ID');
+    let visible = 0;
+    $('[data-supplier-row]').forEach(row => { const match = !q || String(row.dataset.search || '').includes(q); row.hidden = !match; if (match) visible++; });
+    const count = $('[data-supplier-count]'); if (count) count.textContent = 'Menampilkan ' + visible + ' supplier';
+    const empty = $('[data-supplier-empty]'); if (empty) empty.hidden = visible !== 0;
+    return;
+  }
+  if (t.dataset.distSearch !== undefined) {
+    const q = String(t.value || '').trim().toLocaleLowerCase('id-ID');
+    let visible = 0;
+    $('[data-dist-row]').forEach(row => { const match = !q || String(row.dataset.search || '').includes(q); row.hidden = !match; if (match) visible++; });
+    const empty = $('[data-dist-empty]'); if (empty) empty.hidden = visible !== 0;
+    return;
+  }
+  if (t.dataset.billSupplierSearch !== undefined) {
+    const q = String(t.value || '').trim().toLocaleLowerCase('id-ID');
+    let visible = 0;
+    $('[data-bill-supplier-row]').forEach(row => { const match = !q || String(row.dataset.search || '').includes(q); row.hidden = !match; if (match) visible++; });
+    const empty = $('[data-bill-supplier-empty]'); if (empty) empty.hidden = visible !== 0;
+    return;
+  }
+  if (t.dataset.titipanSupplierSearch !== undefined) {
+    const q = String(t.value || '').trim().toLocaleLowerCase('id-ID');
+    $('[data-titipan-supplier-row]').forEach(row => { row.hidden = !!q && !String(row.dataset.search || '').includes(q); });
     return;
   }
   if (t.dataset.titipanQty !== undefined) {
@@ -2803,9 +2832,9 @@ function formKasbon(isAdmin) {
     const karyawans = S.users.filter(u => u.role === 'karyawan');
     if (!karyawans.length) return toast('Tidak ada karyawan', 'error');
     formModal({
-      title: 'Tambah Kasbon',
-      fields: [{ key:'userId', label:'Karyawan', type:'select', options: karyawans.map(u => ({ v:u.id, l:u.name })) }, { key:'tipe', label:'Tipe', type:'select', options: [{v:'Kasbon',l:'Kasbon (utang)'},{v:'Bayar',l:'Bayar'}] }, { key:'nominal', label:'Nominal', type:'number' }, { key:'keterangan', label:'Keterangan', type:'textarea' }],
-      onSubmit: async (data, c) => { c(); showLoader(); try { await api('addKasbon', { token: S.token, payload: data }); S.kasbon = await api('getKasbon', { token: S.token, filter: {} }); toast('Kasbon dicatat', 'success'); } catch (e) { toast(e.message, 'error'); } finally { hideLoader(); render(); } }
+      title: 'Kasbon / Terima Pembayaran',
+      fields: [{ key:'userId', label:'Karyawan', type:'select', options: karyawans.map(u => ({ v:u.id, l:u.name })) }, { key:'tipe', label:'Jenis transaksi', type:'select', options: [{v:'Kasbon',l:'Berikan Kasbon (uang keluar)'},{v:'Bayar',l:'Terima Pembayaran Kasbon (uang masuk)'}] }, { key:'nominal', label:'Nominal', type:'number' }, { key:'keterangan', label:'Keterangan', type:'textarea' }],
+      onSubmit: async (data, c) => { c(); showLoader(); try { await api('addKasbon', { token: S.token, payload: data }); S.kasbon = await api('getKasbon', { token: S.token, filter: {} }); toast(data.tipe === 'Bayar' ? 'Pembayaran kasbon diterima' : 'Kasbon dicatat', 'success'); } catch (e) { toast(e.message, 'error'); } finally { hideLoader(); render(); } }
     });
   } else {
     formModal({
@@ -3259,9 +3288,12 @@ async function formBayarSupplier(supplierId) {
     hideLoader();
     if (detail.total <= 0) return toast('Tidak ada utang pending.', 'info');
     const sup = S.suppliers.find(s => String(s.id) === String(supplierId)) || {};
-    let body = '<div class="card-flat" style="padding:12px;margin-bottom:12px"><strong>' + esc(sup.nama || supplierId) + '</strong><div class="text-xs text-gray mt-1">' + detail.count + ' transaksi pending · Titipan: ' + fmtRp(detail.totalTitipan || 0) + ' · Pembelian susulan: ' + fmtRp(detail.totalPembelianSusulan || 0) + '</div><div class="hero" style="margin-top:12px;margin-bottom:0;padding:16px"><div class="hero-label">Total Bayar</div><div class="hero-value" style="font-size:22px;margin-bottom:0">' + fmtRp(detail.total) + '</div></div></div>';
-    body += '<p class="text-xs font-semibold text-gray mb-2">Rincian (jenis transaksi dibedakan)</p><div style="max-height:300px;overflow-y:auto">';
-    body += detail.items.map(it => '<div class="row-between text-xs" style="padding:8px 0;border-bottom:1px solid #f8fafc"><div style="min-width:0;flex:1"><div class="font-semibold">' + esc(it.nama) + ' <span class="badge ' + (it.jenis === 'Pembelian susulan' ? 'badge-warn' : 'badge-info') + '">' + esc(it.jenis || 'Titipan terjual') + '</span></div><div class="text-gray">' + esc(it.tanggal) + ' · ' + esc(it.lapakNama) + (it.setoranId ? ' · Setoran ' + esc(it.setoranId) : '') + '</div><div class="text-gray">' + it.qtyLaku + ' × ' + fmtRp(it.hargaTitip) + '</div></div><div class="text-right font-bold">' + fmtRp(it.utang) + '</div></div>').join('');
+    let body = '<div class="card-flat" style="padding:12px;margin-bottom:12px"><strong>' + esc(sup.nama || supplierId) + '</strong><div class="text-xs text-gray mt-1">' + (detail.groupedCount || detail.count) + ' baris gabungan dari ' + detail.count + ' transaksi/lapak · Titipan: ' + fmtRp(detail.totalTitipan || 0) + ' · Pembelian susulan: ' + fmtRp(detail.totalPembelianSusulan || 0) + '</div><div class="hero" style="margin-top:12px;margin-bottom:0;padding:16px"><div class="hero-label">Total Tagihan Supplier (semua lapak)</div><div class="hero-value" style="font-size:22px;margin-bottom:0">' + fmtRp(detail.total) + '</div></div></div>';
+    body += '<p class="text-xs font-semibold text-gray mb-2">Rincian kue digabung per produk dan tanggal; asal lapak tetap terlihat</p><div style="max-height:300px;overflow-y:auto">';
+    body += detail.items.map(it => {
+      const lapakText = (it.lapakBreakdown || []).map(x => x.lapakNama + ': ' + x.qty + ' pcs').join(' · ');
+      return '<div class="row-between text-xs" style="padding:8px 0;border-bottom:1px solid #f8fafc"><div style="min-width:0;flex:1"><div class="font-semibold">' + esc(it.nama) + ' <span class="badge ' + (it.jenis === 'Pembelian susulan' ? 'badge-warn' : 'badge-info') + '">' + esc(it.jenis || 'Titipan terjual') + '</span></div><div class="text-gray">' + esc(it.tanggal) + ' · ' + esc(lapakText) + '</div><div class="text-gray">' + it.qtyLaku + ' × ' + fmtRp(it.hargaTitip) + '</div></div><div class="text-right font-bold">' + fmtRp(it.utang) + '</div></div>';
+    }).join('');
     body += '</div>';
     body += '<div class="field mt-3"><label>Metode Pembayaran</label><select data-f="metode" class="select"><option value="Tunai">Tunai</option><option value="QRIS">QRIS</option><option value="Transfer">Transfer</option></select></div>';
     modal({
