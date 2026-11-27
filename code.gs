@@ -2113,6 +2113,7 @@ function apiSubmitRekap(token, payload) {
     // bersamaan dengan submit tidak tertinggal dari perhitungan maupun tautan setoran.
     // Cache lokal eksekusi harus dibuang agar pembacaan ini benar-benar membaca sheet terbaru.
     _clearSheetCache('BayarTitipanKaryawan');
+    _clearSheetCache('Konsinyasi');
     bayarTitipanHariIni = getSheetData('BayarTitipanKaryawan').filter(b => String(b.lapakId) === String(sess.lapakId) && (!b.setoranId || b.setoranId === '') && String(b.status || 'Active') === 'Active');
     const totalTitipanTunai = bayarTitipanHariIni.filter(b => String(b.metode || 'Tunai') === 'Tunai').reduce((sum,b) => sum + toPosNum(b.totalBayar),0);
     const totalTitipanQris = bayarTitipanHariIni.filter(b => String(b.metode || '') === 'QRIS').reduce((sum,b) => sum + toPosNum(b.totalBayar),0);
@@ -2140,7 +2141,6 @@ function apiSubmitRekap(token, payload) {
       const marker = draftMarker + d.katalogId;
       const draft = draftRows.find(x => String(x.catatan || '').indexOf(marker) === 0);
       if (!draft) continue; // kompatibilitas untuk item yang belum pernah disiapkan sebagai draft
-      const expectedUtang = d.qtyLaku * (Number(k.hargaBeli) || 0);
       const statusValid = d.qtyLaku > 0 ? String(draft.status)==='Bayar' : ['Cancelled','Bayar'].includes(String(draft.status));
       if (!statusValid ||
           (Number(draft.qtyLaku) || 0) !== d.qtyLaku ||
