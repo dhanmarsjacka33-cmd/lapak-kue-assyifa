@@ -2008,8 +2008,7 @@ function apiSaveRekapDraft(token, payload) {
         additions.push(h.map(name=>obj[name]));
       }
     }
-    ensureSupplierFinanceSheets_();
-    const journal = beginWriteJournal(['Konsinyasi','SupplierCreditLedger']);
+    const journal = beginWriteJournal(['Konsinyasi']);
     try {
       updates.forEach(u => journalSetValue(journal, ks, u.row, u.col, u.value));
       if (additions.length) {
