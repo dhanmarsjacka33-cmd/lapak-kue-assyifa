@@ -217,7 +217,7 @@ has(backend, /function apiGetSupplierFinanceOverview\(token\)/, 'Admin must be a
 has(backend, /function apiApproveSupplierCorrection\(token,requestId,reviewNote\)/, 'Admin approval endpoint must exist');
 has(backend, /function apiRejectSupplierCorrection\(token,requestId,reviewNote\)/, 'Admin rejection endpoint must exist');
 has(backend, /if\(String\(req\[ri\('status'\)\]\)!=='Pending'\)/, 'A correction request may only be applied once');
-has(backend, /const paid=String\(krow\[ki\('status'\)\]\)==='Bayar'\?oldGross:Math\.max\(0,oldGross-oldDue\)/, 'Approval must preserve amounts already paid or credited before recalculating the obligation');
+has(backend, /paid=String\(krow\[ki\('status'\)\]\)==='Bayar'\?oldGross:Math\.max\(0,oldGross-oldDue\)/, 'Approval must preserve amounts already paid or credited before recalculating the obligation');
 has(backend, /const newGross=newQty\*price,newDue=Math\.max\(0,newGross-paid\),credit=Math\.max\(0,paid-newGross\)/, 'Overpayment from an approved correction must become supplier credit');
 has(backend, /eventType:'CREDIT'/, 'Approved overpayment must create a credit ledger event');
 has(backend, /eventType:'APPLY'/, 'Using credit on an invoice must be an auditable ledger event');
