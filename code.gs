@@ -2008,13 +2008,15 @@ function apiSaveRekapDraft(token, payload) {
         additions.push(h.map(name=>obj[name]));
       }
     }
-    const journal = beginWriteJournal(['Konsinyasi']);
+    ensureSupplierFinanceSheets_();
+    const journal = beginWriteJournal(['Konsinyasi','SupplierCreditLedger']);
     try {
       updates.forEach(u => journalSetValue(journal, ks, u.row, u.col, u.value));
       if (additions.length) {
         const additionObjects = additions.map(row => { const obj = {}; h.forEach((name, index) => { if (name) obj[name] = row[index]; }); return obj; });
         appendObjectsByHeaders(ks, additionObjects);
       }
+      applySupplierCreditsToPendingInvoices_('',sess.username,journal);
     } catch (writeError) {
       try { rollbackWriteJournal(journal); }
       catch (rollbackError) { console.error('Gagal rollback draft rekap:', rollbackError.message); return { success:false, message:'Penyimpanan draft gagal dan pemulihan otomatis tidak sepenuhnya berhasil. Hentikan proses dan minta admin memeriksa data. Detail: ' + writeError.message + ' | ' + rollbackError.message }; }
@@ -2165,7 +2167,8 @@ function apiSubmitRekap(token, payload) {
       return { success:false, message:'Struktur sheet pendukung belum lengkap. Tidak ada transaksi yang ditulis.' };
     }
     const setoranId = 'S' + Utilities.getUuid().slice(0, 8).toUpperCase() + Date.now();
-    const journal = beginWriteJournal(['Setoran','SetoranDetail','BayarTitipanKaryawan','KartuStok','PengeluaranLapak','Konsinyasi']);
+    ensureSupplierFinanceSheets_();
+    const journal = beginWriteJournal(['Setoran','SetoranDetail','BayarTitipanKaryawan','KartuStok','PengeluaranLapak','Konsinyasi','SupplierCreditLedger']);
     try {
     appendObjectsByHeaders(setoranSheet, [{
       id:setoranId, tanggal:tgl, lapakId:sess.lapakId, userId:sess.id,
@@ -2227,6 +2230,7 @@ function apiSubmitRekap(token, payload) {
       });
       if (kRows.length) appendObjectsByHeaders(konsinyasiSheet,kRows);
     }
+    applySupplierCreditsToPendingInvoices_('',sess.username,journal);
     } catch (writeError) {
       try {
         rollbackWriteJournal(journal);
@@ -2711,13 +2715,15 @@ function apiAddSetoranPembelianSusulan(token, payload) {
     if(!supplier) return {success:false,message:'Supplier item belum terdaftar di katalog.'};
     const kSheet=ss.getSheetByName('Konsinyasi'), stokSheet=ss.getSheetByName('KartuStok');
     if(!hasHeaders(kSheet,['id','tanggal','supplierId','lapakId','katalogId','qtyLaku','hargaTitip','utang','status','kasId','bayarAt','bayarBy','setoranId','catatan']) || !hasHeaders(stokSheet,['id','tanggal','katalogId','lapakId','tipe','masuk','keluar','saldo','refId','keterangan'])) return {success:false,message:'Struktur sheet supplier/stok belum lengkap. Tidak ada perubahan.'};
+    ensureSupplierFinanceSheets_();
     const id='KN'+Utilities.getUuid().slice(0,8).toUpperCase();
     const utang=qty*harga;
     const marker='PEMBELIAN_SUSULAN|'+setoranId+'|'+String(payload.catatan||'').trim().slice(0,120);
-    const journal=beginWriteJournal(['Konsinyasi','KartuStok']);
+    const journal=beginWriteJournal(['Konsinyasi','KartuStok','SupplierCreditLedger']);
     try {
       appendObjectsByHeaders(kSheet,[{id,tanggal:new Date(),supplierId,lapakId:setoran.lapakId,katalogId,qtyLaku:qty,hargaTitip:harga,utang,status:'Pending',kasId:'',bayarAt:'',bayarBy:'',setoranId,catatan:marker}]);
       catatKartuStok(katalogId,setoran.lapakId,'Pembelian Susulan',qty,0,id,'Pembelian susulan setoran '+setoranId+' · '+(supplier.nama||supplierId));
+      applySupplierCreditsToPendingInvoices_(supplierId,sess.username,journal);
     } catch(e) {
       try { rollbackWriteJournal(journal); }
       catch(re) { return {success:false,message:'Pembelian gagal dan rollback perlu diperiksa: '+e.message+' | '+re.message}; }
