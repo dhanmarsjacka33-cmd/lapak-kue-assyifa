@@ -492,6 +492,7 @@ function renderTitipanSection() {
           <div style="min-width:0;flex:1">
             <div class="text-sm font-semibold">${esc(s.supplierNama)}</div>
             <div class="text-xs text-gray">${s.count} transaksi pending</div>
+            ${Number(s.saldoLebihAvailable||0)>0 ? `<div class="text-xs text-green">Saldo lebih tersedia: ${fmtRp(s.saldoLebihAvailable)} · dipakai otomatis</div>` : ''}
           </div>
           <div class="text-right" style="flex-shrink:0;margin-left:8px">
             <div class="text-sm font-bold text-red">${fmtRp(s.total)}</div>
@@ -2156,7 +2157,7 @@ function formBayarTitipan(supplierId) {
     </div>`;
   }).join('');
   const body = `
-    <div class="alert alert-info" style="margin-bottom:10px">Masukkan jumlah kue yang masih tersisa secara fisik. Sistem otomatis menghitung kue yang terjual/ditagihkan: jumlah diterima dikurangi sisa kue, lalu mengalikan dengan harga titip.</div>
+    <div class="alert alert-info" style="margin-bottom:10px">Masukkan jumlah kue yang masih tersisa secara fisik. Sistem otomatis menghitung kue yang terjual/ditagihkan: jumlah diterima dikurangi sisa kue, lalu mengalikan dengan harga titip. ${Number(pending.saldoLebihAvailable||0)>0 ? 'Saldo lebih supplier '+fmtRp(pending.saldoLebihAvailable)+' akan dipakai terlebih dahulu; uang tunai yang diminta hanya sisa setelah kredit.' : ''}</div>
     <div data-titipan-payment="1" data-locked-total="${pending.items.filter(it => it.canAdjust === false).reduce((sum,it) => sum + (Number(it.utang)||0),0)}">
       ${rows}
       <div class="card-flat" style="padding:12px;background:var(--amber-50);border:1px solid rgba(245,158,11,.3)">
