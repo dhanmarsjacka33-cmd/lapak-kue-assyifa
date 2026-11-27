@@ -2378,7 +2378,22 @@ function apiGetTitipanKaryawan(token) {
       createdAt: formatDateTime(b.createdAt)
     }));
 
-  return { pending, sudahBayar };
+  const correctionCandidates = konsinyasiRows
+    .filter(k=>String(k.status)==='Bayar'&&String(k.setoranId||''))
+    .sort((a,b)=>(new Date(b.tanggal).getTime()||0)-(new Date(a.tanggal).getTime()||0))
+    .slice(0,100)
+    .map(k=>{
+      const id=String(k.id),detail=detailMap[String(k.setoranId)+'|'+String(k.katalogId)]||{},request=correctionByInvoice[id]||{};
+      return {
+        id,tanggal:formatDate(k.tanggal),supplierId:String(k.supplierId),supplierNama:supMap[String(k.supplierId)]||String(k.supplierId),
+        katalogId:String(k.katalogId),nama:katMap[String(k.katalogId)]||String(k.katalogId),
+        qtyLaku:Number(k.qtyLaku)||0,currentQtyLaku:Number(k.qtyLaku)||0,
+        qtyDrop:Number(detail.qtyDrop)||Number(k.qtyLaku)||0,qtySisa:Number(detail.qtySisa)||0,
+        hargaTitip:Number(k.hargaTitip)||0,utang:Number(k.utang)||0,status:String(k.status),
+        setoranId:String(k.setoranId),correctionRequestId:request.id||'',correctionRequestStatus:request.status||''
+      };
+    });
+  return { pending, sudahBayar, correctionCandidates };
 }
 function apiKaryawanBayarSupplier(token, payload) {
   const sess = requireRole(token, ['karyawan']);
