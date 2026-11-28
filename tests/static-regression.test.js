@@ -216,3 +216,14 @@ has(serviceWorker, /app\.js\?v=7\.7/, 'Service worker static asset list must pre
 // Once an invoice is linked to a submitted setoran, employee adjustment must be locked in UI and API.
 has(backend, /canAdjust: !paidIds\[id\] && !String\(k\.setoranId \|\| ''\)/, 'Submitted supplier invoices must render as locked for employees');
 has(backend, /if\(row\.setoranId\) return \{success:false,message:'Laporan lapak sudah dikirim/, 'Backend must refuse post-submit employee quantity edits even if the client bypasses UI');
+
+
+// New supplier reporting and setoran accounting rules.
+if (/Masih ada tagihan titip jual yang belum dibayar/.test(backend)) throw new Error('Unpaid supplier invoices must not block daily settlement submission');
+has(backend, /\['Pending','Bayar'\]\.includes\(String\(draft\.status\)\)/, 'Submitted supplier report may remain unpaid and pending');
+has(backend, /totalTitipanDibayar = totalTitipanTunai \+ totalTitipanQris \+ totalTitipanTransfer/, 'Supplier payments must be included in setoran reconciliation');
+has(backend, /totalSistem - totalTitipanDibayar - \(totalTunai \+ totalQris \+ totalTransfer \+ totalPengeluaran\)/, 'Setoran variance must include supplier payments and operating expenses');
+has(frontend, /function renderSupplierDraftButtons\(d\)/, 'Employee recap must provide supplier-by-supplier report actions');
+has(frontend, /prepare-rekap-supplier/, 'Employee must be able to save a supplier report independently');
+has(frontend, /const selected = supplierId \? d\.distribusi\.filter/, 'Supplier report action must only include the selected supplier products');
+has(frontend, /total - totalTitipan - \(tunai \+ qris \+ transfer \+ pengeluaran\)/, 'Employee preview must use the same reconciliation formula as backend');
