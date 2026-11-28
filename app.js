@@ -2068,8 +2068,11 @@ async function doSubmitRekap() {
   const qris = qrisEl ? (parseInt(qrisEl.value, 10) || 0) : 0;
   let totalLaku = 0;
   d.distribusi.forEach(x => { totalLaku += (x.qtyDrop - (S.rekap[x.katalogId] || 0)) * x.hargaJual; });
-  const selisih = totalLaku - (tunai + qris);
-  const konfirmasi = '<div style="padding:4px 0"><div class="row-between text-sm mb-2"><span class="text-gray">Total Penjualan</span><strong>' + fmtRp(totalLaku) + '</strong></div><div class="row-between text-sm mb-2"><span class="text-gray">Tunai + QRIS</span><strong>' + fmtRp(tunai + qris) + '</strong></div><div class="row-between text-sm" style="border-top:1px solid #f1f5f9;padding-top:8px;margin-top:8px"><span class="text-gray">Selisih</span><strong class="' + (Math.abs(selisih) < 1 ? 'text-green' : 'text-red') + '">' + fmtRp(selisih) + '</strong></div><p class="text-xs text-gray mt-3">Data tidak bisa diubah setelah dikirim.</p></div>';
+  const transfer = parseInt(($('input[name="transfer"]') || {}).value, 10) || 0;
+  const pengeluaranTotal = $('[data-peng-row]').reduce((sum,r) => sum + (parseInt((r.querySelector('[data-peng-nom]') || {}).value,10)||0),0);
+  const pembayaranSupplier = ((S.titipanKaryawan || {}).sudahBayar || []).filter(x => !x.setoranId).reduce((sum,x) => sum + (Number(x.total)||0),0);
+  const selisih = totalLaku - pembayaranSupplier - (tunai + qris + transfer + pengeluaranTotal);
+  const konfirmasi = '<div style="padding:4px 0"><div class="row-between text-sm mb-2"><span class="text-gray">Total Penjualan</span><strong>' + fmtRp(totalLaku) + '</strong></div><div class="row-between text-sm mb-2"><span class="text-gray">Pembayaran supplier</span><strong>- ' + fmtRp(pembayaranSupplier) + '</strong></div><div class="row-between text-sm mb-2"><span class="text-gray">Tunai + QRIS + Transfer + Pengeluaran</span><strong>' + fmtRp(tunai + qris + transfer + pengeluaranTotal) + '</strong></div><div class="row-between text-sm" style="border-top:1px solid #f1f5f9;padding-top:8px;margin-top:8px"><span class="text-gray">Selisih</span><strong class="' + (Math.abs(selisih) < 1 ? 'text-green' : 'text-red') + '">' + fmtRp(selisih) + '</strong></div><p class="text-xs text-gray mt-3">Supplier yang belum dibayar tetap tercatat sebagai saldo kewajiban lapak.</p><p class="text-xs text-gray mt-1">Data tidak bisa diubah setelah dikirim.</p></div>';
   const ok = await new Promise(resolve => modal({ title: 'Kirim Laporan?', body: konfirmasi, actions: [{ label: 'Batal', onClick: c => { c(); resolve(false); } }, { label: 'Kirim', className: 'btn-primary', onClick: c => { c(); resolve(true); } }] }));
   if (!ok) return;
   S.submitting = true;
