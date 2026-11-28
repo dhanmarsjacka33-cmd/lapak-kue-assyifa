@@ -97,11 +97,11 @@ console.log('PASS: syntax and static regression checks');
 // Accounting regression guards: supplier payment methods are metadata only.
  // Supplier payments must not be deducted again from employee handover or QRIS/transfer receipts.
 has(backend, /const totalTitipanTunai = bayarTitipanHariIni\.filter\(b => String\(b\.metode \|\| 'Tunai'\) === 'Tunai'\)\.reduce/, 'Submit must total cash supplier payments linked to the settlement');
-has(backend, /if \(uangDisetor < 0\)/, 'Submit must reject cash outflows greater than cash sales');
+has(backend, /const uangDisetor = totalTunai;/, 'Setoran must preserve the actual cash amount entered by the employee');
 has(backend, /!\['Tunai','QRIS','Transfer'\]\.includes\(metode\)/, 'Supplier payments must support Tunai, QRIS and Transfer');
 has(backend, /if\(tunaiDiserahkan<0\)/, 'Admin edits must reject negative cash handovers');
 has(backend, /const tunaiDiserahkan=nt-np/, 'Admin edits must not subtract supplier payment metadata from cash handover');
-has(backend, /const uangDisetor = totalTunai - totalPengeluaran/, 'Employee cash handover deducts operating expenses only, never supplier payments');
+has(backend, /const uangDisetor = totalTunai;/, 'Employee cash handover must not deduct operating expenses a second time');
 has(backend, /const keuntunganBersih = totalPenjualan - totalPembayaranSupplier - pengeluaranOperasional/, 'Main cash must receive net profit after supplier payments and operating expenses');
 has(backend, /kategori:'Keuntungan Bersih'/, 'Approval must post net profit as a single cash inflow');
 if (/kategori:'Pembayaran Titipan Supplier'/.test(backend)) throw new Error('Supplier payments must not create main-cash outflow entries');
@@ -118,7 +118,7 @@ if (/data-f="uangDisetor"/.test(frontend)) throw new Error('Admin edit form must
 has(backend, /formatDate\(b\.tanggal\) === tgl \|\| !b\.setoranId/, 'Employee summary must include older unlinked supplier payments');
 has(backend, /tanggal: formatDate\(b\.tanggal\)/, 'Supplier payment history must expose payment date');
 has(frontend, /filter\(x => !x\.setoranId\)/, 'Employee summary must identify supplier payments not yet linked to a settlement');
-has(frontend, /const tunaiDiserahkan = tunai - pengeluaran/, 'Cash handover preview deducts operating expenses only');
+has(frontend, /const tunaiDiserahkan = tunai;/, 'Cash handover preview must preserve the actual cash amount entered by the employee');
 has(frontend, /Belum tertaut ke laporan setoran/, 'Unlinked supplier payments must be labeled as informational history, not a future deduction');
 
 has(backend, /const nominalBayar=Number\(payload\.nominalBayar\)/, 'Employee supplier payment must accept an editable partial payment amount');
@@ -173,7 +173,7 @@ const approveEnd = backend.indexOf('\nfunction ', approveStart + 10);
 const approveCode = backend.slice(approveStart, approveEnd);
 if (/hasHeaders\(kasSheet, \['id','tanggal','keterangan','tipe','kategori','nominal','saldo'\]\)/.test(supplierPayCode + approveCode)) throw new Error('Optional Kas category must not block supplier payment or setoran approval');
 has(frontend, /Penerimaan belum diisi/, 'Employee rekap must clearly warn when sales exist but all payment channels are zero');
-has(frontend, /Pengeluaran operasional melebihi tunai yang diinput/, 'Employee rekap must explain why cash handover becomes negative');
+has(frontend, /Pengeluaran operasional \(sudah digunakan\)/, 'Employee rekap must display operating expenses separately');
 has(frontend, /Kekurangan tunai/, 'Negative cash handover must be labeled as a shortfall, not an amount to hand over');
 
 // Search coverage for both roles and supplier bill aggregation across lapaks.
@@ -207,11 +207,11 @@ has(frontend, /api\('getKas', \{ token:S\.token, limit:50 \}\)/, 'Admin cash bal
 const indexHtml = fs.readFileSync('index.html', 'utf8');
 const testingHtml = fs.readFileSync('index.testing.html', 'utf8');
 const serviceWorker = fs.readFileSync('sw.js', 'utf8');
-has(indexHtml, /app\.js\?v=7\.6/, 'Main app must request the new frontend asset version');
+has(indexHtml, /app\.js\?v=7\.7/, 'Main app must request the new frontend asset version');
 has(testingHtml, /app\.js\?v=7\.6/, 'Testing page must request the new frontend asset version');
 has(testingHtml, /<script src="app\.js\?v=7\.6" defer><\/script>/, 'Testing page executable script must use the same frontend asset version as its preload');
-has(serviceWorker, /kueassyifa-v15/, 'Service worker cache must be invalidated for the new release');
-has(serviceWorker, /app\.js\?v=7\.6/, 'Service worker static asset list must preload the new frontend version');
+has(serviceWorker, /kueassyifa-v16/, 'Service worker cache must be invalidated for the new release');
+has(serviceWorker, /app\.js\?v=7\.7/, 'Service worker static asset list must preload the new frontend version');
 
 // Once an invoice is linked to a submitted setoran, employee adjustment must be locked in UI and API.
 has(backend, /canAdjust: !paidIds\[id\] && !String\(k\.setoranId \|\| ''\)/, 'Submitted supplier invoices must render as locked for employees');
