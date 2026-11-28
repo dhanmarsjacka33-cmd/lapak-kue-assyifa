@@ -21,7 +21,7 @@ const S = {
   settingPayroll: null, hariEfektif: null,
   payrollBulan: null, payrollData: null, payrollHistory: null,
   dashboardProfit: null, profitRange: 30, absensiHariIni: null,
-  konsinyasi: null, saldoSupplier: null, konsinyasiFilter: {},
+  konsinyasi: null, saldoSupplier: null, konsinyasiFilter: {}, invoiceCorrections: null,
   riwayatBayarSupplier: null, templateBox: null,
   pesananPelanggan: null, pesananPelangganDetail: null,
   kalenderBulan: null, kalenderData: null,
@@ -512,6 +512,9 @@ function renderTitipanSection() {
         <button class="btn btn-success btn-block btn-sm" data-act="bayar-titipan" data-id="${esc(s.supplierId)}">
           ${ico('money','ico-sm')} Bayar ke ${esc(s.supplierNama)}
         </button>
+        <details class="mt-2"><summary class="text-xs text-gray">Rincian invoice & koreksi</summary>
+          ${(s.items||[]).map(it => `<div class="row-between text-xs mt-2"><span>${esc(it.nama)} · ${it.qtyLaku} pcs · ${fmtRp(it.utang)}</span>${it.canAdjust===false ? `<button class="btn btn-ghost btn-sm" data-act="request-invoice-correction" data-id="${esc(it.id)}">Ajukan koreksi</button>` : '<span class="text-gray">Belum dikirim</span>'}</div>`).join('')}
+        </details>
       </div>
     `).join('');
   }
@@ -1249,7 +1252,11 @@ function tabDashboardProfit() {
 function tabKonsinyasi() {
   const saldo = S.saldoSupplier || [], list = S.konsinyasi || [];
   const totalUtang = saldo.reduce((s, x) => s + (x.pending || 0), 0);
-  let html = `<h3 class="card-title">${ico('truck')} Titip Jual</h3>
+  const corrections = (S.invoiceCorrections || []).filter(x => x.status === 'Pending');
+  let html = `<h3 class="card-title">Permohonan Koreksi Invoice (${corrections.length})</h3>`;
+  if (!corrections.length) html += '<div class="empty"><p>Tidak ada permohonan koreksi yang menunggu.</p></div>';
+  else html += corrections.map(c => `<div class="card"><div class="row-between"><strong>${esc(c.supplierNama)} · ${esc(c.lapakNama)}</strong><span class="badge badge-warn">Menunggu</span></div><div class="text-xs text-gray mt-1">${esc(c.karyawanNama)} · ${esc(c.tanggal)} · Invoice ${esc(c.invoiceId)}</div><div class="row-between mt-2 text-sm"><span>Jumlah lama → usulan</span><strong>${c.qtyLama} → ${c.qtyUsulan} pcs</strong></div><p class="text-sm mt-2">Alasan: ${esc(c.alasan)}</p><div class="row mt-2" style="gap:6px"><button class="btn btn-success btn-sm" data-act="approve-invoice-correction" data-id="${esc(c.id)}" style="flex:1">Setujui</button><button class="btn btn-danger btn-sm" data-act="reject-invoice-correction" data-id="${esc(c.id)}" style="flex:1">Tolak</button></div></div>`).join('');
+  html += `<h3 class="card-title mt-3">${ico('truck')} Titip Jual</h3>
     <div class="hero hero-amber"><div class="hero-label">Total Tagihan Gabungan Semua Lapak</div><div class="hero-value">${fmtRp(totalUtang)}</div><div class="hero-sub">Satu pembayaran untuk setiap supplier, mencakup semua lapak</div></div>
     <h3 class="card-title">${ico('list')} Tagihan per Supplier</h3><div class="field mb-2"><input type="search" class="input" data-bill-supplier-search placeholder="Cari supplier..." autocomplete="off"></div>`;
   const withPending = saldo.filter(s => s.pending > 0);
@@ -1492,6 +1499,7 @@ function handleClick(e) {
   if (a === 'absen-keluar') return doAbsenKeluar();
   if (a === 'bayar-titipan') return formBayarTitipan(id);
   if (a === 'batal-bayar-titipan') return batalBayarTitipan(id);
+  if (a === 'request-invoice-correction') return formRequestInvoiceCorrection(id);
   if (a === 'kar-tab') {
     S.tab = tab || 'home';
     updateKaryawanTabbar();
@@ -1582,6 +1590,8 @@ function handleClick(e) {
   if (a === 'profit-range') { S.profitRange = parseInt(btn.dataset.range, 10); return loadDashboardProfit(); }
 
   if (a === 'load-konsinyasi') return loadKonsinyasi();
+  if (a === 'approve-invoice-correction') return decideInvoiceCorrection(id,'approve');
+  if (a === 'reject-invoice-correction') return decideInvoiceCorrection(id,'reject');
   if (a === 'bayar-supplier') return formBayarSupplier(id);
   if (a === 'edit-konsinyasi') return formEditKonsinyasi(id);
   if (a === 'detail-konsinyasi') return showDetailKonsinyasi(id);
@@ -2250,7 +2260,7 @@ async function loadTabData(tab) {
       const supEl = $('[data-kons-supplier]'), statEl = $('[data-kons-status]');
       const supplierId = supEl ? supEl.value : '', status = statEl ? statEl.value : '';
       S.konsinyasiFilter = { supplierId, status };
-      tasks.push(Promise.all([cached('getKonsinyasi', { token: S.token, filter: { supplierId, status } }, 'konsinyasi_' + JSON.stringify({ supplierId, status })).then(d => S.konsinyasi = d), cached('getSaldoSupplier', { token: S.token }, 'saldoSupplier').then(d => S.saldoSupplier = d)]));
+      tasks.push(Promise.all([cached('getKonsinyasi', { token: S.token, filter: { supplierId, status } }, 'konsinyasi_' + JSON.stringify({ supplierId, status })).then(d => S.konsinyasi = d), cached('getSaldoSupplier', { token: S.token }, 'saldoSupplier').then(d => S.saldoSupplier = d), api('getInvoiceCorrections',{token:S.token}).then(d=>S.invoiceCorrections=d)]));
     }
     if (tab === 'analytics') { const range = S.analyticsRange || 30; tasks.push(cached('getAnalytics', { token: S.token, range }, 'analytics_' + range).then(d => S.analytics = d)); }
     if (tab === 'analisis-performa') { const range = S.analisisRange || 30, groupBy = S.analisisGroupBy || 'item', ids = S.analisisSelectedIds || []; tasks.push(cached('getAnalisisPerforma', { token: S.token, range, groupBy, ids }, 'analisis_' + JSON.stringify({ range, groupBy, ids })).then(d => { S.analisisPerforma = d; if (!ids.length && d.selectedIds) S.analisisSelectedIds = d.selectedIds; })); }
@@ -3320,28 +3330,58 @@ async function formBayarSupplier(supplierId) {
     hideLoader();
     if (detail.total <= 0) return toast('Tidak ada utang pending.', 'info');
     const sup = S.suppliers.find(s => String(s.id) === String(supplierId)) || {};
-    let body = '<div class="card-flat" style="padding:12px;margin-bottom:12px"><strong>' + esc(sup.nama || supplierId) + '</strong><div class="text-xs text-gray mt-1">' + (detail.groupedCount || detail.count) + ' baris gabungan dari ' + detail.count + ' transaksi/lapak · Titipan: ' + fmtRp(detail.totalTitipan || 0) + ' · Pembelian susulan: ' + fmtRp(detail.totalPembelianSusulan || 0) + '</div><div class="hero" style="margin-top:12px;margin-bottom:0;padding:16px"><div class="hero-label">Total Tagihan Supplier (semua lapak)</div><div class="hero-value" style="font-size:22px;margin-bottom:0">' + fmtRp(detail.total) + '</div></div></div>';
+    const supplierBalance=(S.saldoSupplier||[]).find(s=>String(s.supplierId)===String(supplierId))||{};
+    const credit=Math.max(0,Number(supplierBalance.kredit)||0);
+    const cashRequired=Math.max(0,detail.total-credit);
+    let body = '<div class="card-flat" style="padding:12px;margin-bottom:12px"><strong>' + esc(sup.nama || supplierId) + '</strong><div class="text-xs text-gray mt-1">' + (detail.groupedCount || detail.count) + ' baris gabungan dari ' + detail.count + ' transaksi/lapak · Titipan: ' + fmtRp(detail.totalTitipan || 0) + ' · Pembelian susulan: ' + fmtRp(detail.totalPembelianSusulan || 0) + '</div><div class="hero" style="margin-top:12px;margin-bottom:0;padding:16px"><div class="hero-label">Total Tagihan Supplier (semua lapak)</div><div class="hero-value" style="font-size:22px;margin-bottom:0">' + fmtRp(detail.total) + '</div><div class="text-xs mt-2">Saldo kredit supplier: <strong>' + fmtRp(credit) + '</strong><br>Minimal uang baru yang perlu dibayar: <strong>' + fmtRp(cashRequired) + '</strong></div></div></div>';
     body += '<p class="text-xs font-semibold text-gray mb-2">Rincian digabung berdasarkan kue dan supplier, walaupun tanggal atau lapaknya berbeda</p><div style="max-height:300px;overflow-y:auto">';
     body += detail.items.map(it => {
       const lapakText = (it.sourceBreakdown || it.lapakBreakdown || []).map(x => (x.tanggal ? x.tanggal + ' · ' : '') + x.lapakNama + ': ' + x.qty + ' pcs').join(' · ');
       return '<div class="row-between text-xs" style="padding:8px 0;border-bottom:1px solid #f8fafc"><div style="min-width:0;flex:1"><div class="font-semibold">' + esc(it.nama) + ' <span class="badge ' + (it.jenis === 'Pembelian susulan' ? 'badge-warn' : 'badge-info') + '">' + esc(it.jenis || 'Titipan terjual') + '</span></div><div class="text-gray">' + esc(lapakText) + '</div><div class="text-gray">' + it.qtyLaku + ' × ' + fmtRp(it.hargaTitip) + '</div></div><div class="text-right font-bold">' + fmtRp(it.utang) + '</div></div>';
     }).join('');
     body += '</div>';
-    body += '<div class="field mt-3"><label>Metode Pembayaran</label><select data-f="metode" class="select"><option value="Tunai">Tunai</option><option value="QRIS">QRIS</option><option value="Transfer">Transfer</option></select></div>';
+    body += '<div class="field mt-3"><label>Uang yang dibayarkan sekarang (minimal ' + fmtRp(cashRequired) + ')</label><input data-f="nominalBayar" type="number" min="' + cashRequired + '" step="1" inputmode="numeric" class="input" value="' + cashRequired + '"></div><div class="field mt-3"><label>Metode Pembayaran</label><select data-f="metode" class="select"><option value="Tunai">Tunai</option><option value="QRIS">QRIS</option><option value="Transfer">Transfer</option></select></div>';
     modal({
       title: 'Bayar Supplier', body,
       actions: [
         { label: 'Batal', onClick: c => c() },
         { label: 'Bayar ' + fmtRp(detail.total), className: 'btn-success', onClick: async (c, w) => {
           const metode = w.querySelector('[data-f="metode"]').value;
+          const nominalBayar = Number(w.querySelector('[data-f="nominalBayar"]').value);
+          if(!Number.isSafeInteger(nominalBayar)||nominalBayar<cashRequired)return toast('Nominal pembayaran minimal '+fmtRp(cashRequired)+'.','error');
           c(); showLoader();
-          try { const r = await api('bayarSupplier', { token: S.token, payload: { supplierId, metode } }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) { await loadKonsinyasi(); S.dash = await api('getAdminDashboard', { token: S.token }); MEM.clear(); } }
+          try { const r = await api('bayarSupplier', { token: S.token, payload: { supplierId, metode, nominalBayar } }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) { await loadKonsinyasi(); S.dash = await api('getAdminDashboard', { token: S.token }); MEM.clear(); } }
           catch (e) { toast(e.message, 'error'); }
           finally { hideLoader(); render(); }
         } }
       ]
     });
   } catch (e) { hideLoader(); toast(e.message, 'error'); }
+}
+async function decideInvoiceCorrection(id, decision) {
+  const reason = decision === 'reject' ? prompt('Alasan penolakan koreksi:') : (prompt('Catatan admin (boleh kosong):') || '');
+  if (decision === 'reject' && !String(reason||'').trim()) return;
+  showLoader();
+  try {
+    const r=await api('decideInvoiceCorrection',{token:S.token,id,decision,reason});
+    toast(r.message,r.success?'success':'error');
+    if(r.success){MEM.clear();await loadKonsinyasi();}
+  }catch(e){toast(e.message,'error');}
+  finally{hideLoader();render();}
+}
+function formRequestInvoiceCorrection(invoiceId) {
+  const invoice=(S.titipanKaryawan?.pending||[]).flatMap(x=>x.items||[]).find(x=>String(x.id)===String(invoiceId))||{};
+  formModal({title:'Ajukan Koreksi Invoice',fields:[
+    {key:'qtyLaku',label:'Jumlah kue terjual yang benar',type:'number',value:Number(invoice.qtyLaku)||0},
+    {key:'alasan',label:'Alasan koreksi',type:'textarea',required:true}
+  ],onSubmit:async(data,close)=>{
+    const qty=Number(data.qtyLaku);
+    if(!Number.isSafeInteger(qty)||qty<0)return toast('Jumlah harus bilangan bulat nol atau lebih.','error');
+    close();showLoader();
+    try{const r=await api('requestInvoiceCorrection',{token:S.token,payload:{invoiceId,qtyLaku:qty,alasan:data.alasan}});toast(r.message,r.success?'success':'error');}
+    catch(e){toast(e.message,'error');}
+    finally{hideLoader();render();}
+  }});
 }
 function formEditKonsinyasi(id) {
   const item = (S.konsinyasi || []).find(k => String(k.id) === String(id));
