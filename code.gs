@@ -158,6 +158,9 @@ const ROUTES = {
   getKonsinyasi: p => apiGetKonsinyasi(p.token, p.filter),
   editKonsinyasi: p => apiEditKonsinyasi(p.token, p.id, p.updates),
   getSaldoSupplier: p => apiGetSaldoSupplier(p.token),
+  getInvoiceCorrections: p => apiGetInvoiceCorrections(p.token),
+  requestInvoiceCorrection: p => apiRequestInvoiceCorrection(p.token, p.payload),
+  decideInvoiceCorrection: p => apiDecideInvoiceCorrection(p.token, p.id, p.decision, p.reason),
   bayarSupplier: p => apiBayarSupplier(p.token, p.payload),
   getRiwayatBayarSupplier: p => apiGetRiwayatBayarSupplier(p.token, p.filter),
   getKonsinyasiDetailSupplier: p => apiGetKonsinyasiDetailSupplier(p.token, p.supplierId),
@@ -217,6 +220,8 @@ function setupDatabase() {
     { name: 'HariEfektif',     headers: ['id','bulan','lapakId','jumlahHari','catatan'] },
     { name: 'RekapPayroll',    headers: ['id','bulan','userId','userName','rincianJSON','totalBersih','kasId','dibayarAt','dibayarBy'] },
     { name: 'Konsinyasi',      headers: ['id','tanggal','supplierId','lapakId','katalogId','qtyLaku','hargaTitip','utang','status','kasId','bayarAt','bayarBy','setoranId','catatan'] },
+    { name: 'KoreksiInvoice', headers: ['id','tanggal','invoiceId','supplierId','lapakId','karyawanId','karyawanNama','qtyLama','qtyUsulan','alasan','status','adminBy','adminAt','hasil'] },
+    { name: 'SaldoSupplier', headers: ['id','tanggal','supplierId','tipe','nominal','referensiId','catatan','createdBy'] },
     { name: 'BayarTitipanKaryawan', headers: ['id','tanggal','lapakId','supplierId','userName','totalBayar','konsinyasiIds','setoranId','createdAt','catatan','noNota','metode','status'] },
     { name: 'TemplateBox',     headers: ['id','nama','hargaPaket','keterangan','aktif'] },
     { name: 'TemplateBoxItem', headers: ['id','templateBoxId','katalogId','qty'] },
@@ -4049,6 +4054,127 @@ function apiEditKonsinyasi(token, id, updates) {
     return { success: true, message: 'Titipan diperbarui; detail setoran dan saldo stok ikut disinkronkan.' };
   } finally { lock.releaseLock(); }
 }
+
+function apiRequestInvoiceCorrection(token, payload) {
+  const sess = requireRole(token, ['karyawan']);
+  payload = payload || {};
+  const invoiceId = String(payload.invoiceId || '').trim();
+  const qtyUsulan = Number(payload.qtyLaku);
+  const alasan = String(payload.alasan || '').trim();
+  if (!invoiceId || !alasan) return {success:false,message:'Invoice dan alasan koreksi wajib diisi.'};
+  if (!Number.isSafeInteger(qtyUsulan) || qtyUsulan < 0) return {success:false,message:'Jumlah kue harus bilangan bulat nol atau lebih.'};
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return {success:false,message:'Sistem sibuk. Coba lagi.'};
+  try {
+    const ss=SpreadsheetApp.getActiveSpreadsheet(), ks=ss.getSheetByName('Konsinyasi'), req=ss.getSheetByName('KoreksiInvoice');
+    if(!hasHeaders(ks,['id','supplierId','lapakId','katalogId','qtyLaku','hargaTitip','utang','status','setoranId']) ||
+       !hasHeaders(req,['id','tanggal','invoiceId','supplierId','lapakId','karyawanId','karyawanNama','qtyLama','qtyUsulan','alasan','status','adminBy','adminAt','hasil']))
+      return {success:false,message:'Struktur koreksi invoice belum lengkap. Jalankan setupDatabase pada project TESTING.'};
+    const rows=ks.getDataRange().getValues(), h=rows[0].map(String);
+    const ix=Object.fromEntries(['id','supplierId','lapakId','katalogId','qtyLaku','hargaTitip','utang','status','setoranId'].map(k=>[k,h.indexOf(k)]));
+    const pos=rows.findIndex((r,i)=>i>0&&String(r[ix.id])===invoiceId);
+    if(pos<1)return {success:false,message:'Invoice tidak ditemukan.'};
+    const r=rows[pos];
+    if(String(r[ix.lapakId])!==String(sess.lapakId))return {success:false,message:'Invoice ini bukan milik lapak Anda.'};
+    if(String(r[ix.status])!=='Pending' || !String(r[ix.setoranId]||''))return {success:false,message:'Hanya invoice yang sudah masuk laporan dan masih pending yang dapat diajukan untuk koreksi.'};
+    const detail=ss.getSheetByName('SetoranDetail');
+    if(!detail || !hasHeaders(detail,['setoranId','katalogId','qtyDrop','qtySisa','qtyLaku']))return {success:false,message:'Rincian setoran belum lengkap.'};
+    const dd=detail.getDataRange().getValues(), dh=dd[0].map(String);
+    const di=(k)=>dh.indexOf(k);
+    const dpos=dd.findIndex((x,i)=>i>0&&String(x[di('setoranId')])===String(r[ix.setoranId])&&String(x[di('katalogId')])===String(r[ix.katalogId]));
+    if(dpos<1)return {success:false,message:'Rincian stok invoice tidak ditemukan.'};
+    const drop=Number(dd[dpos][di('qtyDrop')])||0;
+    if(qtyUsulan>drop)return {success:false,message:'Jumlah terjual tidak boleh melebihi jumlah kue yang diterima ('+drop+').' };
+    const requests=req.getDataRange().getValues(), rh=requests[0].map(String), ri=rh.indexOf('invoiceId'), rs=rh.indexOf('status');
+    if(requests.slice(1).some(x=>String(x[ri])===invoiceId&&String(x[rs])==='Pending'))return {success:false,message:'Masih ada permohonan koreksi yang menunggu admin.'};
+    const id='KI'+Utilities.getUuid().slice(0,10).toUpperCase();
+    appendObjectsByHeaders(req,[{id,tanggal:new Date(),invoiceId,supplierId:r[ix.supplierId],lapakId:r[ix.lapakId],karyawanId:sess.id,karyawanNama:sess.name,qtyLama:Number(r[ix.qtyLaku])||0,qtyUsulan,alasan,status:'Pending',adminBy:'',adminAt:'',hasil:''}]);
+    _clearSheetCache();
+    return {success:true,message:'Permohonan koreksi dikirim kepada admin.',id};
+  } finally {lock.releaseLock();}
+}
+
+function apiGetInvoiceCorrections(token) {
+  requireRole(token,['admin']);
+  const names={}; getSheetData('Katalog').forEach(x=>names[String(x.id)]=x.nama||x.id);
+  const suppliers={}; getSheetData('Suppliers').forEach(x=>suppliers[String(x.id)]=x.nama||x.id);
+  const lapaks={}; getSheetData('Lapak').forEach(x=>lapaks[String(x.id)]=x.nama||x.id);
+  return getSheetData('KoreksiInvoice').map(x=>({
+    id:x.id, tanggal:formatDateTime(x.tanggal), invoiceId:x.invoiceId,
+    supplierId:x.supplierId, supplierNama:suppliers[String(x.supplierId)]||x.supplierId,
+    lapakId:x.lapakId, lapakNama:lapaks[String(x.lapakId)]||x.lapakId,
+    karyawanNama:x.karyawanNama, katalogNama:names[String((getSheetData('Konsinyasi').find(k=>String(k.id)===String(x.invoiceId))||{}).katalogId)]||'',
+    qtyLama:Number(x.qtyLama)||0, qtyUsulan:Number(x.qtyUsulan)||0,
+    alasan:x.alasan||'', status:x.status||'Pending', adminBy:x.adminBy||'', hasil:x.hasil||''
+  })).sort((a,b)=>String(b.tanggal).localeCompare(String(a.tanggal)));
+}
+
+function apiDecideInvoiceCorrection(token, id, decision, reason) {
+  const sess=requireRole(token,['admin']);
+  decision=String(decision||'').toLowerCase();
+  reason=String(reason||'').trim();
+  if(!id || !['approve','reject'].includes(decision))return {success:false,message:'Keputusan koreksi tidak valid.'};
+  if(decision==='reject'&&!reason)return {success:false,message:'Alasan penolakan wajib diisi.'};
+  const lock=LockService.getScriptLock();
+  if(!lock.tryLock(CONFIG.LOCK_TIMEOUT))return {success:false,message:'Sistem sibuk. Coba lagi.'};
+  try{
+    const ss=SpreadsheetApp.getActiveSpreadsheet(), req=ss.getSheetByName('KoreksiInvoice'), ks=ss.getSheetByName('Konsinyasi'), detail=ss.getSheetByName('SetoranDetail');
+    if(!req||!ks||!detail)return {success:false,message:'Sheet koreksi atau invoice tidak ditemukan.'};
+    const rd=req.getDataRange().getValues(), rh=rd[0].map(String), ri=k=>rh.indexOf(k);
+    const rp=rd.findIndex((r,i)=>i>0&&String(r[ri('id')])===String(id));
+    if(rp<1)return {success:false,message:'Permohonan tidak ditemukan.'};
+    const request=rd[rp];
+    if(String(request[ri('status')])!=='Pending')return {success:false,message:'Permohonan ini sudah diproses.'};
+    const kd=ks.getDataRange().getValues(), kh=kd[0].map(String), ki=k=>kh.indexOf(k);
+    const kp=kd.findIndex((r,i)=>i>0&&String(r[ki('id')])===String(request[ri('invoiceId')]));
+    if(kp<1)return {success:false,message:'Invoice asal tidak ditemukan.'};
+    const invoice=kd[kp];
+    if(String(invoice[ki('status')])!=='Pending')return {success:false,message:'Invoice sudah dibayar atau tidak lagi pending. Koreksi otomatis dibatalkan untuk melindungi riwayat pembayaran.'};
+    if(decision==='reject'){
+      req.getRange(rp+1,ri('status')+1).setValue('Rejected');
+      req.getRange(rp+1,ri('adminBy')+1).setValue(sess.username);
+      req.getRange(rp+1,ri('adminAt')+1).setValue(new Date());
+      req.getRange(rp+1,ri('hasil')+1).setValue(reason);
+      _clearSheetCache();
+      return {success:true,message:'Permohonan koreksi ditolak.'};
+    }
+    const active=getSheetData('BayarTitipanKaryawan').filter(b=>String(b.status||'Active')==='Active');
+    const invoiceId=String(invoice[ki('id')]);
+    const hasPayment=active.some(b=>{
+      const raw=String(b.konsinyasiIds||'');
+      if(raw.trim().startsWith('[')){try{return JSON.parse(raw).some(x=>x&&String(x.id)===invoiceId);}catch(e){return true;}}
+      return raw.split(',').map(x=>x.trim()).includes(invoiceId);
+    });
+    if(hasPayment)return {success:false,message:'Invoice pernah menerima pembayaran. Admin harus merekonsiliasi pembayaran terlebih dahulu; koreksi tidak diterapkan.'};
+    const setoranId=String(invoice[ki('setoranId')]||''), katalogId=String(invoice[ki('katalogId')]||'');
+    const dd=detail.getDataRange().getValues(), dh=dd[0].map(String), di=k=>dh.indexOf(k);
+    const dp=dd.findIndex((r,i)=>i>0&&String(r[di('setoranId')])===setoranId&&String(r[di('katalogId')])===katalogId);
+    if(dp<1)return {success:false,message:'Detail setoran tidak ditemukan. Tidak ada perubahan.'};
+    const qtyDrop=Number(dd[dp][di('qtyDrop')])||0, qty=Number(request[ri('qtyUsulan')])||0;
+    if(!Number.isSafeInteger(qty)||qty<0||qty>qtyDrop)return {success:false,message:'Jumlah usulan sudah tidak valid terhadap stok drop.'};
+    const qtySisa=qtyDrop-qty, price=Number(invoice[ki('hargaTitip')])||0, debt=qty*price;
+    const journal=beginWriteJournal(['Konsinyasi','SetoranDetail','KoreksiInvoice']);
+    try{
+      journalSetValue(journal,ks,kp+1,ki('qtyLaku')+1,qty);
+      journalSetValue(journal,ks,kp+1,ki('utang')+1,debt);
+      journalSetValue(journal,detail,dp+1,di('qtyLaku')+1,qty);
+      journalSetValue(journal,detail,dp+1,di('qtySisa')+1,qtySisa);
+      if(di('subtotal')>=0)journalSetValue(journal,detail,dp+1,di('subtotal')+1,qty*(Number(dd[dp][di('hargaJual')])||0));
+      journalSetValue(journal,req,rp+1,ri('status')+1,'Approved');
+      journalSetValue(journal,req,rp+1,ri('adminBy')+1,sess.username);
+      journalSetValue(journal,req,rp+1,ri('adminAt')+1,new Date());
+      journalSetValue(journal,req,rp+1,ri('hasil')+1,reason||'Disetujui admin');
+    }catch(e){try{rollbackWriteJournal(journal);}catch(re){return {success:false,message:'Koreksi gagal dan rollback perlu pemeriksaan: '+e.message+' | '+re.message};}return {success:false,message:'Koreksi gagal. Semua perubahan dibatalkan: '+e.message};}
+    _clearSheetCache();
+    return {success:true,message:'Koreksi invoice disetujui. Tagihan dan rincian stok sudah disesuaikan.',qtyLaku:qty,utang:debt};
+  }finally{lock.releaseLock();}
+}
+
+function getSaldoKreditSupplier_(supplierId) {
+  return getSheetData('SaldoSupplier').filter(x=>String(x.supplierId)===String(supplierId))
+    .reduce((sum,x)=>sum+(String(x.tipe)==='Kredit'?1:-1)*(Number(x.nominal)||0),0);
+}
+
 function apiGetSaldoSupplier(token) {
   requireRole(token, ['admin']);
   const supMap = {}; getSheetData('Suppliers').forEach(s => supMap[s.id] = s);
@@ -4059,6 +4185,8 @@ function apiGetSaldoSupplier(token) {
     if (k.status === 'Pending') { balanceMap[sid].pending += Number(k.utang) || 0; balanceMap[sid].pendingCount++; }
     else if (k.status === 'Bayar') { balanceMap[sid].totalDibayar += Number(k.utang) || 0; balanceMap[sid].countDibayar++; }
   });
+  getSheetData('Suppliers').forEach(s=>{const sid=String(s.id);if(!balanceMap[sid])balanceMap[sid]={supplierId:sid,nama:s.nama||sid,tipeTransaksi:s.tipeTransaksi||'BeliPutus',pending:0,pendingCount:0,totalDibayar:0,countDibayar:0};});
+  Object.values(balanceMap).forEach(x=>{x.kredit=getSaldoKreditSupplier_(x.supplierId);x.totalTagihan=x.pending;x.sisaSetelahKredit=Math.max(0,x.pending-x.kredit);});
   return Object.values(balanceMap).sort((a, b) => b.pending - a.pending);
 }
 function apiBayarSupplier(token, payload) {
@@ -4071,48 +4199,37 @@ function apiBayarSupplier(token, payload) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success: false, message: 'Sistem sibuk. Coba lagi.' };
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName('Konsinyasi');
-    const data = sheet.getDataRange().getValues();
-    const h = data[0];
-    const iSupplier = h.indexOf('supplierId'), iStatus = h.indexOf('status');
-    const iUtang = h.indexOf('utang'), iKasId = h.indexOf('kasId');
-    const iBayarAt = h.indexOf('bayarAt'), iBayarBy = h.indexOf('bayarBy');
-    if (iSupplier < 0 || iStatus < 0 || iUtang < 0 || iKasId < 0) return {success:false,message:'Struktur Konsinyasi belum lengkap. Tidak ada perubahan.'};
-    let totalBayar = 0;
-    const rowsToUpdate = [];
-    for (let i = 1; i < data.length; i++) {
-      if (String(data[i][iSupplier]) === supplierId && data[i][iStatus] === 'Pending') {
-        totalBayar += Number(data[i][iUtang]) || 0; rowsToUpdate.push(i + 1);
-      }
-    }
-    if (totalBayar <= 0) return { success: false, message: 'Tidak ada utang pending.' };
-    const kasSheet = ss.getSheetByName('Kas');
-    if (!hasHeaders(kasSheet, ['id','tanggal','keterangan','tipe','nominal','saldo'])) return {success:false,message:'Struktur Kas belum lengkap. Tidak ada perubahan.'};
-    const kasData = kasSheet.getDataRange().getValues();
-    const iSaldo = kasData[0].indexOf('saldo');
-    const saldoLama = kasData.length > 1 ? Number(kasData[kasData.length - 1][iSaldo]) || 0 : 0;
-    const kasId = 'KS' + Utilities.getUuid().slice(0, 8).toUpperCase();
-    const sup = getSheetData('Suppliers').find(s => String(s.id) === supplierId) || {};
-    const kasRow = {id:kasId,tanggal:new Date(),keterangan:'Bayar Supplier: '+(sup.nama||supplierId)+' ('+rowsToUpdate.length+' transaksi) ['+metode+']',tipe:'Keluar',kategori:'Konsinyasi',metode,nominal:totalBayar,saldo:saldoLama-totalBayar};
-    const journal = beginWriteJournal(['Konsinyasi','Kas']);
-    try {
-      appendObjectsByHeaders(kasSheet,[kasRow]);
-      rowsToUpdate.forEach(r => {
-        journalSetValue(journal, sheet, r, iStatus + 1, 'Bayar');
-        journalSetValue(journal, sheet, r, iKasId + 1, kasId);
-        if (iBayarAt >= 0) journalSetValue(journal, sheet, r, iBayarAt + 1, new Date());
-        if (iBayarBy >= 0) journalSetValue(journal, sheet, r, iBayarBy + 1, sess.username);
-      });
-    } catch (writeError) {
-      try { rollbackWriteJournal(journal); }
-      catch (rollbackError) { console.error('Gagal rollback pembayaran supplier:',rollbackError.message); return {success:false,message:'Pembayaran gagal dan pemulihan otomatis perlu diperiksa. '+writeError.message+' | '+rollbackError.message}; }
-      _clearSheetCache();
-      return {success:false,message:'Pembayaran gagal. Perubahan dibatalkan: '+writeError.message};
-    }
+    const ss=SpreadsheetApp.getActiveSpreadsheet(), sheet=ss.getSheetByName('Konsinyasi'), creditSheet=ss.getSheetByName('SaldoSupplier');
+    if(!creditSheet || !hasHeaders(creditSheet,['id','tanggal','supplierId','tipe','nominal','referensiId','catatan','createdBy']))
+      return {success:false,message:'Sheet SaldoSupplier belum tersedia. Jalankan setupDatabase pada project TESTING.'};
+    const data=sheet.getDataRange().getValues(), h=data[0].map(String);
+    const iSupplier=h.indexOf('supplierId'), iStatus=h.indexOf('status'), iUtang=h.indexOf('utang'), iKasId=h.indexOf('kasId'), iBayarAt=h.indexOf('bayarAt'), iBayarBy=h.indexOf('bayarBy');
+    if([iSupplier,iStatus,iUtang,iKasId].some(i=>i<0))return {success:false,message:'Struktur Konsinyasi belum lengkap.'};
+    let totalDebt=0;const rows=[];
+    for(let i=1;i<data.length;i++)if(String(data[i][iSupplier])===supplierId&&String(data[i][iStatus])==='Pending'){const v=Math.max(0,Number(data[i][iUtang])||0);if(v){totalDebt+=v;rows.push(i+1);}}
+    if(totalDebt<=0)return {success:false,message:'Tidak ada utang pending.'};
+    const creditBefore=Math.max(0,getSaldoKreditSupplier_(supplierId));
+    const creditUsed=Math.min(creditBefore,totalDebt);
+    const cashRequired=totalDebt-creditUsed;
+    const cashInput=payload.nominalBayar===undefined||payload.nominalBayar===null||payload.nominalBayar===''?cashRequired:Number(payload.nominalBayar);
+    if(!Number.isSafeInteger(cashInput)||cashInput<cashRequired)return {success:false,message:'Pembayaran tunai minimal '+fmtRpLocal(cashRequired)+' setelah memakai kredit supplier '+fmtRpLocal(creditUsed)+'.'};
+    const overpayment=cashInput-cashRequired;
+    const kasSheet=ss.getSheetByName('Kas');
+    if(!hasHeaders(kasSheet,['id','tanggal','keterangan','tipe','nominal','saldo']))return {success:false,message:'Struktur Kas belum lengkap.'};
+    const kasData=kasSheet.getDataRange().getValues(), kh=kasData[0].map(String), iSaldo=kh.indexOf('saldo');
+    const saldoLama=kasData.length>1?Number(kasData[kasData.length-1][iSaldo])||0:0;
+    const kasId=cashInput>0?'KS'+Utilities.getUuid().slice(0,8).toUpperCase():'';
+    const sup=getSheetData('Suppliers').find(s=>String(s.id)===supplierId)||{};
+    const journal=beginWriteJournal(['Konsinyasi','Kas','SaldoSupplier']);
+    try{
+      if(cashInput>0)appendObjectsByHeaders(kasSheet,[{id:kasId,tanggal:new Date(),keterangan:'Bayar Supplier: '+(sup.nama||supplierId)+' ['+metode+']',tipe:'Keluar',kategori:'Konsinyasi',metode,nominal:cashInput,saldo:saldoLama-cashInput}]);
+      if(creditUsed>0)appendObjectsByHeaders(creditSheet,[{id:'SS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),supplierId,tipe:'Pakai',nominal:creditUsed,referensiId:kasId||'CREDIT-ONLY',catatan:'Kredit dipakai untuk melunasi tagihan '+totalDebt,createdBy:sess.username}]);
+      if(overpayment>0)appendObjectsByHeaders(creditSheet,[{id:'SS'+Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),supplierId,tipe:'Kredit',nominal:overpayment,referensiId:kasId,catatan:'Kelebihan pembayaran supplier',createdBy:sess.username}]);
+      rows.forEach(r=>{if(cashInput>0)journalSetValue(journal,sheet,r,iKasId+1,kasId);journalSetValue(journal,sheet,r,iStatus+1,'Bayar');if(iBayarAt>=0)journalSetValue(journal,sheet,r,iBayarAt+1,new Date());if(iBayarBy>=0)journalSetValue(journal,sheet,r,iBayarBy+1,sess.username);});
+    }catch(e){try{rollbackWriteJournal(journal);}catch(re){return {success:false,message:'Pembayaran gagal dan rollback perlu pemeriksaan: '+e.message+' | '+re.message};}return {success:false,message:'Pembayaran gagal. Semua perubahan dibatalkan: '+e.message};}
     _clearSheetCache();
-    return { success: true, message: 'Bayar ' + (sup.nama || supplierId) + ': Rp ' + totalBayar.toLocaleString('id-ID') + ' via ' + metode, total: totalBayar, count: rowsToUpdate.length, kasId, metode };
-  } finally { lock.releaseLock(); }
+    return {success:true,message:'Tagihan '+(sup.nama||supplierId)+' dilunasi. Kredit dipakai '+fmtRpLocal(creditUsed)+'.'+(overpayment?' Kelebihan '+fmtRpLocal(overpayment)+' disimpan sebagai kredit supplier.':''),total:totalDebt,nominalTunai:cashInput,kreditDipakai:creditUsed,kreditBaru:overpayment,kasId,metode};
+  }finally{lock.releaseLock();}
 }
 function apiGetRiwayatBayarSupplier(token, filter) {
   requireRole(token, ['admin']);

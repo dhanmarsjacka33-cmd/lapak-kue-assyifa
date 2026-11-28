@@ -216,3 +216,18 @@ has(serviceWorker, /app\.js\?v=7\.6/, 'Service worker static asset list must pre
 // Once an invoice is linked to a submitted setoran, employee adjustment must be locked in UI and API.
 has(backend, /canAdjust: !paidIds\[id\] && !String\(k\.setoranId \|\| ''\)/, 'Submitted supplier invoices must render as locked for employees');
 has(backend, /if\(row\.setoranId\) return \{success:false,message:'Laporan lapak sudah dikirim/, 'Backend must refuse post-submit employee quantity edits even if the client bypasses UI');
+
+
+// Invoice correction approval and supplier credit ledger regressions.
+has(backend, /name: 'KoreksiInvoice'.*headers:/, 'Invoice correction request sheet must be created non-destructively');
+has(backend, /name: 'SaldoSupplier'.*headers:/, 'Supplier credit ledger sheet must be created non-destructively');
+has(backend, /requestInvoiceCorrection: p => apiRequestInvoiceCorrection/, 'Employee invoice correction route must exist');
+has(backend, /decideInvoiceCorrection: p => apiDecideInvoiceCorrection/, 'Admin invoice correction decision route must exist');
+has(backend, /function apiRequestInvoiceCorrection\(/, 'Employee must be able to submit invoice correction requests');
+has(backend, /function apiGetInvoiceCorrections\(/, 'Admin must be able to review invoice correction requests');
+has(backend, /function apiDecideInvoiceCorrection\(/, 'Admin must be able to approve or reject invoice correction requests');
+has(backend, /hasPayment\)return \{success:false,message:'Invoice pernah menerima pembayaran/, 'Approval must refuse unsafe edits to invoices with payment history');
+has(backend, /function getSaldoKreditSupplier_\(/, 'Supplier credit must be calculated from an auditable ledger');
+has(backend, /Kelebihan pembayaran supplier/, 'Supplier overpayment must be recorded as supplier credit');
+has(backend, /Kredit dipakai untuk melunasi tagihan/, 'Supplier credit use must be recorded in the ledger');
+has(backend, /kreditDipakai:creditUsed,kreditBaru:overpayment/, 'Supplier payment response must report credit used and new credit');
