@@ -1,6 +1,6 @@
 /**
- * Kue As-Syifa POS v5.10 — Backend
- * v5.10: Karyawan bisa bayar supplier titipan KAPAN SAJA + PARTIAL
+ * Kue As-Syifa POS v5.11 — Backend
+ * v5.11: Karyawan bisa bayar supplier titipan KAPAN SAJA + PARTIAL
  *        (kompatibel dengan app.js v6.5)
  */
 
@@ -27,7 +27,7 @@ function _clearSheetCache(name) { if (name) { delete __sheetCache[name]; return;
 // ============================================================
 //  ENTRY
 // ============================================================
-function doGet() { return json({ ok: true, message: 'Kue As-Syifa v5.10' }); }
+function doGet() { return json({ ok: true, message: 'Kue As-Syifa v5.11' }); }
 
 function doPost(e) {
   try {
@@ -280,10 +280,10 @@ function setupDatabase() {
     });
     usersSheet.getRange(2, 1, rows.length, 11).setValues(rows);
     _clearSheetCache();
-    return 'Setup v5.10 selesai. Password awal:\\n' + credentials.join('\\n');
+    return 'Setup v5.11 selesai. Password awal:\\n' + credentials.join('\\n');
   }
   _clearSheetCache();
-  return 'Setup v5.10 selesai. Sheet Users sudah berisi akun; tidak ada perubahan akun.';
+  return 'Setup v5.11 selesai. Sheet Users sudah berisi akun; tidak ada perubahan akun.';
 }
 
 // Migrasi header akuntansi non-destruktif. Jalankan manual satu kali dari Apps Script.
@@ -495,7 +495,7 @@ function upgradeDatabase_v510() {
     }
   }
   _clearSheetCache();
-  return 'Upgrade v5.10 selesai. Kolom BayarTitipanKaryawan: catatan, noNota, metode, status.';
+  return 'Upgrade v5.11 selesai. Kolom BayarTitipanKaryawan: catatan, noNota, metode, status.';
 }
 
 function upgradeDatabase_v511() {
@@ -1794,7 +1794,7 @@ function apiGetKaryawanDashboard(token) {
   const sudahSubmit = getSheetData('Setoran').some(s => formatDate(s.tanggal) === tgl && String(s.lapakId) === String(sess.lapakId));
   const lapak = getSheetData('Lapak').find(l => l.id === sess.lapakId) || {};
   const absensiKaryawan = apiAbsensiHariIni(token);
-  // v5.10 — Feature A: Titipan SELALU ditampilkan (bisa bayar kapan saja)
+  // v5.11 — Feature A: Titipan SELALU ditampilkan (bisa bayar kapan saja)
   const titipanData = apiGetTitipanKaryawan(token);
   return {
     tanggal: tgl, absen, distribusi, locked, sudahSubmit,
@@ -2133,7 +2133,7 @@ function apiSubmitRekap(token, payload) {
     details.push({ katalogId: it.katalogId, qtyDrop, qtySisa, qtyLaku, hargaJual, hargaBeli: Number(k.hargaBeli) || 0, subtotal, tipePelanggan: tipe });
   }
 
-  // v5.10 — Feature A: Ambil SEMUA bayar titipan yang belum ter-link (carry-over bila bayar setelah submit)
+  // v5.11 — Feature A: Ambil SEMUA bayar titipan yang belum ter-link (carry-over bila bayar setelah submit)
   let bayarTitipanHariIni = getSheetData('BayarTitipanKaryawan').filter(b =>
     String(b.lapakId) === String(sess.lapakId) &&
     (!b.setoranId || b.setoranId === '') &&
@@ -2294,7 +2294,7 @@ function apiSubmitRekap(token, payload) {
 }
 
 // ============================================================
-//  TITIP JUAL — BAYAR LANGSUNG OLEH KARYAWAN (v5.10)
+//  TITIP JUAL — BAYAR LANGSUNG OLEH KARYAWAN (v5.11)
 // ============================================================
 function apiGetTitipanKaryawan(token) {
   const sess = requireRole(token, ['karyawan']);
@@ -4600,7 +4600,7 @@ function apiGetAnalisisPerforma(token, payload) {
 function diagnoseFull() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const r = [];
-  r.push('=== DIAGNOSTIC KUE AS-SYIFA v5.10 ===');
+  r.push('=== DIAGNOSTIC KUE AS-SYIFA v5.11 ===');
   r.push('Timezone: ' + Session.getScriptTimeZone());
   r.push('Sekarang: ' + new Date().toString());
   r.push('');
