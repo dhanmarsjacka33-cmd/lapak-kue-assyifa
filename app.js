@@ -2420,7 +2420,6 @@ function showMoreMenu() {
     { title: 'Karyawan & Payroll', items: [
       { id:'absensi', label:'Rekap Absensi', icon:'clock' },
       { id:'absensi-hari-ini', label:'Absen Hari Ini', icon:'list' },
-      { id:'bonus-antar', label:'Bonus Antar', icon:'truck' },
       { id:'payroll', label:'Rekap Payroll', icon:'money' },
       { id:'setting-payroll', label:'Setting Payroll', icon:'settings' },
       { id:'kasbon', label:'Kasbon', icon:'money' }
@@ -2610,7 +2609,8 @@ function formKas() {
     fields: [
       { key:'tipe', label:'Tipe', type:'select', options:[{v:'Masuk',l:'Masuk'},{v:'Keluar',l:'Keluar'}] },
       { key:'keterangan', label:'Keterangan', placeholder:'Contoh: Beli gas' },
-      { key:'kategori', label:'Kategori', placeholder:'Opsional' },
+      { key:'kategori', label:'Kategori', placeholder:'Contoh: Operasional / Bonus Antar' },
+      { key:'userId', label:'Penerima bonus antar (pilih jika kategori Bonus Antar)', type:'select', allowEmpty:true, options:S.users.filter(u => u.role === 'karyawan').map(u => ({ v:u.id, l:u.name })) },
       { key:'nominal', label:'Nominal (Rp)', type:'number' }
     ],
     onSubmit: async (data, c) => {
