@@ -1816,6 +1816,7 @@ function apiGetMyPayrollSummary(token, bulan) {
   const setoran = getSheetData('Setoran').filter(s => formatDate(s.tanggal).indexOf(bulan) === 0 && String(s.userId) === String(sess.id));
   const absensi = getSheetData('AbsensiKaryawan').filter(a => formatDate(a.tanggal).indexOf(bulan) === 0 && String(a.userId) === String(sess.id));
   const bonusAntar = getSheetData('BonusAntar').filter(b => formatDate(b.tanggal).indexOf(bulan) === 0 && String(b.userId) === String(sess.id));
+  const bonusAntarKas = getSheetData('Kas').filter(k => formatDate(k.tanggal).indexOf(bulan) === 0 && String(k.kategori || '').toLocaleLowerCase('id-ID') === 'bonus antar' && k.tipe === 'Keluar' && String(k.userId) === String(sess.id));
   const settingPayroll = getSheetData('SettingPayroll').filter(s => String(s.aktif) !== 'false' && s.aktif !== false);
   const hariEfektif = getSheetData('HariEfektif').filter(h => h.bulan === bulan);
   const settingMap = {};
@@ -1844,7 +1845,7 @@ function apiGetMyPayrollSummary(token, bulan) {
   });
   const settingLapak = user.lapakId ? settingMap[String(user.lapakId)] : null;
   const totalTunjangan = settingLapak ? Number(settingLapak.tunjanganLapak) || 0 : 0;
-  const totalBonusAntar = bonusAntar.reduce((sum,b) => sum + (Number(b.nominal) || 0), 0);
+  const totalBonusAntar = bonusAntar.reduce((sum,b) => sum + (Number(b.nominal) || 0), 0) + bonusAntarKas.reduce((sum,b) => sum + (Number(b.nominal) || 0), 0);
   const kasbonMap = getKasbonOutstandingMap_(getSheetData('Kasbon'));
   const totalKasbon = (kasbonMap[String(sess.id)] || {outstanding:0}).outstanding;
   const totalPenghasilan = Math.round(totalBonusMerekap + totalTunjangan + totalBonusAntar);
@@ -2923,7 +2924,7 @@ function apiEditSetoran(token, idSetoran, updates) {
 // ============================================================
 function apiGetKas(token, limit) {
   requireRole(token, ['admin']);
-  const kas = getSheetData('Kas').map(k => ({ id:k.id, tanggal:formatDateTime(k.tanggal), keterangan:k.keterangan || '', tipe:k.tipe || '', kategori:k.kategori || '', metode:k.metode || ((String(k.keterangan || '').match(/\[(Tunai|QRIS|Transfer)\]\s*$/i) || [])[1] || ''), nominal:Number(k.nominal) || 0, saldo:Number(k.saldo) || 0 }));
+  const kas = getSheetData('Kas').map(k => ({ id:k.id, tanggal:formatDateTime(k.tanggal), keterangan:k.keterangan || '', tipe:k.tipe || '', kategori:k.kategori || '', userId:k.userId || '', metode:k.metode || ((String(k.keterangan || '').match(/\[(Tunai|QRIS|Transfer)\]\s*$/i) || [])[1] || ''), nominal:Number(k.nominal) || 0, saldo:Number(k.saldo) || 0 }));
   if (limit) return kas.slice(-limit).reverse();
   return kas.reverse();
 }
@@ -2935,12 +2936,16 @@ function apiAddKas(token, item) {
     const nominal = toPosNum(item.nominal);
     if (nominal <= 0) return { success: false, message: 'Nominal harus lebih dari 0.' };
     const tipe = item.tipe === 'Keluar' ? 'Keluar' : 'Masuk';
+    const kategori = String(item.kategori || 'Lain').trim();
+    const userId = kategori.toLocaleLowerCase('id-ID') === 'bonus antar' ? String(item.userId || '') : '';
+    if (kategori.toLocaleLowerCase('id-ID') === 'bonus antar' && (tipe !== 'Keluar' || !userId)) return { success:false, message:'Bonus antar harus berupa pengeluaran dan memiliki penerima karyawan.' };
+    addColumnIfMissing('Kas', 'userId', '');
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Kas');
     const data = sheet.getDataRange().getValues();
     const iSaldo = data[0].indexOf('saldo');
     const saldoLama = data.length > 1 ? Number(data[data.length - 1][iSaldo]) || 0 : 0;
     const saldoBaru = tipe === 'Masuk' ? saldoLama + nominal : saldoLama - nominal;
-    appendObjectsByHeaders(sheet, [{id:'KS' + Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:String(item.keterangan || ''),tipe,kategori:String(item.kategori || 'Lain'),nominal,saldo:saldoBaru}]);
+    appendObjectsByHeaders(sheet, [{id:'KS' + Utilities.getUuid().slice(0,8).toUpperCase(),tanggal:new Date(),keterangan:String(item.keterangan || ''),tipe,kategori,userId,nominal,saldo:saldoBaru}]);
     _clearSheetCache();
     return { success: true, message: 'Transaksi kas dicatat.' };
   } finally { lock.releaseLock(); }
@@ -3782,6 +3787,7 @@ function apiRekapPayroll(token, bulan) {
   const setoran = getSheetData('Setoran').filter(s => formatDate(s.tanggal).indexOf(bulan) === 0);
   const absensiK = getSheetData('AbsensiKaryawan').filter(a => formatDate(a.tanggal).indexOf(bulan) === 0);
   const bonusAntar = getSheetData('BonusAntar').filter(b => formatDate(b.tanggal).indexOf(bulan) === 0);
+  const bonusAntarKas = getSheetData('Kas').filter(k => formatDate(k.tanggal).indexOf(bulan) === 0 && String(k.kategori || '').toLocaleLowerCase('id-ID') === 'bonus antar' && k.tipe === 'Keluar' && k.userId);
   const kasbon = getSheetData('Kasbon').filter(k => k.status === 'Outstanding' && k.tipe === 'Kasbon');
   const settingPayroll = getSheetData('SettingPayroll').filter(s => String(s.aktif) !== 'false' && s.aktif !== false);
   const hariEfektif = getSheetData('HariEfektif').filter(h => h.bulan === bulan);
@@ -3819,7 +3825,8 @@ function apiRekapPayroll(token, bulan) {
       }
     }
     const antarList = bonusAntar.filter(b => String(b.userId) === String(u.id));
-    const totalBonusAntar = antarList.reduce((s, b) => s + (Number(b.nominal) || 0), 0);
+    const antarKasList = bonusAntarKas.filter(b => String(b.userId) === String(u.id));
+    const totalBonusAntar = antarList.reduce((s, b) => s + (Number(b.nominal) || 0), 0) + antarKasList.reduce((s, b) => s + (Number(b.nominal) || 0), 0);
     const kasbonUser = kasbon.filter(k => String(k.userId) === String(u.id));
     const totalKasbon = kasbonUser.reduce((s, k) => s + (Number(k.nominal) || 0), 0);
     const absensiUser = absensiK.filter(a => String(a.userId) === String(u.id));
@@ -3833,7 +3840,7 @@ function apiRekapPayroll(token, bulan) {
     let skor = 100 - (telat * 2) - (setengahHari * 1);
     skor = Math.max(0, Math.min(100, skor));
     const totalBersih = Math.max(0, Math.round(totalBonusMerekap + totalTunjangan + totalBonusAntar - totalKasbon));
-    return { userId: u.id, userName: u.name, lapakId: u.lapakId, lapakNama: (lapakMap[u.lapakId] || {}).nama || '', rincianMerekap, totalBonusMerekap: Math.round(totalBonusMerekap), rincianTunjangan, totalTunjangan, bonusAntarList: antarList.map(b => ({ id: b.id, tanggal: formatDate(b.tanggal), tujuan: b.tujuan, nominal: Number(b.nominal) || 0 })), totalBonusAntar, kasbonList: kasbonUser.map(k => ({ id: k.id, nominal: Number(k.nominal) || 0, keterangan: k.keterangan || '', tanggal: formatDate(k.tanggal) })), totalKasbon, kehadiran: { hadir: absensiUser.length, telat, setengahHari, skor }, totalBersih };
+    return { userId: u.id, userName: u.name, lapakId: u.lapakId, lapakNama: (lapakMap[u.lapakId] || {}).nama || '', rincianMerekap, totalBonusMerekap: Math.round(totalBonusMerekap), rincianTunjangan, totalTunjangan, bonusAntarList: antarList.map(b => ({ id: b.id, tanggal: formatDate(b.tanggal), tujuan: b.tujuan, nominal: Number(b.nominal) || 0 })).concat(antarKasList.map(b => ({ id:b.id, tanggal:formatDate(b.tanggal), tujuan:b.keterangan || 'Pengeluaran tambahan', nominal:Number(b.nominal) || 0 }))), totalBonusAntar, kasbonList: kasbonUser.map(k => ({ id: k.id, nominal: Number(k.nominal) || 0, keterangan: k.keterangan || '', tanggal: formatDate(k.tanggal) })), totalKasbon, kehadiran: { hadir: absensiUser.length, telat, setengahHari, skor }, totalBersih };
   });
   const totals = list.reduce((s, x) => { s.totalBonusMerekap += x.totalBonusMerekap; s.totalTunjangan += x.totalTunjangan; s.totalBonusAntar += x.totalBonusAntar; s.totalKasbon += x.totalKasbon; s.totalBersih += x.totalBersih; return s; }, { totalBonusMerekap: 0, totalTunjangan: 0, totalBonusAntar: 0, totalKasbon: 0, totalBersih: 0 });
   return { bulan, list, totals };
