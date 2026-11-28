@@ -280,4 +280,4 @@ has(serviceWorker, /app\.js\?v=7\.7/, 'Service worker must preload the new front
 
 has(backend, /index\+1===didx\?newSubtotal/, 'Correction approval must replace the exact detail row when recalculating setoran total sales');
 has(backend, /const reconciledDue=gross>0\?Math\.min\(currentDue,Math\.max\(0,gross-allocated\)\):currentDue/, 'Supplier credit must never be applied against stale invoice debt already covered by cash or prior credit');
-has(backend, /const balances=getSupplierCreditBalanceMap_\(\),settlements=getSupplierInvoiceSettlementMaps_\(\)/, 'Credit application must reconcile supplier balances against allocated payments before consuming credit');
+has(backend, /const rows=sh\.getDataRange\(\)\.getValues\(\),balances=getSupplierCreditBalanceMap_\(\),settlements=getSupplierInvoiceSettlementMaps_\(\)/, 'Credit application must load supplier balances and invoice settlement allocations before consuming credit');
