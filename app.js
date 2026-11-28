@@ -13,7 +13,7 @@ const S = {
   lapakAktif: JSON.parse(localStorage.getItem('lapakAktif') || 'null'),
   view: 'login', tab: 'home', submitting: false,
   lapak: [], suppliers: [], katalog: [], users: [], belanja: [], jadwal: [],
-  dash: null, karyawan: null, kasbon: null, gaji: null, laporan: null,
+  dash: null, karyawan: null, kasbon: null, gaji: null, payrollSaya: null, laporan: null,
   setoran: null, kas: null, pesanan: null, settingGaji: null, rekapGaji: null,
   kartuStok: null, stokSaldo: null, stokAudit: null, retur: null, hargaTingkat: null,
   tutupBuku: null, notifikasi: null,
@@ -411,6 +411,19 @@ function renderKaryawanBody() {
   const statusCls = { belum: 'status-belum', bekerja: 'status-bekerja', selesai: 'status-selesai' };
 
   let body = '';
+
+  // ============ PENDAPATAN SAYA ============
+  const income = S.payrollSaya;
+  if (income) {
+    body += `<div class="card" style="border:1.5px solid var(--amber);background:var(--amber-50)">
+      <div class="row-between mb-2"><strong class="text-sm">${ico('wallet','ico-sm')} Pendapatan Saya</strong><span class="badge ${income.sudahDibayar ? 'badge-success' : 'badge-warn'}">${income.sudahDibayar ? 'Sudah dibayar' : 'Belum ditarik'}</span></div>
+      <div class="text-xs text-gray mb-2">Periode ${esc(income.bulan)}</div>
+      <div class="text-xs text-gray">Total penghasilan terkumpul</div><div class="text-lg font-bold text-green">${fmtRp(income.totalPenghasilan)}</div>
+      <div class="row-between text-xs mt-2"><span>Potongan kasbon</span><strong class="text-red">- ${fmtRp(Math.min(income.totalKasbon, income.totalPenghasilan))}</strong></div>
+      <div class="row-between mt-2" style="border-top:1px solid rgba(180,120,0,.2);padding-top:8px"><strong class="text-sm">${income.sudahDibayar ? 'Sudah diterima' : 'Hak bersih sementara'}</strong><strong class="text-sm text-green">${fmtRp(income.sudahDibayar ? income.totalDibayar : income.hakBersih)}</strong></div>
+      <div class="text-xs text-gray mt-2">Bonus rekap, tunjangan lapak, dan bonus antar yang sudah tercatat. Angka dapat berubah sampai payroll dibayarkan.</div>
+    </div>`;
+  }
 
   // ============ CLOCK CARD ============
   body += `<div class="clock-card">
@@ -1822,9 +1835,10 @@ async function initKaryawan() {
       api('getKasbon', { token: S.token, filter: {} }),
       api('absensiHariIni', { token: S.token }).catch(() => ({ status: 'belum' })),
       api('getReturList', { token: S.token, filter: {} }).catch(() => []),
-      api('getTitipanKaryawan', { token: S.token }).catch(() => ({ pending: [], sudahBayar: [] }))
+      api('getTitipanKaryawan', { token: S.token }).catch(() => ({ pending: [], sudahBayar: [] })),
+      api('getMyPayrollSummary', { token: S.token, bulan: monthISO() }).catch(() => null)
     ]);
-    S.karyawan = results[0]; S.kasbon = results[1]; S.absensiHariIni = results[2]; S.retur = results[3]; S.titipanKaryawan = results[4];
+    S.karyawan = results[0]; S.kasbon = results[1]; S.absensiHariIni = results[2]; S.retur = results[3]; S.titipanKaryawan = results[4]; S.payrollSaya = results[5];
     if (S.karyawan.distribusi) S.karyawan.distribusi.forEach(x => { if (S.rekap[x.katalogId] === undefined) S.rekap[x.katalogId] = 0; });
     S.view = 'karyawan'; S.tab = 'home';
     updateKaryawanTabbar && updateKaryawanTabbar();
@@ -1932,7 +1946,11 @@ async function karyawanAction(action) {
 async function reloadKaryawan() {
   // Dashboard sudah menggabungkan absensi dan titipan; satu request menghindari
   // pemanggilan endpoint/Spreadsheet berulang saat login dan refresh.
-  const data = await api('getKaryawanDashboard', { token: S.token });
+  const [data, payrollSaya] = await Promise.all([
+    api('getKaryawanDashboard', { token: S.token }),
+    api('getMyPayrollSummary', { token: S.token, bulan: monthISO() }).catch(() => null)
+  ]);
+  S.payrollSaya = payrollSaya;
   S.karyawan = data;
   S.absensiHariIni = data.absensiKaryawan || { status: 'belum' };
   S.titipanKaryawan = { pending: data.titipanPending || [], sudahBayar: data.bayarTitipanHariIni || [] };
@@ -2402,7 +2420,6 @@ function showMoreMenu() {
     { title: 'Karyawan & Payroll', items: [
       { id:'absensi', label:'Rekap Absensi', icon:'clock' },
       { id:'absensi-hari-ini', label:'Absen Hari Ini', icon:'list' },
-      { id:'bonus-antar', label:'Bonus Antar', icon:'truck' },
       { id:'payroll', label:'Rekap Payroll', icon:'money' },
       { id:'setting-payroll', label:'Setting Payroll', icon:'settings' },
       { id:'kasbon', label:'Kasbon', icon:'money' }
@@ -2592,7 +2609,8 @@ function formKas() {
     fields: [
       { key:'tipe', label:'Tipe', type:'select', options:[{v:'Masuk',l:'Masuk'},{v:'Keluar',l:'Keluar'}] },
       { key:'keterangan', label:'Keterangan', placeholder:'Contoh: Beli gas' },
-      { key:'kategori', label:'Kategori', placeholder:'Opsional' },
+      { key:'kategori', label:'Kategori', placeholder:'Contoh: Operasional / Bonus Antar' },
+      { key:'userId', label:'Penerima bonus antar (pilih jika kategori Bonus Antar)', type:'select', allowEmpty:true, options:S.users.filter(u => u.role === 'karyawan').map(u => ({ v:u.id, l:u.name })) },
       { key:'nominal', label:'Nominal (Rp)', type:'number' }
     ],
     onSubmit: async (data, c) => {

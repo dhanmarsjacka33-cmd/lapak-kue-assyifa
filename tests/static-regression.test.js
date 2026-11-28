@@ -14,6 +14,17 @@ has(backend, /function apiSaveRekapDraft\s*\(/, 'Draft preparation API must exis
 has(backend, /function apiSubmitRekap\s*\(/, 'Final rekap API must exist');
 has(backend, /function apiKaryawanBayarSupplier\s*\(/, 'Supplier payment API must exist');
 has(backend, /function apiGetTitipanKaryawan\s*\(/, 'Employee consignment summary API must exist');
+has(backend, /getMyPayrollSummary: p => apiGetMyPayrollSummary\(p\.token, p\.bulan\)/, 'Employee income route must be registered');
+has(backend, /function apiGetMyPayrollSummary\(token, bulan\)[\s\S]*?requireRole\(token, \['karyawan'\]\)[\s\S]*?String\(b\.userId\) === String\(sess\.id\)/, 'Employee income API must be scoped to the authenticated employee');
+has(backend, /addColumnIfMissing\('Kas', 'userId', ''\)/, 'Cash ledger must support employee-linked expense entries');
+has(backend, /Bonus antar harus berupa pengeluaran dan memiliki penerima karyawan/, 'Delivery bonus must require an employee and be an expense');
+has(backend, /bonusAntarKas = getSheetData\('Kas'\)/, 'Payroll must include employee-linked delivery bonus expenses');
+has(frontend, /Penerima bonus antar \(pilih jika kategori Bonus Antar\)/, 'Additional cash expense form must support a bonus recipient');
+if (/id:'bonus-antar', label:'Bonus Antar'/.test(frontend)) throw new Error('Standalone delivery bonus menu must be removed');
+
+has(frontend, /Pendapatan Saya/, 'Employee home must show monthly income summary');
+has(frontend, /api\('getMyPayrollSummary'/, 'Employee home must load its own payroll summary');
+
 has(backend, /const recentKas = kas\.slice\(-10\)\.reverse\(\)/, 'Dashboard must map recent cash transactions');
 has(backend, /metode:k\.metode \|\|/, 'Dashboard recent cash transactions must expose payment method with legacy fallback');
 has(backend, /match\(\/\\\\\[\(Tunai\|QRIS\|Transfer\)\\\\\]\\\\s\*\$\/i\)/, 'Dashboard legacy payment method parser must match bracketed methods');
@@ -134,7 +145,7 @@ has(frontend, /totalTitipanQris/, 'Employee settlement preview must separate sup
 has(frontend, /totalTitipanTransfer/, 'Employee settlement preview must separate supplier transfer payments');
 has(backend, /const qrisBersih = totalQris/, 'QRIS receipts are not reduced by supplier payment metadata');
 has(backend, /const transferBersih = totalTransfer/, 'Transfer receipts are not reduced by supplier payment metadata');
-has(frontend, /const data = await api\('getKaryawanDashboard'/, 'Employee reload should use the combined dashboard response');
+has(frontend, /api\('getKaryawanDashboard'/, 'Employee reload should use the combined dashboard response');
 if (/api\('getTitipanKaryawan'/.test(frontend.slice(frontend.indexOf('async function reloadKaryawan'), frontend.indexOf('async function karyawanSaveDrop')))) throw new Error('Employee reload must not fetch titipan a second time');
 
 has(frontend, /data-locked-total/, 'Live supplier invoice total must include locked rows after previous partial payments');
