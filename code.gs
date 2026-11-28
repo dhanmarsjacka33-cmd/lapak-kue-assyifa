@@ -2070,7 +2070,7 @@ function apiSaveRekapDraft(token, payload) {
       return { success:false, message:'Penyimpanan draft gagal. Perubahan telah dibatalkan: ' + writeError.message };
     }
     _clearSheetCache();
-    return {success:true,message:'Tagihan titip jual berhasil disiapkan. Periksa dan bayar setiap supplier sebelum mengirim laporan.',created:additions.length,updated:updates.length};
+    return {success:true,message:'Laporan supplier berhasil disiapkan. Pembayaran boleh dilakukan sekarang atau menyusul; saldo yang belum dibayar tetap tercatat sebagai kewajiban lapak.',created:additions.length,updated:updates.length};
   } finally { lock.releaseLock(); }
 }
 
@@ -2084,8 +2084,7 @@ function apiSubmitRekap(token, payload) {
   if (nowHour() >= CONFIG.TIME_LOCK_HOUR) return { success: false, message: 'Input terkunci setelah jam ' + CONFIG.TIME_LOCK_HOUR + ':00.' };
   if (isPeriodeLocked(tgl)) return { success: false, message: 'Periode ini terkunci.' };
   const draftMarker = 'DRAFT_REKAP|' + tgl + '|' + sess.lapakId + '|';
-  const konsinyasiDraft = getSheetData('Konsinyasi').filter(k => String(k.lapakId)===String(sess.lapakId) && String(k.catatan||'').indexOf(draftMarker)===0 && String(k.status)==='Pending');
-  if (konsinyasiDraft.length) return {success:false,message:'Masih ada tagihan titip jual yang belum dibayar. Lunasi terlebih dahulu sebelum mengirim laporan.'};
+  // Supplier boleh dibayar setelah laporan dikirim. Tagihan belum lunas tetap Pending.
   const items = Array.isArray(payload.items) ? payload.items : [];
   const pengeluaranList = Array.isArray(payload.pengeluaran) ? payload.pengeluaran.slice() : [];
   const totalTunai = toPosNum(payload.totalTunai);
@@ -2147,7 +2146,7 @@ function apiSubmitRekap(token, payload) {
     if (!Number.isFinite(nominal) || nominal < 0) return { success:false, message:'Nominal pengeluaran tidak valid. Periksa kembali daftar pengeluaran.' };
   }
   const totalPengeluaran = pengeluaranList.reduce((s, p) => s + toPosNum(p.nominal), 0);
-  const selisih = totalSistem - (totalTunai + totalQris + totalTransfer);
+  let totalTitipanDibayar = 0;
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(CONFIG.LOCK_TIMEOUT)) return { success: false, message: 'Sistem sibuk. Coba lagi.' };
   try {
@@ -2159,15 +2158,14 @@ function apiSubmitRekap(token, payload) {
     const totalTitipanTunai = bayarTitipanHariIni.filter(b => String(b.metode || 'Tunai') === 'Tunai').reduce((sum,b) => sum + toPosNum(b.totalBayar),0);
     const totalTitipanQris = bayarTitipanHariIni.filter(b => String(b.metode || '') === 'QRIS').reduce((sum,b) => sum + toPosNum(b.totalBayar),0);
     const totalTitipanTransfer = bayarTitipanHariIni.filter(b => String(b.metode || '') === 'Transfer').reduce((sum,b) => sum + toPosNum(b.totalBayar),0);
-    // Metode pembayaran supplier hanya metadata. Pembayaran supplier tidak
-    // dipotong lagi dari setoran karyawan; dampak laba bersih dicatat di Kas Utama.
-    const uangDisetor = totalTunai - totalPengeluaran;
+    totalTitipanDibayar = totalTitipanTunai + totalTitipanQris + totalTitipanTransfer;
+    // Uang tunai/QRIS/transfer adalah angka aktual yang dihitung karyawan.
+    // Pengeluaran ditambahkan kembali dalam rekonsiliasi, bukan mengurangi input tunai.
+    const uangDisetor = totalTunai;
     const qrisBersih = totalQris;
     const transferBersih = totalTransfer;
-    if (uangDisetor < 0) return { success:false, message:'Pengeluaran operasional melebihi penerimaan tunai.' };
     const expectedSetoran = uangDisetor + qrisBersih + transferBersih;
-    const unpaidDraft = getSheetData('Konsinyasi').filter(k => String(k.lapakId)===String(sess.lapakId) && String(k.catatan||'').indexOf(draftMarker)===0 && String(k.status)==='Pending');
-    if (unpaidDraft.length) return {success:false,message:'Masih ada tagihan titip jual yang belum dibayar. Lunasi terlebih dahulu sebelum mengirim laporan.'};
+    const selisih = totalSistem - totalTitipanDibayar - (totalTunai + totalQris + totalTransfer + totalPengeluaran);
     if (getSheetData('Setoran').some(x => formatDate(x.tanggal)===tgl && String(x.lapakId)===String(sess.lapakId))) return {success:false,message:'Laporan hari ini sudah dikirim.'};
 
     // Pastikan draft yang pernah disiapkan/dibatalkan/dibayar sesuai dengan angka laporan final.
@@ -2183,7 +2181,10 @@ function apiSubmitRekap(token, payload) {
       const draft = draftRows.find(x => String(x.catatan || '').indexOf(marker) === 0);
       if (!draft) continue; // kompatibilitas untuk item yang belum pernah disiapkan sebagai draft
       const expectedUtang = d.qtyLaku * (Number(k.hargaBeli) || 0);
-      if (String(draft.status) !== (d.qtyLaku > 0 ? 'Bayar' : 'Cancelled') ||
+      const statusValid = d.qtyLaku > 0
+        ? ['Pending','Bayar'].includes(String(draft.status))
+        : ['Cancelled','Pending'].includes(String(draft.status));
+      if (!statusValid ||
           (Number(draft.qtyLaku) || 0) !== d.qtyLaku ||
           (Number(draft.utang) || 0) !== expectedUtang) {
         return {success:false,message:'Jumlah sisa atau tagihan '+(k.nama || d.katalogId)+' berubah setelah tagihan disiapkan. Hitung ulang sisa dan tagihan sebelum mengirim laporan.'};
