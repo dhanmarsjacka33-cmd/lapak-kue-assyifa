@@ -618,6 +618,17 @@ function renderDropForm(d) {
     </div>`;
 }
 
+function renderSupplierDraftButtons(d) {
+  const groups = new Map();
+  (d.distribusi || []).filter(x => x.tipeTransaksi === 'TitipJual' && x.supplierId).forEach(x => {
+    const id = String(x.supplierId);
+    if (!groups.has(id)) groups.set(id, String(x.supplierNama || id));
+  });
+  return Array.from(groups.entries()).map(([id,nama]) =>
+    '<button class="btn btn-warning btn-block btn-sm mb-2" data-act="prepare-rekap-supplier" data-id="' + esc(id) + '">Kirim Laporan ' + esc(nama) + '</button>'
+  ).join('');
+}
+
 function renderRekapForm(d) {
   return `
     <div class="card">
@@ -647,9 +658,10 @@ function renderRekapForm(d) {
           </div>
         </div>`).join('')}
       <div class="card-flat" style="padding:12px;margin-top:12px;background:var(--amber-50);border:1px solid rgba(245,158,11,.3)">
-        <p class="text-sm font-semibold mb-1">Titipan Supplier</p>
-        <p class="text-xs text-gray mb-2">Simpan perhitungan sisa terlebih dahulu agar tagihan supplier muncul di menu Titipan. Anda dapat membayar per supplier sebelum mengirim laporan.</p>
-        <button class="btn btn-warning btn-block btn-sm" data-act="prepare-rekap-draft">Hitung Sisa & Siapkan Tagihan</button>
+        <p class="text-sm font-semibold mb-1">Laporan Sisa per Supplier</p>
+        <p class="text-xs text-gray mb-2">Kirim laporan supplier satu per satu. Supplier lain yang belum selesai tidak menghalangi. Pembayaran boleh menyusul dan menjadi saldo kewajiban lapak.</p>
+        ${renderSupplierDraftButtons(d)}
+        <button class="btn btn-ghost btn-block btn-sm" data-act="prepare-rekap-draft">Siapkan Semua Supplier</button>
       </div>
       <div style="border-top:1px solid #f1f5f9;padding-top:14px;margin-top:10px">
         <p class="text-xs font-semibold mb-2">Pengeluaran Lapak (opsional)</p>
@@ -685,15 +697,15 @@ function summaryHTML() {
   const qris = qrisEl ? (parseInt(qrisEl.value, 10) || 0) : 0;
   const transfer = transferEl ? (parseInt(transferEl.value, 10) || 0) : 0;
   // Pembayaran supplier adalah metadata metode, bukan pengurang setoran.
-  const tunaiDiserahkan = tunai - pengeluaran;
+  const tunaiDiserahkan = tunai;
   const qrisDiserahkan = qris;
   const transferDiserahkan = transfer;
   const expected = tunaiDiserahkan + qrisDiserahkan + transferDiserahkan;
-  const selisih = total - (tunai + qris + transfer);
+  const selisih = total - totalTitipan - (tunai + qris + transfer + pengeluaran);
   const penerimaan = tunai + qris + transfer;
   const warnings = [];
   if (total > 0 && penerimaan === 0) warnings.push('Penerimaan belum diisi. Masukkan jumlah tunai, QRIS, dan transfer yang benar-benar diterima.');
-  if (pengeluaran > tunai) warnings.push('Pengeluaran operasional melebihi tunai yang diinput. Setoran tunai negatif dan laporan tidak dapat dikirim.');
+
   return `<div style="flex:1">
     ${warnings.length ? `<div class="text-xs text-red font-semibold mb-2">${warnings.map(esc).join('<br>')}</div>` : ''}
     <div class="row-between text-xs"><span>Penjualan</span><strong>${fmtRp(total)}</strong></div>
@@ -1483,6 +1495,7 @@ function handleClick(e) {
   if (a === 'save-drop-edit') return karyawanEditDrop();
   if (a === 'submit-rekap') return doSubmitRekap();
   if (a === 'prepare-rekap-draft') return prepareRekapDraft();
+  if (a === 'prepare-rekap-supplier') return prepareRekapDraft(id);
   if (a === 'add-peng') return addPengRow();
   if (a === 'del-peng') { const r = e.target.closest('[data-peng-row]'); if (r) r.remove(); return updateSummary(); }
   if (a === 'ajukan-kasbon') return formKasbon(false);
@@ -2015,11 +2028,13 @@ async function karyawanEditDrop() {
   finally { if (button && button.isConnected) { button.disabled = false; button.textContent = 'Simpan Perubahan'; } }
 }
 
-async function prepareRekapDraft() {
+async function prepareRekapDraft(supplierId) {
   if (S.submitting) return;
   const d = S.karyawan;
   if (!d || !Array.isArray(d.distribusi) || !d.distribusi.length) return toast('Data drop belum tersedia.', 'error');
-  const items = d.distribusi.map(x => ({ katalogId:x.katalogId, qtySisa:Math.max(0, Math.min(Number(S.rekap[x.katalogId])||0, Number(x.qtyDrop)||0)) }));
+  const selected = supplierId ? d.distribusi.filter(x => String(x.supplierId) === String(supplierId) && x.tipeTransaksi === 'TitipJual') : d.distribusi.filter(x => x.tipeTransaksi === 'TitipJual');
+  if (!selected.length) return toast('Tidak ada produk titip jual untuk supplier ini.', 'error');
+  const items = selected.map(x => ({ katalogId:x.katalogId, qtySisa:Math.max(0, Math.min(Number(S.rekap[x.katalogId])||0, Number(x.qtyDrop)||0)) }));
   S.submitting = true; showLoader();
   try {
     const r = await api('saveRekapDraft', {token:S.token, payload:{tanggal:d.tanggal,items}});
