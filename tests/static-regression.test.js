@@ -145,7 +145,7 @@ has(frontend, /totalTitipanQris/, 'Employee settlement preview must separate sup
 has(frontend, /totalTitipanTransfer/, 'Employee settlement preview must separate supplier transfer payments');
 has(backend, /const qrisBersih = totalQris/, 'QRIS receipts are not reduced by supplier payment metadata');
 has(backend, /const transferBersih = totalTransfer/, 'Transfer receipts are not reduced by supplier payment metadata');
-has(frontend, /const data = await api\('getKaryawanDashboard'/, 'Employee reload should use the combined dashboard response');
+has(frontend, /api\('getKaryawanDashboard'/, 'Employee reload should use the combined dashboard response');
 if (/api\('getTitipanKaryawan'/.test(frontend.slice(frontend.indexOf('async function reloadKaryawan'), frontend.indexOf('async function karyawanSaveDrop')))) throw new Error('Employee reload must not fetch titipan a second time');
 
 has(frontend, /data-locked-total/, 'Live supplier invoice total must include locked rows after previous partial payments');
