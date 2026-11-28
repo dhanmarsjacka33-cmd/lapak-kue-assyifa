@@ -8,7 +8,7 @@ Dokumen ini menjelaskan jalur uji yang terpisah dari aplikasi produksi. Ikuti ur
 - Gunakan Google Spreadsheet TESTING yang terpisah dan berisi data contoh/salinan yang sudah disamarkan.
 - Jangan pernah menempelkan URL Web App produksi pada halaman TESTING.
 - Jangan menguji transaksi dengan data usaha nyata. Transaksi pada mode TESTING tetap dapat menulis ke Spreadsheet yang dituju oleh URL API.
-- Repository ini belum memiliki deployment otomatis untuk Google Apps Script. Perubahan `code.gs` di GitHub tidak otomatis mengubah backend Apps Script.
+- Repository menyediakan workflow deployment otomatis khusus GAS TESTING (`.github/workflows/gas-testing-deploy.yml`). Workflow hanya mengirim `code.gs` ke project TESTING setelah pemeriksaan lulus dan hanya memakai Script ID/deployment ID/kredensial TESTING yang disimpan sebagai GitHub Secrets. Jika secrets belum lengkap, deployment dilewati dengan peringatan; tidak ada fallback ke project produksi.
 
 ## Menyiapkan backend TESTING (sekali saja)
 
@@ -18,6 +18,15 @@ Dokumen ini menjelaskan jalur uji yang terpisah dari aplikasi produksi. Ikuti ur
 4. Deploy sebagai Web App dari project TESTING. Catat URL dengan pola `https://script.google.com/macros/s/.../exec`.
 5. Jangan menyimpan URL deployment atau token di repository publik.
 
+## Mengaktifkan deployment GAS TESTING otomatis
+
+Atur tiga repository secrets di GitHub (Settings → Secrets and variables → Actions):
+
+- `GAS_TESTING_SCRIPT_ID`: Script ID dari Project Settings Apps Script TESTING (bukan URL `/exec`).
+- `GAS_TESTING_DEPLOYMENT_ID`: ID deployment Web App TESTING yang sudah aktif.
+- `GAS_TESTING_CLASPRC_JSON`: isi file autentikasi `.clasprc.json` milik akun Google yang berwenang mengedit project TESTING. Simpan langsung sebagai secret; jangan kirim ke chat atau commit ke repository.
+
+Workflow memvalidasi sintaks dan regression test, mengambil file project Apps Script yang sudah ada, mengganti `code.gs`, lalu memperbarui deployment TESTING yang sama. Pemicu otomatis hanya push ke `main` yang mengubah `code.gs`; workflow juga dapat dijalankan manual. Jangan gunakan Script ID atau deployment ID produksi.
 ## Membuka frontend TESTING
 
 1. Buka halaman `index.testing.html` yang dipublikasikan melalui GitHub Pages, bukan `index.html`.
