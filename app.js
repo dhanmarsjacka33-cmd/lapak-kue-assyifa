@@ -3330,22 +3330,27 @@ async function formBayarSupplier(supplierId) {
     hideLoader();
     if (detail.total <= 0) return toast('Tidak ada utang pending.', 'info');
     const sup = S.suppliers.find(s => String(s.id) === String(supplierId)) || {};
-    let body = '<div class="card-flat" style="padding:12px;margin-bottom:12px"><strong>' + esc(sup.nama || supplierId) + '</strong><div class="text-xs text-gray mt-1">' + (detail.groupedCount || detail.count) + ' baris gabungan dari ' + detail.count + ' transaksi/lapak · Titipan: ' + fmtRp(detail.totalTitipan || 0) + ' · Pembelian susulan: ' + fmtRp(detail.totalPembelianSusulan || 0) + '</div><div class="hero" style="margin-top:12px;margin-bottom:0;padding:16px"><div class="hero-label">Total Tagihan Supplier (semua lapak)</div><div class="hero-value" style="font-size:22px;margin-bottom:0">' + fmtRp(detail.total) + '</div></div></div>';
+    const supplierBalance=(S.saldoSupplier||[]).find(s=>String(s.supplierId)===String(supplierId))||{};
+    const credit=Math.max(0,Number(supplierBalance.kredit)||0);
+    const cashRequired=Math.max(0,detail.total-credit);
+    let body = '<div class="card-flat" style="padding:12px;margin-bottom:12px"><strong>' + esc(sup.nama || supplierId) + '</strong><div class="text-xs text-gray mt-1">' + (detail.groupedCount || detail.count) + ' baris gabungan dari ' + detail.count + ' transaksi/lapak · Titipan: ' + fmtRp(detail.totalTitipan || 0) + ' · Pembelian susulan: ' + fmtRp(detail.totalPembelianSusulan || 0) + '</div><div class="hero" style="margin-top:12px;margin-bottom:0;padding:16px"><div class="hero-label">Total Tagihan Supplier (semua lapak)</div><div class="hero-value" style="font-size:22px;margin-bottom:0">' + fmtRp(detail.total) + '</div><div class="text-xs mt-2">Saldo kredit supplier: <strong>' + fmtRp(credit) + '</strong><br>Minimal uang baru yang perlu dibayar: <strong>' + fmtRp(cashRequired) + '</strong></div></div></div>';
     body += '<p class="text-xs font-semibold text-gray mb-2">Rincian digabung berdasarkan kue dan supplier, walaupun tanggal atau lapaknya berbeda</p><div style="max-height:300px;overflow-y:auto">';
     body += detail.items.map(it => {
       const lapakText = (it.sourceBreakdown || it.lapakBreakdown || []).map(x => (x.tanggal ? x.tanggal + ' · ' : '') + x.lapakNama + ': ' + x.qty + ' pcs').join(' · ');
       return '<div class="row-between text-xs" style="padding:8px 0;border-bottom:1px solid #f8fafc"><div style="min-width:0;flex:1"><div class="font-semibold">' + esc(it.nama) + ' <span class="badge ' + (it.jenis === 'Pembelian susulan' ? 'badge-warn' : 'badge-info') + '">' + esc(it.jenis || 'Titipan terjual') + '</span></div><div class="text-gray">' + esc(lapakText) + '</div><div class="text-gray">' + it.qtyLaku + ' × ' + fmtRp(it.hargaTitip) + '</div></div><div class="text-right font-bold">' + fmtRp(it.utang) + '</div></div>';
     }).join('');
     body += '</div>';
-    body += '<div class="field mt-3"><label>Metode Pembayaran</label><select data-f="metode" class="select"><option value="Tunai">Tunai</option><option value="QRIS">QRIS</option><option value="Transfer">Transfer</option></select></div>';
+    body += '<div class="field mt-3"><label>Uang yang dibayarkan sekarang (minimal ' + fmtRp(cashRequired) + ')</label><input data-f="nominalBayar" type="number" min="' + cashRequired + '" step="1" inputmode="numeric" class="input" value="' + cashRequired + '"></div><div class="field mt-3"><label>Metode Pembayaran</label><select data-f="metode" class="select"><option value="Tunai">Tunai</option><option value="QRIS">QRIS</option><option value="Transfer">Transfer</option></select></div>';
     modal({
       title: 'Bayar Supplier', body,
       actions: [
         { label: 'Batal', onClick: c => c() },
         { label: 'Bayar ' + fmtRp(detail.total), className: 'btn-success', onClick: async (c, w) => {
           const metode = w.querySelector('[data-f="metode"]').value;
+          const nominalBayar = Number(w.querySelector('[data-f="nominalBayar"]').value);
+          if(!Number.isSafeInteger(nominalBayar)||nominalBayar<cashRequired)return toast('Nominal pembayaran minimal '+fmtRp(cashRequired)+'.','error');
           c(); showLoader();
-          try { const r = await api('bayarSupplier', { token: S.token, payload: { supplierId, metode } }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) { await loadKonsinyasi(); S.dash = await api('getAdminDashboard', { token: S.token }); MEM.clear(); } }
+          try { const r = await api('bayarSupplier', { token: S.token, payload: { supplierId, metode, nominalBayar } }); toast(r.message, r.success ? 'success' : 'error'); if (r.success) { await loadKonsinyasi(); S.dash = await api('getAdminDashboard', { token: S.token }); MEM.clear(); } }
           catch (e) { toast(e.message, 'error'); }
           finally { hideLoader(); render(); }
         } }
