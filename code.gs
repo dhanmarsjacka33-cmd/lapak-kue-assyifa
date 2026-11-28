@@ -75,6 +75,7 @@ const ROUTES = {
   bukaLapak: p => apiBukaLapak(p.token),
   tutupLapak: p => apiTutupLapak(p.token),
   getKaryawanDashboard: p => apiGetKaryawanDashboard(p.token),
+  getMyPayrollSummary: p => apiGetMyPayrollSummary(p.token, p.bulan),
   karyawanInputDrop: p => apiKaryawanInputDrop(p.token, p.items),
   editDropStok: p => apiEditDropStok(p.token, p.items),
   submitRekap: p => apiSubmitRekap(p.token, p.payload),
@@ -1805,6 +1806,58 @@ function apiGetKaryawanDashboard(token) {
     bayarTitipanHariIni: titipanData.sudahBayar
   };
 }
+function apiGetMyPayrollSummary(token, bulan) {
+  const sess = requireRole(token, ['karyawan']);
+  bulan = String(bulan || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM'));
+  if (!/^\\d{4}-\\d{2}$/.test(bulan)) return { success:false, message:'Periode tidak valid.' };
+  const user = getSheetData('Users').find(u => String(u.id) === String(sess.id));
+  if (!user) return { success:false, message:'Data karyawan tidak ditemukan.' };
+  const lapakMap = {}; getSheetData('Lapak').forEach(l => lapakMap[String(l.id)] = l);
+  const setoran = getSheetData('Setoran').filter(s => formatDate(s.tanggal).indexOf(bulan) === 0 && String(s.userId) === String(sess.id));
+  const absensi = getSheetData('AbsensiKaryawan').filter(a => formatDate(a.tanggal).indexOf(bulan) === 0 && String(a.userId) === String(sess.id));
+  const bonusAntar = getSheetData('BonusAntar').filter(b => formatDate(b.tanggal).indexOf(bulan) === 0 && String(b.userId) === String(sess.id));
+  const settingPayroll = getSheetData('SettingPayroll').filter(s => String(s.aktif) !== 'false' && s.aktif !== false);
+  const hariEfektif = getSheetData('HariEfektif').filter(h => h.bulan === bulan);
+  const settingMap = {};
+  settingPayroll.forEach(s => {
+    const key = String(s.lapakId), berlaku = formatDate(s.berlakuDari);
+    if (!settingMap[key] || formatDate(settingMap[key].berlakuDari) < berlaku) settingMap[key] = s;
+  });
+  const heMap = {};
+  hariEfektif.forEach(h => heMap[String(h.lapakId)] = Number(h.jumlahHari) || 0);
+  const rekapPerLapak = {};
+  setoran.forEach(s => {
+    const key = String(s.lapakId);
+    if (!rekapPerLapak[key]) rekapPerLapak[key] = {};
+    rekapPerLapak[key][formatDate(s.tanggal)] = true;
+  });
+  let totalBonusMerekap = 0;
+  const rincianMerekap = [];
+  Object.keys(rekapPerLapak).forEach(lapakId => {
+    const hariMerekap = Object.keys(rekapPerLapak[lapakId]).length;
+    const he = heMap[lapakId] || 26;
+    const setting = settingMap[lapakId];
+    const rate = setting ? Number(setting.bonusMerekap) || 0 : 0;
+    const bonus = he > 0 ? hariMerekap / he * rate : 0;
+    totalBonusMerekap += bonus;
+    rincianMerekap.push({ lapakNama:(lapakMap[lapakId] || {}).nama || lapakId, hariMerekap, hariEfektif:he, bonus:Math.round(bonus) });
+  });
+  const settingLapak = user.lapakId ? settingMap[String(user.lapakId)] : null;
+  const totalTunjangan = settingLapak ? Number(settingLapak.tunjanganLapak) || 0 : 0;
+  const totalBonusAntar = bonusAntar.reduce((sum,b) => sum + (Number(b.nominal) || 0), 0);
+  const kasbonMap = getKasbonOutstandingMap_(getSheetData('Kasbon'));
+  const totalKasbon = (kasbonMap[String(sess.id)] || {outstanding:0}).outstanding;
+  const totalPenghasilan = Math.round(totalBonusMerekap + totalTunjangan + totalBonusAntar);
+  const dibayar = getSheetData('RekapPayroll').find(x => x.bulan === bulan && String(x.userId) === String(sess.id));
+  return {
+    bulan, rincianMerekap, totalBonusMerekap:Math.round(totalBonusMerekap),
+    totalTunjangan, totalBonusAntar, totalPenghasilan, totalKasbon,
+    hakBersih:Math.max(0,totalPenghasilan-Math.min(totalKasbon,totalPenghasilan)),
+    sudahDibayar:!!dibayar, totalDibayar:dibayar ? Number(dibayar.totalBersih) || 0 : 0,
+    kehadiran:absensi.length
+  };
+}
+
 function apiKaryawanInputDrop(token, items) {
   const sess = requireRole(token, ['karyawan']);
   const lock = LockService.getScriptLock();
