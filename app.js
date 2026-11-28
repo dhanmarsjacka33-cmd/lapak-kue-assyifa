@@ -714,7 +714,7 @@ function summaryHTML() {
     ${totalTitipanTunai > 0 ? `<div class="row-between text-xs text-gray"><span>Titipan dibayar Tunai (informasi)</span><span>${fmtRp(totalTitipanTunai)}</span></div>` : ''}
     ${totalTitipanQris > 0 ? `<div class="row-between text-xs text-gray"><span>Titipan dibayar QRIS (informasi)</span><span>${fmtRp(totalTitipanQris)}</span></div>` : ''}
     ${totalTitipanTransfer > 0 ? `<div class="row-between text-xs text-gray"><span>Titipan dibayar Transfer (informasi)</span><span>${fmtRp(totalTitipanTransfer)}</span></div>` : ''}
-    <div class="row-between text-xs text-red"><span>Pengeluaran operasional</span><span>- ${fmtRp(pengeluaran)}</span></div>
+    <div class="row-between text-xs text-red"><span>Pengeluaran operasional (sudah digunakan)</span><span>- ${fmtRp(pengeluaran)}</span></div>
     <div class="row-between text-xs ${tunaiDiserahkan < 0 ? 'text-red' : 'text-green'} font-bold mt-2"><span>${tunaiDiserahkan < 0 ? 'Kekurangan tunai' : 'Tunai yang diserahkan karyawan'}</span><span>${fmtRp(Math.abs(tunaiDiserahkan))}</span></div>
     <div class="row-between text-xs ${expected < 0 ? 'text-red' : 'text-green'} font-bold"><span>${expected < 0 ? 'Kekurangan penerimaan Owner' : 'Total penerimaan Owner'}</span><span>${fmtRp(Math.abs(expected))}</span></div>
     <div class="divider" style="margin:10px 0"></div>
