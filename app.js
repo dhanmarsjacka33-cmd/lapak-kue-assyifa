@@ -3364,6 +3364,20 @@ async function decideInvoiceCorrection(id, decision) {
   }catch(e){toast(e.message,'error');}
   finally{hideLoader();render();}
 }
+function formRequestInvoiceCorrection(invoiceId) {
+  const invoice=(S.titipanKaryawan?.pending||[]).flatMap(x=>x.items||[]).find(x=>String(x.id)===String(invoiceId))||{};
+  formModal({title:'Ajukan Koreksi Invoice',fields:[
+    {key:'qtyLaku',label:'Jumlah kue terjual yang benar',type:'number',value:Number(invoice.qtyLaku)||0},
+    {key:'alasan',label:'Alasan koreksi',type:'textarea',required:true}
+  ],onSubmit:async(data,close)=>{
+    const qty=Number(data.qtyLaku);
+    if(!Number.isSafeInteger(qty)||qty<0)return toast('Jumlah harus bilangan bulat nol atau lebih.','error');
+    close();showLoader();
+    try{const r=await api('requestInvoiceCorrection',{token:S.token,payload:{invoiceId,qtyLaku:qty,alasan:data.alasan}});toast(r.message,r.success?'success':'error');}
+    catch(e){toast(e.message,'error');}
+    finally{hideLoader();render();}
+  }});
+}
 function formEditKonsinyasi(id) {
   const item = (S.konsinyasi || []).find(k => String(k.id) === String(id));
   if (!item) return toast('Data titipan tidak ditemukan.', 'error');
