@@ -512,6 +512,9 @@ function renderTitipanSection() {
         <button class="btn btn-success btn-block btn-sm" data-act="bayar-titipan" data-id="${esc(s.supplierId)}">
           ${ico('money','ico-sm')} Bayar ke ${esc(s.supplierNama)}
         </button>
+        <details class="mt-2"><summary class="text-xs text-gray">Rincian invoice & koreksi</summary>
+          ${(s.items||[]).map(it => `<div class="row-between text-xs mt-2"><span>${esc(it.nama)} · ${it.qtyLaku} pcs · ${fmtRp(it.utang)}</span>${it.canAdjust===false ? `<button class="btn btn-ghost btn-sm" data-act="request-invoice-correction" data-id="${esc(it.id)}">Ajukan koreksi</button>` : '<span class="text-gray">Belum dikirim</span>'}</div>`).join('')}
+        </details>
       </div>
     `).join('');
   }
@@ -1496,6 +1499,7 @@ function handleClick(e) {
   if (a === 'absen-keluar') return doAbsenKeluar();
   if (a === 'bayar-titipan') return formBayarTitipan(id);
   if (a === 'batal-bayar-titipan') return batalBayarTitipan(id);
+  if (a === 'request-invoice-correction') return formRequestInvoiceCorrection(id);
   if (a === 'kar-tab') {
     S.tab = tab || 'home';
     updateKaryawanTabbar();
