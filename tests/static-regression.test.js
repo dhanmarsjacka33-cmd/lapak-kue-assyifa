@@ -198,6 +198,7 @@ const testingHtml = fs.readFileSync('index.testing.html', 'utf8');
 const serviceWorker = fs.readFileSync('sw.js', 'utf8');
 has(indexHtml, /app\.js\?v=7\.6/, 'Main app must request the new frontend asset version');
 has(testingHtml, /app\.js\?v=7\.6/, 'Testing page must request the new frontend asset version');
+has(testingHtml, /<script src="app\\.js\\?v=7\\.6" defer><\\/script>/, 'Testing page executable script must use the same frontend asset version as its preload');
 has(serviceWorker, /kueassyifa-v15/, 'Service worker cache must be invalidated for the new release');
 has(serviceWorker, /app\.js\?v=7\.6/, 'Service worker static asset list must preload the new frontend version');
 
