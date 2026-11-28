@@ -16,6 +16,12 @@ has(backend, /function apiKaryawanBayarSupplier\s*\(/, 'Supplier payment API mus
 has(backend, /function apiGetTitipanKaryawan\s*\(/, 'Employee consignment summary API must exist');
 has(backend, /getMyPayrollSummary: p => apiGetMyPayrollSummary\(p\.token, p\.bulan\)/, 'Employee income route must be registered');
 has(backend, /function apiGetMyPayrollSummary\(token, bulan\)[\s\S]*?requireRole\(token, \['karyawan'\]\)[\s\S]*?String\(b\.userId\) === String\(sess\.id\)/, 'Employee income API must be scoped to the authenticated employee');
+has(backend, /addColumnIfMissing\('Kas', 'userId', ''\)/, 'Cash ledger must support employee-linked expense entries');
+has(backend, /Bonus antar harus berupa pengeluaran dan memiliki penerima karyawan/, 'Delivery bonus must require an employee and be an expense');
+has(backend, /bonusAntarKas = getSheetData\('Kas'\)/, 'Payroll must include employee-linked delivery bonus expenses');
+has(frontend, /Penerima bonus antar \(pilih jika kategori Bonus Antar\)/, 'Additional cash expense form must support a bonus recipient');
+if (/id:'bonus-antar', label:'Bonus Antar'/.test(frontend)) throw new Error('Standalone delivery bonus menu must be removed');
+
 has(frontend, /Pendapatan Saya/, 'Employee home must show monthly income summary');
 has(frontend, /api\('getMyPayrollSummary'/, 'Employee home must load its own payroll summary');
 
