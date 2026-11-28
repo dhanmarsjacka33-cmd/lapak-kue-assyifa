@@ -1,0 +1,66 @@
+name: Deploy GAS TESTING
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'code.gs'
+      - '.github/workflows/gas-testing-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Validate backend and regression checks
+        run: |
+          cp code.gs /tmp/code.gs.js
+          node --check /tmp/code.gs.js
+          node --check app.js
+          node tests/static-regression.test.js
+
+  deploy-testing:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check TESTING deployment credentials
+        id: credentials
+        env:
+          SCRIPT_ID: ${{ secrets.GAS_TESTING_SCRIPT_ID }}
+          DEPLOYMENT_ID: ${{ secrets.GAS_TESTING_DEPLOYMENT_ID }}
+          CLASPRC_JSON: ${{ secrets.GAS_TESTING_CLASPRC_JSON }}
+        run: |
+          if [ -z "$SCRIPT_ID" ] || [ -z "$DEPLOYMENT_ID" ] || [ -z "$CLASPRC_JSON" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::GAS TESTING deployment skipped. Add GAS_TESTING_SCRIPT_ID, GAS_TESTING_DEPLOYMENT_ID, and GAS_TESTING_CLASPRC_JSON repository secrets."
+            exit 0
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+      - name: Deploy code.gs to the existing TESTING Web App
+        if: steps.credentials.outputs.configured == 'true'
+        env:
+          SCRIPT_ID: ${{ secrets.GAS_TESTING_SCRIPT_ID }}
+          DEPLOYMENT_ID: ${{ secrets.GAS_TESTING_DEPLOYMENT_ID }}
+          CLASPRC_JSON: ${{ secrets.GAS_TESTING_CLASPRC_JSON }}
+        run: |
+          npm install --global @google/clasp
+          mkdir -p "$HOME"
+          printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
+          mkdir gas-testing
+          cd gas-testing
+          printf '{"scriptId":"%s","rootDir":"."}' "$SCRIPT_ID" > .clasp.json
+          clasp pull
+          cp ../code.gs ./code.gs
+          clasp push --force
+          clasp deploy --deploymentId "$DEPLOYMENT_ID" --description "Lapak Kue Assyifa TESTING - ${GITHUB_SHA}"
